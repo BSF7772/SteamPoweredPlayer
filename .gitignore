@@ -1,0 +1,27 @@
+# build output
+bin/
+obj/
+*.user
+.vs/
+
+# portable toolchain and caches (everything is installed inside the workspace, never committed)
+.tools/
+
+# Android
+android/.gradle/
+android/build/
+android/app/build/
+android/local.properties
+*.jks
+*.keystore
+
+# never commit media or probe output
+*.mp4
+*.m4s
+*.m4a
+*.mkv
+spikes/**/out/
+
+# local secrets and settings
+.env
+*.secret
