@@ -18,6 +18,8 @@ public sealed class Mpv : IDisposable
     readonly List<MpvEvent> _events = new();
     readonly object _lock = new();
     long _reqId;
+    readonly SemaphoreSlim _wrLock = new(1, 1);
+    public string? ReadLoopEnd; public int BadLines; public string? LastBadLine;
     public int Pid => _proc.Id;
     public Process Process => _proc;
     public long StartTs { get; }
@@ -69,7 +71,7 @@ public sealed class Mpv : IDisposable
             {
                 var ts = Now();
                 JsonElement j;
-                try { j = JsonDocument.Parse(line).RootElement.Clone(); } catch { continue; }
+                try { j = JsonDocument.Parse(line).RootElement.Clone(); } catch { BadLines++; LastBadLine = line.Length > 200 ? line[..200] : line; continue; }
                 if (j.TryGetProperty("request_id", out var rid) && rid.ValueKind == JsonValueKind.Number)
                 {
                     TaskCompletionSource<JsonElement>? tcs;
@@ -84,7 +86,8 @@ public sealed class Mpv : IDisposable
                 }
             }
         }
-        catch { /* pipe closed */ }
+        catch (Exception e) { ReadLoopEnd = e.GetType().Name + ": " + e.Message; }
+        ReadLoopEnd ??= "eof";
     }
 
     public async Task<JsonElement> CmdRaw(params object[] args)
@@ -93,9 +96,15 @@ public sealed class Mpv : IDisposable
         var tcs = new TaskCompletionSource<JsonElement>(TaskCreationOptions.RunContinuationsAsynchronously);
         lock (_lock) _pending[id] = tcs;
         var json = JsonSerializer.Serialize(new Dictionary<string, object> { ["command"] = args, ["request_id"] = id });
-        await _wr.WriteLineAsync(json);
+        await _wrLock.WaitAsync();
+        try { await _wr.WriteLineAsync(json); } finally { _wrLock.Release(); }
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
-        return await tcs.Task.WaitAsync(cts.Token);
+        try { return await tcs.Task.WaitAsync(cts.Token); }
+        catch (OperationCanceledException)
+        {
+            lock (_lock) _pending.Remove(id);
+            throw new TimeoutException($"mpv IPC no reply to [{string.Join(' ', args)}] in 30s; readLoopEnd={ReadLoopEnd ?? "running"} badLines={BadLines} last={LastBadLine}");
+        }
     }
 
     public async Task Cmd(params object[] args)
