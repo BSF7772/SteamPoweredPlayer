@@ -48,7 +48,16 @@ Regexes: `^(bg|clip)_(\d+)_(\d{8})_(\d{6})$`, `^clip_downloaded_(\d{8})_(\d{6})$
 - Typical video: HEVC Main (`hev1`), 1080p–1440p at 59.94 fps, ~22 Mbps, **`yuvj420p` (full range)**. Older or other GPUs can give
   H.264 (`avc1`). Audio: AAC-LC 48 kHz stereo, 128 kbps.
 - **One IDR at the start of each chunk** (GOP = 3 s). Lossless cuts snap to 3 s; frame-exact cuts need a re-encode.
-- Chunks carry absolute `tfdt` (chunk N starts at about N × 3 s), and frames are stamped unevenly (game-capture jitter).
+- Chunks carry absolute `tfdt`, and frames are stamped unevenly (game-capture jitter). **The `tfdt` axis is the session's absolute
+  time**: chunk N starts at about (N−1) × 3 s (+ up to 8 ms) in live sessions and also in trimmed sessions (a session whose chunk
+  1881 sits at 5640.006 s). Clips restart the chunk numbers at 1 but **not** `tfdt` (chunk 1 of one clip starts at 585.0 s).
+  Playback time, markers and the trickplay all use this axis (plan §3).
+- **Layout of a video chunk (one fragment per frame):** each `moof` (108 B) is followed by an `mdat` with one frame, and `tfhd` carries
+  the defaults. The first fragment holds `VPS SPS PPS SEI IDR_W_RADL` (the IDR), so **the first fragment alone is enough to decode a
+  thumbnail**. IDR sizes seen: 1 KB to 906 KB, median 247–359 KB, p99 570–689 KB (so no fixed 512 KB prefix is safe: a fixed 512 KiB
+  read truncated 14.9 % of the IDRs in the S4 sample).
+- **Zero-filled chunks exist** (S4 found two at the end of one session, with normal chunk names). Check the head of each chunk (an 8-byte
+  read: a valid chunk starts with an MP4 box header, a zero-filled one with zeros) before trusting it.
 
 ## The manifest is not the truth
 Seen in practice:
@@ -75,8 +84,17 @@ The result is in sync and starts at 0. A 30 s remux takes well under a second on
 
 ## Playback with mpv (EDL)
 mpv's EDL can play the chunks directly: `!mp4_dash,init=<init>` prefixes the init segment to each chunk at the byte level and opens
-segments on demand, `length=3` gives instant seeks without opening every file, and `!new_stream` adds the audio track. Escape values
-as `%<utf8-byte-count>%value`. mpv documents `mp4_dash` as "may change at any time", so pin the libmpv version.
+segments on demand and `!new_stream` adds the audio track. Escape values as `%<utf8-byte-count>%value`. mpv documents `mp4_dash` as
+"may change at any time", so pin the libmpv version.
+
+What S2 found with real sessions:
+- **Do not give every segment `length=3`.** Seeks then land early, audio can be lost and a gap freezes. Use the **lead EDL**: the first
+  part is `N0 × 3 s` long and the part before each gap is stretched over the gap, so mpv's `time-pos` equals the `tfdt` media time.
+- **Seek = reload:** every seek or back-step across chunks is `loadfile <edl> start=<t>`, over a window of about 60 chunks around the
+  playhead (RAM grows with the media length, so the window is rebuilt and the file is reloaded periodically). The measured reload
+  median is 95 ms with hardware decode.
+- mpv opens the chunk files with share mode READ | WRITE | DELETE. Whether Steam's own cleanup still succeeds while mpv holds a chunk
+  open was **not tested**.
 
 ## Game IDs, names, art
 - `gameid <= 2^32`: a Steam appid (e.g. `730`).
@@ -92,12 +110,21 @@ as `%<utf8-byte-count>%value`. mpv documents `mp4_dash` as "may change at any ti
 `gamemode`, `screenshot`, `achievement`, `phase`, `error`}, `title`, `description` (may contain emoji; read as UTF-8), `icon` (e.g.
 `cs2_death`, `cs2_gun_kill`, `cs2_bomb_plant`, `steam_screenshot`), `priority`, `duration`, `possible_clip`, `mode` (game-mode bands),
 `tags[{name,group,icon,priority}]` (e.g. Map / Mode on phases), `achievement_name`, `handle` (screenshots).
-The mapping from timeline time to video time still has to be validated against visible events (plan spike S5).
+**Mapping to video time (validated, spike S5):** `position = entry.time / 1000 − offsetMs / 1000` is the absolute session time, equal
+to the media `tfdt` (not an index into the chunks on disk). `offsetMs` is Steam's exact value (protobuf field 1.5.10, below). The
+fallback from the folder names, `(bgStartUtc − timelineStartUtc) × 1000`, is quantised to whole seconds, so it is only good to
+±1 s (measured −0.61 … +0.59 s over 18 sessions). With the exact offset a visible event starts +0.09 s after the mapped time
+(range −0.15 … +0.30 s, 11 fine readings). `daterecorded` always equals the UTC time in the timeline file name. A timeline can start up
+to about 113 s before its bg folder. Composite events (`cs2_double_kill`, `cs2_multi_kill`) have `duration` ≈ 8 s and are ranges
+(the first kill is about 2 s after `time`); single `cs2_death`, `cs2_gun_kill`, `cs2_knife_kill`, `cs2_taser_kill` have `duration 0`.
 
 ## Protobuf files (reverse-engineered, partial)
 - `gamerecording.pb`: field 1 repeated `{1 timeline_id, 2 gameid, 3 date_recorded, 4 duration_ms}`. Field 4 repeated is a per-app
   tag index: `{1 appid, 2 tag{1 name, 2 group, 3 icon, 4 priority}, 3[] {2 timeline_id, 3 offset_ms}}`. Field 2 is unknown.
-- `clip.pb`: `{1 {1 timeline_id, 2 gameid, 3 date, 4 duration_ms, 5 {1 bg_folder, 2 start_ms, 3 duration_ms, …}}, 3 created, 4 gameid,
+  **Field 1.5.10 is the exact offset (ms) of the bg-session start inside the timeline** (e.g. `57332` where the folder names say 57 s).
+  Field 1.5 exists only for sessions whose cache folder is still present. Field 1.5.2 is *not* the offset for a trimmed session
+  (there it is field 10 + the trimmed time), and 1.5.3 is the retained duration in ms: use field 10.
+- `clip.pb` (the offset is field 1 → 5 → **10**, same meaning and unit): `{1 {1 timeline_id, 2 gameid, 3 date, 4 duration_ms, 5 {1 bg_folder, 2 start_ms, 3 duration_ms, …}}, 3 created, 4 gameid,
   7 title, 12 width, 13 height, …}`.
 - Related message names: SteamTracking/Protobufs `webui/service_gamerecordingclip.proto` (`CMsgVideoGameRecordingDef`).
   Validate any schema against many real files, never one.
