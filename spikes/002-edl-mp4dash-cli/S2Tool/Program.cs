@@ -4,6 +4,7 @@
 //   info  <session>
 //   probe <folder> [--pid P]          share-mode probe (use on COPIES only)
 //   run   <scenario> ...              mpv JSON-IPC measurements (see Scenarios.cs)
+//   mkcopy|copycheck|deltest ...      s2d: test copies, head-trim/gap check, live delete experiments (see Del.cs, DELETE-TESTS.md)
 using System.Globalization;
 using System.Text.Json;
 
@@ -13,7 +14,7 @@ public static class Program
 {
     public static async Task<int> Main(string[] args)
     {
-        if (args.Length == 0) { Console.Error.WriteLine("usage: edl|info|probe|run ..."); return 2; }
+        if (args.Length == 0) { Console.Error.WriteLine("usage: edl|info|probe|run|mkcopy|copycheck|deltest ..."); return 2; }
         CultureInfo.DefaultThreadCurrentCulture = CultureInfo.InvariantCulture;
         switch (args[0])
         {
@@ -24,6 +25,9 @@ public static class Program
             case "probe-selftest": return ShareProbe.SelfTest(args);
             case "summary": return Summary.Run(args);
             case "run": return await Scenarios.Run(args);
+            case "mkcopy": return Del.MkCopy(args);
+            case "copycheck": return await Del.CopyCheck(args);
+            case "deltest": return await Del.DelTest(args);
             default: Console.Error.WriteLine("unknown command"); return 2;
         }
     }

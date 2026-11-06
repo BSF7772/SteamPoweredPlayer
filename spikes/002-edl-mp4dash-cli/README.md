@@ -153,7 +153,29 @@ Both run **only on copies** under `.tools/fixtures-local/s2/` (never in `Backgro
 Cleanup that only the maintainer may do (nothing was deleted by this spike): `spikes/002-edl-mp4dash-cli/out/` (2.8 GB: `out/bin*`, `out/trial`, the old invalid runs, `out/lead/shots` PNG/MP4 reference frames, mpv logs),
 `.tools/fixtures-local/s2/stale-100` (810 MB copy), `.tools/mpv/mpv-20261105`'s `src-ref/` (mpv sources used for the root-cause analysis), `.tools/mpv/{dotnet-home,nuget}`.
 
+## s2d follow-up: head trim on copies, gap handling, delete harness
+Rule for this round: the worker never deletes anything, not even its own copies. Own copies live in `.tools/s2d/` and are listed for the maintainer to clean up.
+New S2Tool commands (`Del.cs`, `Dx.cs`): `mkcopy` (copy only, refuses anything outside `.tools/s2d/`), `copycheck` (playback checks of a copy), `deltest` (experiments 1 and 2 above, driven by an
+external `--delete-cmd` script; dry run without it). S2Tool has no file-delete or move API. How to run the live experiments: [DELETE-TESTS.md](DELETE-TESTS.md).
+
+**(a) Head trim without deleting (done, d3d11va, lead EDL).**
+| Check | Result |
+|---|---|
+| Copy of chunks 1925..1939 only (15 of the 100) plus init files | `tfdt` of every kept chunk identical to the untrimmed fixture (0 mismatches, 0 size mismatches) |
+| `time-pos` axis | still equals `tfdt`: lead base moves to 3·(1925−1) = 5772 s, axis spread 20 ms (the 0.037 s chunk offset), so marker offsets stay valid |
+| Open at first chunk, reload mid, revisit first chunk, reload at last chunk | all play; reload to `playback-restart` 46..351 ms; mpv log errors 0 |
+| Copy with a hole (chunks 1915..1934, 1925 and 1926 missing) | `time-pos` jumps forward 6.149 s across the 6 s hole with 0 ms stall; reload after the hole works; errors 0 |
+
+Consequence: head trimming needs no timeline bookkeeping. Rebuild the EDL from the chunks on disk, keep the axis, and a seek is the same `loadfile start=` as before.
+
+**(b) Live delete experiments: pending maintainer run** (see DELETE-TESTS.md). Dry runs of the harness only (nothing deleted, so these say nothing about Windows delete behaviour):
+* Experiment 1 on a 15-chunk copy: Restart Manager names mpv as the holder of the playhead chunk; playback continuous (max jump ±0.018 s); no handles after the reload.
+* Experiment 2 on a 40-chunk copy: 20 ticks of 3 s, 40 "WOULD DELETE" lines; 223 samples over 58 s, max jump +0.029 s / −0.027 s, no stall; mpv log errors 0 at every tick; rebuilt EDL (20 chunks) reload in 87 ms, advanced 3.999 s in 4.012 s of wall time; no process holds any of the 40 files.
+* Harness bug found and fixed on the way: the sampler task and the main loop wrote to the mpv IPC pipe concurrently (hang, then `TaskCanceledException`). `Mpv.CmdRaw` now serializes writes, has a 30 s reply timeout with a descriptive error, and records read-loop diagnostics.
+
 ## Open issues
+* s2d: live delete behaviour (delete-pending, new-open errors, playback continuing across a deleted open chunk, handles after reload) is untested until the maintainer runs DELETE-TESTS.md.
+* s2d: mpv logs a `[vo/gpu-next] Loading failed.` line at each reload; no error is counted and playback is fine, cause not investigated.
 * Budget "CPU < 3 %": measured 5.2 % of one core, 0.32 % of all logical cores for mpv's own window; unclear which the plan means (S1).
 * Seek budget with reload: 9 of 90 windowed reloads (35 of 90 whole-session reloads) exceeded 150 ms with hardware decode (max 192 ms windowed); CPU decode is out of budget (83 of 90).
 * mpv documents `mp4_dash` as "may change at any time"; all of the above is pinned to 0.42.0 (the lead EDL relies on the unclipped-segment behaviour; re-test on every mpv bump). Fallback from the plan (libmpv `stream_cb` virtual fMP4) is untested.
