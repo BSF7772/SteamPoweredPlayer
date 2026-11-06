@@ -22,6 +22,7 @@ public static class Program
             case "probe": return ShareProbe.Run(args);
             case "integrity": return Integrity.Run(args);
             case "probe-selftest": return ShareProbe.SelfTest(args);
+            case "summary": return Summary.Run(args);
             case "run": return await Scenarios.Run(args);
             default: Console.Error.WriteLine("unknown command"); return 2;
         }

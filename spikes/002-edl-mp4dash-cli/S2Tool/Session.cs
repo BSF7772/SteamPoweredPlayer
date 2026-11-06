@@ -26,7 +26,7 @@ public static partial class Scanner
         }
         if (validateHeads)
             for (int st = 0; st < 2; st++)
-                have[st].RemoveWhere(n => Mp4.IsZeroHeaded(Path.Combine(folder, $"chunk-stream{st}-{n:00000}.m4s")));
+                have[st].RemoveWhere(n => (first is null || n >= first) && (last is null || n <= last) && Mp4.IsZeroHeaded(Path.Combine(folder, $"chunk-stream{st}-{n:00000}.m4s")));
         var complete = have[0].Intersect(have[1]).OrderBy(n => n)
             .Where(n => (first is null || n >= first) && (last is null || n <= last))
             .Where(n => exclude is null || !exclude.Any(e => n >= e.a && n <= e.b))

@@ -5,16 +5,24 @@
 //   run eof   <session> ...      (EOF -> rebuilt EDL + loadfile start=)
 //   run share <copyFolder> ...   (play from a COPY, probe share mode of mpv's open files)
 using System.Diagnostics;
+using System.Runtime.InteropServices;
 using System.Text.Json;
 
 namespace S2Tool;
 
 public static class Scenarios
 {
-    static readonly JsonSerializerOptions J = new() { WriteIndented = true };
+    static readonly JsonSerializerOptions J = new() { WriteIndented = true, NumberHandling = System.Text.Json.Serialization.JsonNumberHandling.AllowNamedFloatingPointLiterals };
     static bool Lead;     // --lead: EDL axis == tfdt axis (first part declared N0*3 s long)
     static double B;      // seek/start base for the EDL currently loaded (0 in classic mode, (firstChunk-1)*3 in lead mode)
     static double BaseOf(SessionMedia s) => Lead ? 3.0 * (s.Runs[0].First - 1) : 0;
+    static string LastEdl = "";   // path of the EDL written last (the one the scenario plays)
+    static async Task Goto(Mpv m, double u, bool paused = false)   // fresh-timeline positioning: loadfile start= (avoids the revisit defect of plain seeks)
+    {
+        var mk = m.Mark();
+        await m.Cmd("loadfile", LastEdl, "replace", "-1", $"start={FS(B + u)},pause={(paused ? "yes" : "no")}");
+        await m.WaitEvent("playback-restart", mk);
+    }
     static string FS(double v) => v.ToString("0.000", System.Globalization.CultureInfo.InvariantCulture);
 
     public static async Task<int> Run(string[] a)
@@ -27,6 +35,7 @@ public static class Scenarios
         Directory.CreateDirectory(outDir);
         Lead = a.Contains("--lead");
         Mpv.ExtraArgs = (Program.Opt(a, "--extra") ?? "").Split(';', StringSplitOptions.RemoveEmptyEntries);
+        var load0 = await Load();
         var res = new Dictionary<string, object?> { ["scenario"] = scenario, ["hwdec"] = hwdec, ["leadEdl"] = Lead, ["utc"] = DateTime.UtcNow.ToString("o") };
         try
         {
@@ -35,6 +44,12 @@ public static class Scenarios
                 case "basic": await Basic(session, mpvExe, hwdec, outDir, tag, res); break;
                 case "gap": await Gap(session, mpvExe, hwdec, outDir, tag, res); break;
                 case "eof": await Eof(session, mpvExe, hwdec, outDir, tag, res); break;
+                case "speed": await SpeedDetail(session, mpvExe, hwdec, outDir, tag, res); break;
+                case "memgrow": await MemGrow(session, mpvExe, hwdec, outDir, tag, res); break;
+                case "seekmodes": await SeekModes(session, mpvExe, hwdec, outDir, tag, res); break;
+                case "seekwin": await SeekModes(session, mpvExe, hwdec, outDir, tag, res, new[] { "loadfile-start", "loadfile-window" }); break;
+                case "hrfix": await HrFix(session, mpvExe, hwdec, outDir, tag, res); break;
+                case "hrprobe": await HrProbe(session, mpvExe, hwdec, outDir, tag, res); break;
                 case "crashed": await Crashed(session, mpvExe, hwdec, outDir, tag, res); break;
                 case "prewarm": await Prewarm(session, mpvExe, hwdec, outDir, tag, res); break;
                 case "coldopen": await ColdOpen(session, mpvExe, hwdec, outDir, tag, res); break;
@@ -45,6 +60,7 @@ public static class Scenarios
             }
         }
         catch (Exception e) { res["FAILED"] = e.ToString(); Console.Error.WriteLine(e); }
+        res["machineLoadBefore"] = load0; res["machineLoadAfter"] = await Load();
         var path = Path.Combine(outDir, $"{scenario}-{tag}.json");
         File.WriteAllText(path, JsonSerializer.Serialize(res, J));
         Console.WriteLine(JsonSerializer.Serialize(res, J));
@@ -81,11 +97,232 @@ public static class Scenarios
     }
 
     // ---------- helpers ----------
+    [DllImport("kernel32.dll")] static extern bool GetSystemTimes(out long idle, out long kernel, out long user);
+
+    /// <summary>Whole-machine CPU load over 1 s and GPU load from nvidia-smi: other processes disturb timing numbers, so every result file records them.</summary>
+    static async Task<object> Load()
+    {
+        GetSystemTimes(out var i0, out var k0, out var u0); await Task.Delay(1000); GetSystemTimes(out var i1, out var k1, out var u1);
+        double total = (k1 - k0) + (u1 - u0), idle = i1 - i0;
+        string gpu = "n/a";
+        try
+        {
+            var psi = new ProcessStartInfo("nvidia-smi", "--query-gpu=utilization.gpu,utilization.decoder,utilization.encoder --format=csv,noheader,nounits") { RedirectStandardOutput = true, UseShellExecute = false, CreateNoWindow = true };
+            using var p = Process.Start(psi)!; gpu = (await p.StandardOutput.ReadToEndAsync()).Trim(); p.WaitForExit(3000);
+        }
+        catch { }
+        return new { systemCpuBusyPercent = R(100.0 * (total - idle) / Math.Max(total, 1), 1), gpuUtilGpuDecEncPercent = gpu };
+    }
+
     static List<string> Lines(string path)   // mpv still has its log open: read with full sharing
     {
         using var fs = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
         using var sr = new StreamReader(fs);
         var all = new List<string>(); string? l; while ((l = sr.ReadLine()) is not null) all.Add(l); return all;
+    }
+
+    // ---------- hrprobe: is the picture right after a mid-chunk paused seek? (screenshot vs ffmpeg reference decode, PSNR) ----------
+    static async Task<string> RunProc(string exe, string args)
+    {
+        var psi = new ProcessStartInfo(exe, args) { RedirectStandardError = true, RedirectStandardOutput = true, UseShellExecute = false, CreateNoWindow = true };
+        using var p = Process.Start(psi)!;
+        var err = p.StandardError.ReadToEndAsync(); var o = p.StandardOutput.ReadToEndAsync();
+        p.WaitForExit(60000);
+        return (await err) + (await o);
+    }
+
+    static async Task HrProbe(string session, string exe, string hwdec, string outDir, string tag, Dictionary<string, object?> res)
+    {
+        var s = ScanV(session); B = BaseOf(s);
+        var edl = await WriteEdl(s, outDir, $"hrprobe-{tag}.edl");
+        var logPath = Path.Combine(outDir, $"hrprobe-{tag}.mpv.log");
+        using var m = await Mpv.StartAsync(exe, hwdec, logPath);
+        await m.Observe("time-pos");
+        await Open(m, edl, "pause=yes"); await Task.Delay(300);
+        var targets = new double[] { 3601, 3600, 3602.5, 1805.5, 5400.25, 4799.677, 1.0, 100.0, 2999.9, 6000.1, 3603.4, 3598.2, 900.5, 2500.75, 4500.33, 6900.9 };
+        var tmp = Path.GetFullPath(Path.Combine(outDir, "shots")); Directory.CreateDirectory(tmp);
+        int k = 0;
+        async Task<object> Check(double u, bool playing)
+        {
+            int linesBefore = Lines(logPath).Count;
+            await m.Set("pause", !playing);
+            var mk = m.Mark();
+            await m.Cmd("seek", B + u, "absolute+exact"); await m.WaitEvent("playback-restart", mk);
+            double? apts = null, avs = null;
+            if (playing) { await Task.Delay(1000); avs = await AvsyncMeanMs(m, 0.5, 5); apts = LastAptsMinusTpMs; await m.Set("pause", true); }
+            await Task.Delay(400);
+            var tp = await m.GetD("time-pos") ?? double.NaN;
+            var errs = Lines(logPath).Skip(linesBefore).Count(l => l.Contains("Could not find ref") || l.Contains("Error constructing the frame RPS"));
+            var shot = Path.Combine(tmp, $"{tag}-{(playing ? "play" : "paused")}-{k}.png").Replace((char)92, '/');
+            await m.Cmd("screenshot-to-file", shot, "video");
+            int chunk = (int)Math.Floor(tp / 3.0) + 1;
+            var cat = Path.Combine(tmp, $"c{chunk}.mp4").Replace((char)92, '/');
+            if (!File.Exists(cat)) File.WriteAllBytes(cat, File.ReadAllBytes(Path.Combine(session, "init-stream0.m4s")).Concat(File.ReadAllBytes(Path.Combine(session, $"chunk-stream0-{chunk:00000}.m4s"))).ToArray());
+            var refPng = Path.Combine(tmp, $"{tag}-{(playing ? "play" : "paused")}-{k}-ref.png").Replace((char)92, '/');
+            await RunProc("ffmpeg", $"-v error -y -copyts -i {cat} -vf \"select='gte(t,{tp - 0.0006:0.000000})'\" -frames:v 1 {refPng}");
+            var psnr = await RunProc("ffmpeg", $"-v info -i {shot} -i {refPng} -lavfi psnr -f null -");
+            var mm = System.Text.RegularExpressions.Regex.Match(psnr, @"average:([0-9.]+|inf)");
+            k++;
+            return new { targetU = u, playingSeek = playing, shownFrameMinusTarget_ms = R((tp - B - u) * 1000, 1), chunk, decodeErrorsLoggedForThisSeek = errs, psnrAvgDb = mm.Success ? mm.Groups[1].Value : "n/a", aptsMinusTpMsWhilePlaying = apts, avsyncProp = avs };
+        }
+        var paused = new List<object>(); var playing = new List<object>();
+        foreach (var u in targets) paused.Add(await Check(u, false));
+        foreach (var u in targets) playing.Add(await Check(u, true));
+        res["pausedSeeks"] = paused; res["playingSeeksThenPause"] = playing;
+        res["extra"] = Mpv.ExtraArgs;
+    }
+
+    // ---------- speed: instantaneous playback rate at 0.25/1/2/4 (sampled every 250 ms), from three start positions ----------
+    static async Task SpeedDetail(string session, string exe, string hwdec, string outDir, string tag, Dictionary<string, object?> res)
+    {
+        var s = ScanV(session); B = BaseOf(s);
+        var edl = await WriteEdl(s, outDir, $"speed-{tag}.edl");
+        using var m = await Mpv.StartAsync(exe, hwdec, Path.Combine(outDir, $"speed-{tag}.mpv.log"));
+        await m.Observe("time-pos");
+        await Open(m, edl);
+        var rows = new List<object>();
+        foreach (var startU in new double[] { 900, 3000.5, 5100.25 })
+            foreach (var sp in new[] { 1.0, 0.25, 2.0, 4.0, 1.0 })
+            {
+                await m.Set("speed", sp);
+                var mk = m.Mark();
+                await Goto(m, startU);
+                await Task.Delay(2000);                                               // settle
+                var drops0 = (await m.GetD("frame-drop-count") ?? 0) + (await m.GetD("decoder-frame-drop-count") ?? 0);
+                var c0 = Snap(m);
+                var rates = new List<double>(); double? tpPrev = null; long tPrev = 0; double tp0 = 0; long t0 = 0; int n = sp >= 2 ? 24 : 32;
+                for (int i = 0; i < n; i++)
+                {
+                    await Task.Delay(250);
+                    var tp = await m.GetD("time-pos") ?? double.NaN; var t = Mpv.Now();
+                    if (tpPrev is double pp) rates.Add((tp - pp) / (Mpv.Ms(tPrev, t) / 1000.0)); else { tp0 = tp; t0 = t; }
+                    tpPrev = tp; tPrev = t;
+                }
+                var c1 = Snap(m);
+                var drops1 = (await m.GetD("frame-drop-count") ?? 0) + (await m.GetD("decoder-frame-drop-count") ?? 0);
+                var good = rates.Where(r => !double.IsNaN(r)).ToList();
+                rows.Add(new
+                {
+                    startU, speed = sp, overallRatio = R(((tpPrev ?? 0) - tp0) / (Mpv.Ms(t0, tPrev) / 1000.0), 3), medianInstRate = R(Median(good), 3),
+                    minInstRate = R(good.Min(), 2), maxInstRate = R(good.Max(), 2), samplesOffTargetBy50pct = good.Count(r => Math.Abs(r - sp) > 0.5 * sp), samples = good.Count,
+                    framesDropped = drops1 - drops0, aptsMinusTpMs = await AvsyncMeanMs(m, 0.3, 3) is var _ ? LastAptsMinusTpMs : double.NaN, cpu = CpuOver(m, c0, c1),
+                });
+            }
+        res["speedDetail"] = rows;
+    }
+
+    // ---------- memgrow: memory and handles while playing sequentially at 4x (many chunk files opened) ----------
+    static async Task MemGrow(string session, string exe, string hwdec, string outDir, string tag, Dictionary<string, object?> res)
+    {
+        var s = ScanV(session); B = BaseOf(s);
+        var edl = await WriteEdl(s, outDir, $"memgrow-{tag}.edl");
+        using var m = await Mpv.StartAsync(exe, hwdec, Path.Combine(outDir, $"memgrow-{tag}.mpv.log"));
+        await Open(m, edl);
+        await m.Set("speed", 4.0);
+        var rows = new List<object>();
+        for (int i = 0; i <= 24; i++)
+        {
+            m.Process.Refresh();
+            rows.Add(new { wallS = i * 10, mediaPosS = R((await m.GetD("time-pos") ?? 0) - B, 0), workingSetMB = R(m.Process.WorkingSet64 / 1048576.0), privateMB = R(m.Process.PrivateMemorySize64 / 1048576.0), handles = m.Process.HandleCount });
+            await Task.Delay(10000);
+        }
+        res["memGrowth4x"] = rows;
+        // reload the same EDL (what a CacheFollower does): do handles/memory drop?
+        await m.Set("speed", 1.0);
+        var t = await m.GetD("time-pos") ?? B;
+        await Open(m, edl, $"start={FS(t)}");
+        await Task.Delay(2000); m.Process.Refresh();
+        res["afterReload"] = new { workingSetMB = R(m.Process.WorkingSet64 / 1048576.0), privateMB = R(m.Process.PrivateMemorySize64 / 1048576.0), handles = m.Process.HandleCount };
+    }
+
+    // ---------- hrfix: seeks that land in the last 0.5 s of a chunk break the NEXT chunk while playing; which app-level workaround is clean? ----------
+    static async Task HrFix(string session, string exe, string hwdec, string outDir, string tag, Dictionary<string, object?> res)
+    {
+        var s = ScanV(session); B = BaseOf(s);
+        var edl = await WriteEdl(s, outDir, $"hrfix-{tag}.edl");
+        var logPath = Path.Combine(outDir, $"hrfix-{tag}.mpv.log");
+        using var m = await Mpv.StartAsync(exe, hwdec, logPath);
+        await m.Observe("time-pos");
+        await Open(m, edl, "pause=yes"); await Task.Delay(300);
+        var targets = new double[] { 3602.5, 1805.5, 4799.677, 2999.9, 5100.8, 600.7 };   // all end in the last ~0.5 s of a chunk
+        var rows = new List<object>();
+        foreach (var strategy in new[] { "seek-playing", "loadfile-start", "seek-paused-then-unpause", "seek-then-reseek-after-0.3s" })
+            foreach (var u in targets)
+            {
+                int before = Lines(logPath).Count;
+                await m.Set("pause", strategy == "seek-paused-then-unpause");
+                var mk = m.Mark();
+                switch (strategy)
+                {
+                    case "loadfile-start": await m.Cmd("loadfile", edl, "replace", "-1", $"start={FS(B + u)}"); break;
+                    case "seek-then-reseek-after-0.3s":
+                        await m.Cmd("seek", B + u, "absolute+exact"); await m.WaitEvent("playback-restart", mk); await Task.Delay(300);
+                        mk = m.Mark(); await m.Cmd("seek", B + u + 0.3, "absolute+exact"); break;
+                    default: await m.Cmd("seek", B + u, "absolute+exact"); break;
+                }
+                await m.WaitEvent("playback-restart", mk);
+                if (strategy == "seek-paused-then-unpause") { await Task.Delay(300); await m.Set("pause", false); }
+                await Task.Delay(2500);                                               // crosses the chunk boundary
+                var tp = await m.GetD("time-pos") ?? double.NaN;
+                await AvsyncMeanMs(m, 0.3, 3);
+                var errs = Lines(logPath).Skip(before).Count(l => l.Contains("Could not find ref"));
+                rows.Add(new { strategy, targetU = u, progressedSinceTargetS = R(tp - B - u, 2), aptsMinusTpMs = LastAptsMinusTpMs, decodeErrors = errs });
+            }
+        res["hrfix"] = rows;
+    }
+
+    // ---------- seekmodes: "seek" vs "loadfile start=" over a sequence WITH revisits; each op is followed by 3.5 s of playback (crosses a chunk boundary) ----------
+    static async Task SeekModes(string session, string exe, string hwdec, string outDir, string tag, Dictionary<string, object?> res, string[]? modes = null)
+    {
+        var s = ScanV(session); B = BaseOf(s);
+        var edl = await WriteEdl(s, outDir, $"seekmodes-{tag}.edl");
+        double len = s.Runs.Sum(r => r.Count) * 3.0;
+        var rng = new Random(7);
+        var seq = new List<double>();
+        for (int i = 0; i < 18; i++) seq.Add(R(rng.NextDouble() * (len - 20), 3));
+        for (int i = 0; i < 12; i++) seq.Add(R(seq[rng.Next(seq.Count)] + rng.NextDouble() * 2, 3));   // revisits of earlier chunks (rewind and replay)
+        var all = new List<object>();
+        foreach (var mode in modes ?? new[] { "seek", "loadfile-start" })
+        {
+            var logPath = Path.Combine(outDir, $"seekmodes-{tag}-{mode}.mpv.log");
+            using var m = await Mpv.StartAsync(exe, hwdec, logPath);
+            await m.Observe("time-pos");
+            await Open(m, edl);
+            var rows = new List<(double ms, bool bad)>(); var detail = new List<object>(); var lat = new List<double>();
+            foreach (var u in seq)
+            {
+                int before = Lines(logPath).Count;
+                var mk = m.Mark(); var t0 = Mpv.Now();
+                if (mode == "seek") await m.Cmd("seek", B + u, "absolute+exact");
+                else if (mode == "loadfile-window")
+                {
+                    int c = s.Runs[0].First + (int)(u / 3.0);
+                    var w = ScanV(session, c - 20, c + 40);   // 60 chunks around the target; in lead mode the EDL axis stays absolute
+                    var wp = Path.GetFullPath(Path.Combine(outDir, $"seekmodes-{tag}-window.edl")).Replace((char)92, (char)47);
+                    File.WriteAllText(wp, Edl.Build(w, null, null, Lead), new System.Text.UTF8Encoding(false));   // built before the clock starts
+                    t0 = Mpv.Now(); mk = m.Mark();
+                    await m.Cmd("loadfile", wp, "replace", "-1", $"start={FS(B + u)}");
+                }
+                else await m.Cmd("loadfile", edl, "replace", "-1", $"start={FS(B + u)}");
+                var pr = await m.WaitEvent("playback-restart", mk);
+                var ms = R(Mpv.Ms(t0, pr)); lat.Add(ms);
+                await Task.Delay(3500);
+                var tp = await m.GetD("time-pos") ?? double.NaN;
+                await AvsyncMeanMs(m, 0.3, 3); var apts = LastAptsMinusTpMs;
+                var errs = Lines(logPath).Skip(before).Count(l => l.Contains("Could not find ref"));
+                bool bad = errs > 0 || double.IsNaN(apts) || Math.Abs(apts) > 80 || Math.Abs(tp - B - u - 3.5) > 0.3;
+                detail.Add(new { u, ms, progressedS = R(tp - B - u, 2), aptsMinusTpMs = apts, decodeErrors = errs, bad });
+            }
+            m.Process.Refresh();
+            all.Add(new
+            {
+                mode, ops = seq.Count, failures = detail.Cast<dynamic>().Count(d => (bool)d.bad),
+                latencyMs = new { median = R(Median(lat)), min = lat.Min(), max = lat.Max() },
+                handlesAtEnd = m.Process.HandleCount, workingSetMBAtEnd = R(m.Process.WorkingSet64 / 1048576.0), privateMBAtEnd = R(m.Process.PrivateMemorySize64 / 1048576.0),
+                detail,
+            });
+        }
+        res["seekModes"] = all;
     }
 
     // ---------- crashed: name-only EDL over a crashed session (zero MPD, zero-filled video chunk, leftover .tmp) ----------
@@ -97,9 +334,10 @@ public static class Scenarios
         var edl = await WriteEdl(nameOnly, outDir, $"crashed-{tag}.edl");
         using var m = await Mpv.StartAsync(exe, hwdec, Path.Combine(outDir, $"crashed-{tag}.mpv.log"));
         var mk = m.Mark();
+        var tCr = Mpv.Now();
         await m.Cmd("loadfile", edl, "replace");
         string outcome;
-        try { await m.WaitEvent("playback-restart", mk, 8); outcome = "playback-restart (it played)"; }
+        try { var prc = await m.WaitEvent("playback-restart", mk, 8); outcome = "playback-restart (it played)"; res["openToPlaybackRestartMs"] = R(Mpv.Ms(tCr, prc)); }
         catch (TimeoutException) { outcome = "no playback-restart within 8 s"; }
         await Task.Delay(500);
         res["outcome"] = outcome;
@@ -185,6 +423,7 @@ public static class Scenarios
     static async Task<string> WriteEdl(SessionMedia s, string outDir, string name, IEnumerable<int>? phantom = null)
     {
         var p = Path.GetFullPath(Path.Combine(outDir, name)).Replace('\\', '/');
+        LastEdl = p;
         await File.WriteAllTextAsync(p, Edl.Build(s, phantom, lead: Lead), new System.Text.UTF8Encoding(false));
         return p;
     }
@@ -238,6 +477,33 @@ public static class Scenarios
     }
 
     // ---------- basic ----------
+    /// <summary>Paused: seek to startU, then frame-step / frame-back-step; per step: latency until time-pos changes and the time-pos delta.</summary>
+    static async Task<object> StepTest(Mpv m, double startU, int fwd, int back)
+    {
+        await m.Set("pause", true);
+        var mk0 = m.Mark();
+        await Goto(m, startU, true); await Task.Delay(300);
+        var start = await m.GetD("time-pos") ?? double.NaN; var prev = start;
+        async Task<List<object>> Steps(string cmd, int n)
+        {
+            var rows = new List<object>();
+            for (int i = 0; i < n; i++)
+            {
+                var mark = m.Mark(); var t0 = Mpv.Now(); var p0 = prev;
+                await m.Cmd(cmd);
+                try { var ts = await m.WaitEvent("prop:time-pos", mark, 3, e => e.Json.TryGetProperty("data", out var dd) && dd.ValueKind == JsonValueKind.Number && Math.Abs(dd.GetDouble() - p0) > 1e-6);
+                      await Task.Delay(80);
+                      var tp = await m.GetD("time-pos") ?? prev;
+                      rows.Add(new { i, latencyMs = R(Mpv.Ms(t0, ts)), deltaMs = R((tp - prev) * 1000, 2) }); prev = tp; }
+                catch (TimeoutException) { rows.Add(new { i, error = "time-pos did not change in 3 s" }); }
+            }
+            return rows;
+        }
+        var f = await Steps("frame-step", fwd);
+        var b = await Steps("frame-back-step", back);
+        return new { startTimePosMinusBase = R(start - B, 3), forward = f, back = b };
+    }
+
     static async Task Basic(string session, string exe, string hwdec, string outDir, string tag, Dictionary<string, object?> res)
     {
         var s = ScanV(session); B = BaseOf(s);
@@ -281,16 +547,17 @@ public static class Scenarios
         res["steady1x_avsyncMeanMs"] = await AvsyncMeanMs(m);
 
         // 4) seeks (timeline seconds = origin + U)
-        double dur = await m.GetD("duration") ?? s.Runs.Sum(r => r.Count) * 3.0;
-        res["durationFromMpv"] = dur;
-        var targetsU = new List<double> { 3600, 600, 6900, 120, 3600, 1805.5, 5400.25, 30, 3601, 7100 };
+        double dur = s.Runs.Sum(r => r.Count) * 3.0;          // the app's own duration (n chunks x 3 s); mpv's duration property is not used (see README)
+        res["durationFromMpvProperty"] = await m.GetD("duration"); res["durationFromIndex"] = dur;
+        var targetsU = new List<double> { 3600, 600, 6900, 120, 4000.3, 1805.5, 5400.25, 30, 2222.2, 7100 };   // all distinct chunks: plain seeks into already-visited chunks are defective (see README)
         var rng = new Random(42);
-        for (int i = 0; i < 10; i++) targetsU.Add(R(rng.NextDouble() * (dur - 10), 3));
+        for (int i = 0; i < 30; i++) targetsU.Add(R(rng.NextDouble() * (dur - 10), 3));
         var seeks = new List<object>(); var seekMs = new List<double>(); var seek3600 = new List<double>();
         foreach (var u in targetsU)
         {
             if (u > dur - 3) continue;
             var target = u;
+            await m.Set("pause", false);
             var mark = m.Mark(); var t0 = Mpv.Now();
             await m.Cmd("seek", B + target, "absolute+exact");
             var pr = await m.WaitEvent("playback-restart", mark);
@@ -298,12 +565,14 @@ public static class Scenarios
             await Task.Delay(1500);
             var tp = await m.GetD("time-pos") ?? double.NaN;
             var tNow = Mpv.Now();
-            var avs = await AvsyncMeanMs(m, 0.5, 5);
+            var avs = await AvsyncMeanMs(m, 0.5, 5); var apts1 = LastAptsMinusTpMs;
             var drift = tp - origin - target - Mpv.Ms(pr, tNow) / 1000.0;
-            seeks.Add(new { targetU = u, seekMs = ms, timePosMinusExpectedMs = R(drift * 1000), avsyncMs = avs, aptsMinusTpMs = LastAptsMinusTpMs });
+            double? later = null, laterApts = null;
+            if (Math.Abs(apts1) > 80) { await Task.Delay(3000); later = await AvsyncMeanMs(m, 0.5, 5); laterApts = LastAptsMinusTpMs; }   // outlier: transient or persistent?
+            seeks.Add(new { targetU = u, seekMs = ms, timePosMinusExpectedMs = R(drift * 1000), avsyncMs = avs, aptsMinusTpMs1_5s = apts1, outlierRecheck_avsyncMs4_5s = later, outlierRecheck_aptsMinusTpMs4_5s = laterApts });
         }
         res["seeks"] = seeks;
-        res["seekSummary"] = new { n = seekMs.Count, medianMs = R(Median(seekMs)), maxMs = seekMs.Max(), at3600Ms = seek3600, avsyncMaxAbsMs = seeks.Cast<dynamic>().Max(x => Math.Abs((double)x.avsyncMs)) };
+        res["seekSummary"] = new { n = seekMs.Count, medianMs = R(Median(seekMs)), maxMs = seekMs.Max(), at3600Ms = seek3600, avsyncMaxAbsMs = seeks.Cast<dynamic>().Select(x => Math.Abs((double)x.avsyncMs)).DefaultIfEmpty(double.NaN).Max(), aptsMinusTpMaxAbsMs = seeks.Cast<dynamic>().Select(x => (double)x.aptsMinusTpMs1_5s).Where(v => !double.IsNaN(v)).Select(Math.Abs).DefaultIfEmpty(double.NaN).Max(), aptsMinusTpOver80ms = seeks.Cast<dynamic>().Count(x => Math.Abs((double)x.aptsMinusTpMs1_5s) > 80), aptsUnavailable = seeks.Cast<dynamic>().Count(x => double.IsNaN((double)x.aptsMinusTpMs1_5s)) };
 
         // 4b) paused exact seek: how close does the first shown frame land to the target? (error = shown frame time - target; <=0 means the frame is before the target)
         await m.Set("pause", true);
@@ -324,6 +593,7 @@ public static class Scenarios
         res["pausedExactSeekSummary"] = new { n = errs.Count, medianErrMs = R(Median(errs)), minErrMs = errs.Min(), maxErrMs = errs.Max(), within34ms = errs.Count(e => e >= -34 && e <= 34), tooEarlyOver100ms = errs.Count(e => e < -100) };
 
         // 5) live audio-delay change (no seek, no restart)
+        await Goto(m, 1000); await Task.Delay(500);
         await m.Set("pause", false); await Task.Delay(1500);
         var delayRuns = new List<object>();
         var baseAv = await AvsyncMeanMs(m);
@@ -343,7 +613,7 @@ public static class Scenarios
         var speeds = new List<object>();
         foreach (var sp in new[] { 0.25, 2.0, 4.0, 1.0 })
         {
-            await m.Cmd("seek", B + 900, "absolute+exact");
+            await m.Set("speed", sp); await Goto(m, 900);
             await Task.Delay(1000);
             await m.Set("speed", sp);
             await Task.Delay(1000);
@@ -362,34 +632,13 @@ public static class Scenarios
         res["speed"] = speeds;
         await m.Set("speed", 1.0);
 
-        // 7) frame-step and frame-back-step
-        await m.Cmd("seek", B + 1800, "absolute+exact"); await Task.Delay(800);
-        await m.Set("pause", true); await Task.Delay(300);
-        var fwd = new List<object>(); var prev = await m.GetD("time-pos") ?? 0;
-        for (int i = 0; i < 10; i++)
+        // 7) frame-step and frame-back-step: inside a chunk, forward over a chunk boundary, backward over a chunk boundary
+        res["frameStep"] = new
         {
-            var mark = m.Mark(); var t0 = Mpv.Now();
-            await m.Cmd("frame-step");
-            long ts;
-            try { ts = await m.WaitEvent("prop:time-pos", mark, 3, e => e.Json.TryGetProperty("data", out var dd) && dd.ValueKind == JsonValueKind.Number && Math.Abs(dd.GetDouble() - prev) > 1e-6); }
-            catch (TimeoutException) { fwd.Add(new { i, error = "no time-pos change" }); continue; }
-            await Task.Delay(40);
-            var tp = await m.GetD("time-pos") ?? prev;
-            fwd.Add(new { i, latencyMs = R(Mpv.Ms(t0, ts)), deltaMs = R((tp - prev) * 1000, 2) }); prev = tp;
-        }
-        var back = new List<object>();
-        for (int i = 0; i < 5; i++)
-        {
-            var mark = m.Mark(); var t0 = Mpv.Now();
-            await m.Cmd("frame-back-step");
-            long ts;
-            try { ts = await m.WaitEvent("playback-restart", mark, 5); }
-            catch (TimeoutException) { back.Add(new { i, error = "no restart" }); continue; }
-            await Task.Delay(60);
-            var tp = await m.GetD("time-pos") ?? prev;
-            back.Add(new { i, latencyMs = R(Mpv.Ms(t0, ts)), deltaMs = R((tp - prev) * 1000, 2) }); prev = tp;
-        }
-        res["frameStep"] = new { forward = fwd, back };
+            insideChunk = await StepTest(m, 1801.5, 10, 10),
+            forwardAcrossBoundary = await StepTest(m, 1799.95, 8, 0),
+            backAcrossBoundary = await StepTest(m, 1800.05, 0, 8),
+        };
         res["finalState"] = await State(m);
         m.Events("end-file").ForEach(e => { }); // keep events referenced
         res["endFileEvents"] = m.Events("end-file").Select(e => e.Json.ToString()).ToArray();
