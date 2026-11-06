@@ -1,0 +1,2150 @@
+[
+  {
+    "key": "basic | d3d11va | audioDelay.baselineAvsyncMs",
+    "n": 3,
+    "median": 0,
+    "min": 0,
+    "max": 0,
+    "perRepMedian": {
+      "r1": 0,
+      "r2": 0,
+      "r3": 0
+    }
+  },
+  {
+    "key": "basic | d3d11va | audioDelay.runs[].audioDelaySec",
+    "n": 9,
+    "median": 0,
+    "min": -0.2,
+    "max": 0.3,
+    "perRepMedian": {
+      "r1": 0,
+      "r2": 0,
+      "r3": 0
+    }
+  },
+  {
+    "key": "basic | d3d11va | audioDelay.runs[].avsyncMeanMsAfter",
+    "n": 9,
+    "median": 0,
+    "min": 0,
+    "max": 0,
+    "perRepMedian": {
+      "r1": 0,
+      "r2": 0,
+      "r3": 0
+    }
+  },
+  {
+    "key": "basic | d3d11va | audioDelay.runs[].readBack",
+    "n": 9,
+    "median": 0,
+    "min": -0.2,
+    "max": 0.3,
+    "perRepMedian": {
+      "r1": 0,
+      "r2": 0,
+      "r3": 0
+    }
+  },
+  {
+    "key": "basic | d3d11va | audioDelay.runs[].restartEvents",
+    "n": 9,
+    "median": 0,
+    "min": 0,
+    "max": 0,
+    "perRepMedian": {
+      "r1": 0,
+      "r2": 0,
+      "r3": 0
+    }
+  },
+  {
+    "key": "basic | d3d11va | audioDelay.runs[].setRoundTripMs",
+    "n": 9,
+    "median": 0.09,
+    "min": 0.08,
+    "max": 0.1,
+    "perRepMedian": {
+      "r1": 0.08,
+      "r2": 0.09,
+      "r3": 0.09
+    }
+  },
+  {
+    "key": "basic | d3d11va | demuxerCacheTime",
+    "n": 3,
+    "median": 5518.22,
+    "min": 5518.22,
+    "max": 5518.22,
+    "perRepMedian": {
+      "r1": 5518.22,
+      "r2": 5518.22,
+      "r3": 5518.22
+    }
+  },
+  {
+    "key": "basic | d3d11va | durationFromIndex",
+    "n": 3,
+    "median": 7194,
+    "min": 7194,
+    "max": 7194,
+    "perRepMedian": {
+      "r1": 7194,
+      "r2": 7194,
+      "r3": 7194
+    }
+  },
+  {
+    "key": "basic | d3d11va | durationFromMpvProperty",
+    "n": 3,
+    "median": 7194,
+    "min": 7194,
+    "max": 7194,
+    "perRepMedian": {
+      "r1": 7194,
+      "r2": 7194,
+      "r3": 7194
+    }
+  },
+  {
+    "key": "basic | d3d11va | edlBytes",
+    "n": 3,
+    "median": 436654,
+    "min": 436654,
+    "max": 436654,
+    "perRepMedian": {
+      "r1": 436654,
+      "r2": 436654,
+      "r3": 436654
+    }
+  },
+  {
+    "key": "basic | d3d11va | finalState.audio-delay",
+    "n": 3,
+    "median": 0,
+    "min": 0,
+    "max": 0,
+    "perRepMedian": {
+      "r1": 0,
+      "r2": 0,
+      "r3": 0
+    }
+  },
+  {
+    "key": "basic | d3d11va | finalState.avsync",
+    "n": 3,
+    "median": 0,
+    "min": 0,
+    "max": 0,
+    "perRepMedian": {
+      "r1": 0,
+      "r2": 0,
+      "r3": 0
+    }
+  },
+  {
+    "key": "basic | d3d11va | finalState.decoder-frame-drop-count",
+    "n": 3,
+    "median": 0,
+    "min": 0,
+    "max": 0,
+    "perRepMedian": {
+      "r1": 0,
+      "r2": 0,
+      "r3": 0
+    }
+  },
+  {
+    "key": "basic | d3d11va | finalState.demuxer-start-time",
+    "n": 3,
+    "median": 0,
+    "min": 0,
+    "max": 0,
+    "perRepMedian": {
+      "r1": 0,
+      "r2": 0,
+      "r3": 0
+    }
+  },
+  {
+    "key": "basic | d3d11va | finalState.duration",
+    "n": 3,
+    "median": 12709.21,
+    "min": 12709.21,
+    "max": 12709.21,
+    "perRepMedian": {
+      "r1": 12709.21,
+      "r2": 12709.21,
+      "r3": 12709.21
+    }
+  },
+  {
+    "key": "basic | d3d11va | finalState.estimated-vf-fps",
+    "n": 3,
+    "median": 67.98,
+    "min": 67.98,
+    "max": 67.98,
+    "perRepMedian": {
+      "r1": 67.98,
+      "r2": 67.98,
+      "r3": 67.98
+    }
+  },
+  {
+    "key": "basic | d3d11va | finalState.frame-drop-count",
+    "n": 3,
+    "median": 0,
+    "min": 0,
+    "max": 0,
+    "perRepMedian": {
+      "r1": 0,
+      "r2": 0,
+      "r3": 0
+    }
+  },
+  {
+    "key": "basic | d3d11va | finalState.playback-time",
+    "n": 3,
+    "median": 12708.01,
+    "min": 12708.01,
+    "max": 12708.01,
+    "perRepMedian": {
+      "r1": 12708.01,
+      "r2": 12708.01,
+      "r3": 12708.01
+    }
+  },
+  {
+    "key": "basic | d3d11va | finalState.speed",
+    "n": 3,
+    "median": 1,
+    "min": 1,
+    "max": 1,
+    "perRepMedian": {
+      "r1": 1,
+      "r2": 1,
+      "r3": 1
+    }
+  },
+  {
+    "key": "basic | d3d11va | finalState.time-pos",
+    "n": 3,
+    "median": 12708.01,
+    "min": 12708.01,
+    "max": 12708.01,
+    "perRepMedian": {
+      "r1": 12708.01,
+      "r2": 12708.01,
+      "r3": 12708.01
+    }
+  },
+  {
+    "key": "basic | d3d11va | finalState.vo-delayed-frame-count",
+    "n": 3,
+    "median": 0,
+    "min": 0,
+    "max": 0,
+    "perRepMedian": {
+      "r1": 0,
+      "r2": 0,
+      "r3": 0
+    }
+  },
+  {
+    "key": "basic | d3d11va | frameStep.backAcrossBoundary.back[].deltaMs",
+    "n": 3,
+    "median": 5390989.77,
+    "min": 5390989.77,
+    "max": 5390989.77,
+    "perRepMedian": {
+      "r1": 5390989.77,
+      "r2": 5390989.77,
+      "r3": 5390989.77
+    }
+  },
+  {
+    "key": "basic | d3d11va | frameStep.backAcrossBoundary.back[].i",
+    "n": 24,
+    "median": 3.5,
+    "min": 0,
+    "max": 7,
+    "perRepMedian": {
+      "r1": 3.5,
+      "r2": 3.5,
+      "r3": 3.5
+    }
+  },
+  {
+    "key": "basic | d3d11va | frameStep.backAcrossBoundary.back[].latencyMs",
+    "n": 3,
+    "median": 59.7,
+    "min": 58.3,
+    "max": 60.5,
+    "perRepMedian": {
+      "r1": 59.7,
+      "r2": 58.3,
+      "r3": 60.5
+    }
+  },
+  {
+    "key": "basic | d3d11va | frameStep.backAcrossBoundary.startTimePosMinusBase",
+    "n": 3,
+    "median": 7317.02,
+    "min": 7317.02,
+    "max": 7317.02,
+    "perRepMedian": {
+      "r1": 7317.02,
+      "r2": 7317.02,
+      "r3": 7317.02
+    }
+  },
+  {
+    "key": "basic | d3d11va | frameStep.forwardAcrossBoundary.forward[].deltaMs",
+    "n": 24,
+    "median": 16.67,
+    "min": 15.95,
+    "max": 16.67,
+    "perRepMedian": {
+      "r1": 16.67,
+      "r2": 16.67,
+      "r3": 16.67
+    }
+  },
+  {
+    "key": "basic | d3d11va | frameStep.forwardAcrossBoundary.forward[].i",
+    "n": 24,
+    "median": 3.5,
+    "min": 0,
+    "max": 7,
+    "perRepMedian": {
+      "r1": 3.5,
+      "r2": 3.5,
+      "r3": 3.5
+    }
+  },
+  {
+    "key": "basic | d3d11va | frameStep.forwardAcrossBoundary.forward[].latencyMs",
+    "n": 24,
+    "median": 15.85,
+    "min": 0.4,
+    "max": 17.1,
+    "perRepMedian": {
+      "r1": 15.9,
+      "r2": 15.85,
+      "r3": 15.9
+    }
+  },
+  {
+    "key": "basic | d3d11va | frameStep.forwardAcrossBoundary.startTimePosMinusBase",
+    "n": 3,
+    "median": 7314.02,
+    "min": 7314.02,
+    "max": 7314.02,
+    "perRepMedian": {
+      "r1": 7314.02,
+      "r2": 7314.02,
+      "r3": 7314.02
+    }
+  },
+  {
+    "key": "basic | d3d11va | frameStep.insideChunk.back[].deltaMs",
+    "n": 3,
+    "median": 5390823.1,
+    "min": 5390823.1,
+    "max": 5390823.1,
+    "perRepMedian": {
+      "r1": 5390823.1,
+      "r2": 5390823.1,
+      "r3": 5390823.1
+    }
+  },
+  {
+    "key": "basic | d3d11va | frameStep.insideChunk.back[].i",
+    "n": 30,
+    "median": 4.5,
+    "min": 0,
+    "max": 9,
+    "perRepMedian": {
+      "r1": 4.5,
+      "r2": 4.5,
+      "r3": 4.5
+    }
+  },
+  {
+    "key": "basic | d3d11va | frameStep.insideChunk.back[].latencyMs",
+    "n": 3,
+    "median": 77.8,
+    "min": 23.2,
+    "max": 170.8,
+    "perRepMedian": {
+      "r1": 77.8,
+      "r2": 23.2,
+      "r3": 170.8
+    }
+  },
+  {
+    "key": "basic | d3d11va | frameStep.insideChunk.forward[].deltaMs",
+    "n": 30,
+    "median": 16.67,
+    "min": 16.67,
+    "max": 16.67,
+    "perRepMedian": {
+      "r1": 16.67,
+      "r2": 16.67,
+      "r3": 16.67
+    }
+  },
+  {
+    "key": "basic | d3d11va | frameStep.insideChunk.forward[].i",
+    "n": 30,
+    "median": 4.5,
+    "min": 0,
+    "max": 9,
+    "perRepMedian": {
+      "r1": 4.5,
+      "r2": 4.5,
+      "r3": 4.5
+    }
+  },
+  {
+    "key": "basic | d3d11va | frameStep.insideChunk.forward[].latencyMs",
+    "n": 30,
+    "median": 16.8,
+    "min": 0.4,
+    "max": 17,
+    "perRepMedian": {
+      "r1": 16.8,
+      "r2": 16.8,
+      "r3": 16.7
+    }
+  },
+  {
+    "key": "basic | d3d11va | frameStep.insideChunk.startTimePosMinusBase",
+    "n": 3,
+    "median": 7317.02,
+    "min": 7317.02,
+    "max": 7317.02,
+    "perRepMedian": {
+      "r1": 7317.02,
+      "r2": 7317.02,
+      "r3": 7317.02
+    }
+  },
+  {
+    "key": "basic | d3d11va | machineLoadAfter.systemCpuBusyPercent",
+    "n": 3,
+    "median": 4.4,
+    "min": 4.2,
+    "max": 4.7,
+    "perRepMedian": {
+      "r1": 4.4,
+      "r2": 4.2,
+      "r3": 4.7
+    }
+  },
+  {
+    "key": "basic | d3d11va | machineLoadBefore.systemCpuBusyPercent",
+    "n": 3,
+    "median": 6.3,
+    "min": 3.8,
+    "max": 7.4,
+    "perRepMedian": {
+      "r1": 7.4,
+      "r2": 6.3,
+      "r3": 3.8
+    }
+  },
+  {
+    "key": "basic | d3d11va | open.runs[].fileLoadedMs",
+    "n": 18,
+    "median": 48.05,
+    "min": 45.6,
+    "max": 75.7,
+    "perRepMedian": {
+      "r1": 55.2,
+      "r2": 45.95,
+      "r3": 54.35
+    }
+  },
+  {
+    "key": "basic | d3d11va | open.runs[].firstFrameMs",
+    "n": 18,
+    "median": 82.3,
+    "min": 70.6,
+    "max": 302.2,
+    "perRepMedian": {
+      "r1": 96.6,
+      "r2": 72.25,
+      "r3": 82.3
+    }
+  },
+  {
+    "key": "basic | d3d11va | open.runs[].i",
+    "n": 18,
+    "median": 2.5,
+    "min": 0,
+    "max": 5,
+    "perRepMedian": {
+      "r1": 2.5,
+      "r2": 2.5,
+      "r3": 2.5
+    }
+  },
+  {
+    "key": "basic | d3d11va | open.warmMaxFirstFrameMs",
+    "n": 3,
+    "median": 100.7,
+    "min": 84.3,
+    "max": 105.5,
+    "perRepMedian": {
+      "r1": 105.5,
+      "r2": 84.3,
+      "r3": 100.7
+    }
+  },
+  {
+    "key": "basic | d3d11va | open.warmMedianFirstFrameMs",
+    "n": 3,
+    "median": 82,
+    "min": 71.3,
+    "max": 93.6,
+    "perRepMedian": {
+      "r1": 93.6,
+      "r2": 71.3,
+      "r3": 82
+    }
+  },
+  {
+    "key": "basic | d3d11va | originPaused.audio-delay",
+    "n": 3,
+    "median": 0,
+    "min": 0,
+    "max": 0,
+    "perRepMedian": {
+      "r1": 0,
+      "r2": 0,
+      "r3": 0
+    }
+  },
+  {
+    "key": "basic | d3d11va | originPaused.avsync",
+    "n": 3,
+    "median": 0,
+    "min": 0,
+    "max": 0,
+    "perRepMedian": {
+      "r1": 0,
+      "r2": 0,
+      "r3": 0
+    }
+  },
+  {
+    "key": "basic | d3d11va | originPaused.decoder-frame-drop-count",
+    "n": 3,
+    "median": 0,
+    "min": 0,
+    "max": 0,
+    "perRepMedian": {
+      "r1": 0,
+      "r2": 0,
+      "r3": 0
+    }
+  },
+  {
+    "key": "basic | d3d11va | originPaused.demuxer-start-time",
+    "n": 3,
+    "median": 0,
+    "min": 0,
+    "max": 0,
+    "perRepMedian": {
+      "r1": 0,
+      "r2": 0,
+      "r3": 0
+    }
+  },
+  {
+    "key": "basic | d3d11va | originPaused.duration",
+    "n": 3,
+    "median": 7194,
+    "min": 7194,
+    "max": 7194,
+    "perRepMedian": {
+      "r1": 7194,
+      "r2": 7194,
+      "r3": 7194
+    }
+  },
+  {
+    "key": "basic | d3d11va | originPaused.estimated-vf-fps",
+    "n": 3,
+    "median": 67.58,
+    "min": 67.58,
+    "max": 67.58,
+    "perRepMedian": {
+      "r1": 67.58,
+      "r2": 67.58,
+      "r3": 67.58
+    }
+  },
+  {
+    "key": "basic | d3d11va | originPaused.frame-drop-count",
+    "n": 3,
+    "median": 0,
+    "min": 0,
+    "max": 0,
+    "perRepMedian": {
+      "r1": 0,
+      "r2": 0,
+      "r3": 0
+    }
+  },
+  {
+    "key": "basic | d3d11va | originPaused.playback-time",
+    "n": 3,
+    "median": 5517,
+    "min": 5517,
+    "max": 5517,
+    "perRepMedian": {
+      "r1": 5517,
+      "r2": 5517,
+      "r3": 5517
+    }
+  },
+  {
+    "key": "basic | d3d11va | originPaused.speed",
+    "n": 3,
+    "median": 1,
+    "min": 1,
+    "max": 1,
+    "perRepMedian": {
+      "r1": 1,
+      "r2": 1,
+      "r3": 1
+    }
+  },
+  {
+    "key": "basic | d3d11va | originPaused.time-pos",
+    "n": 3,
+    "median": 5517,
+    "min": 5517,
+    "max": 5517,
+    "perRepMedian": {
+      "r1": 5517,
+      "r2": 5517,
+      "r3": 5517
+    }
+  },
+  {
+    "key": "basic | d3d11va | originPaused.vo-delayed-frame-count",
+    "n": 3,
+    "median": 0,
+    "min": 0,
+    "max": 0,
+    "perRepMedian": {
+      "r1": 0,
+      "r2": 0,
+      "r3": 0
+    }
+  },
+  {
+    "key": "basic | d3d11va | pausedExactSeekSummary.maxErrMs",
+    "n": 3,
+    "median": 3.04,
+    "min": 3.04,
+    "max": 3.04,
+    "perRepMedian": {
+      "r1": 3.04,
+      "r2": 3.04,
+      "r3": 3.04
+    }
+  },
+  {
+    "key": "basic | d3d11va | pausedExactSeekSummary.medianErrMs",
+    "n": 3,
+    "median": -985.9,
+    "min": -985.9,
+    "max": -985.9,
+    "perRepMedian": {
+      "r1": -985.9,
+      "r2": -985.9,
+      "r3": -985.9
+    }
+  },
+  {
+    "key": "basic | d3d11va | pausedExactSeekSummary.minErrMs",
+    "n": 3,
+    "median": -2770.07,
+    "min": -2770.07,
+    "max": -2770.07,
+    "perRepMedian": {
+      "r1": -2770.07,
+      "r2": -2770.07,
+      "r3": -2770.07
+    }
+  },
+  {
+    "key": "basic | d3d11va | pausedExactSeekSummary.n",
+    "n": 3,
+    "median": 27,
+    "min": 27,
+    "max": 27,
+    "perRepMedian": {
+      "r1": 27,
+      "r2": 27,
+      "r3": 27
+    }
+  },
+  {
+    "key": "basic | d3d11va | pausedExactSeekSummary.tooEarlyOver100ms",
+    "n": 3,
+    "median": 24,
+    "min": 24,
+    "max": 24,
+    "perRepMedian": {
+      "r1": 24,
+      "r2": 24,
+      "r3": 24
+    }
+  },
+  {
+    "key": "basic | d3d11va | pausedExactSeekSummary.within34ms",
+    "n": 3,
+    "median": 2,
+    "min": 2,
+    "max": 2,
+    "perRepMedian": {
+      "r1": 2,
+      "r2": 2,
+      "r3": 2
+    }
+  },
+  {
+    "key": "basic | d3d11va | pausedExactSeek[].targetU",
+    "n": 81,
+    "median": 2214.11,
+    "min": 3,
+    "max": 5898.53,
+    "perRepMedian": {
+      "r1": 2214.11,
+      "r2": 2214.11,
+      "r3": 2214.11
+    }
+  },
+  {
+    "key": "basic | d3d11va | pausedExactSeek[].timePosMinusTargetMs",
+    "n": 81,
+    "median": -985.92,
+    "min": -2770.07,
+    "max": 3.04,
+    "perRepMedian": {
+      "r1": -985.92,
+      "r2": -985.92,
+      "r3": -985.92
+    }
+  },
+  {
+    "key": "basic | d3d11va | runs[].Count",
+    "n": 3,
+    "median": 2398,
+    "min": 2398,
+    "max": 2398,
+    "perRepMedian": {
+      "r1": 2398,
+      "r2": 2398,
+      "r3": 2398
+    }
+  },
+  {
+    "key": "basic | d3d11va | runs[].First",
+    "n": 3,
+    "median": 1840,
+    "min": 1840,
+    "max": 1840,
+    "perRepMedian": {
+      "r1": 1840,
+      "r2": 1840,
+      "r3": 1840
+    }
+  },
+  {
+    "key": "basic | d3d11va | seekSummary.aptsMinusTpOver80ms",
+    "n": 3,
+    "median": 0,
+    "min": 0,
+    "max": 0,
+    "perRepMedian": {
+      "r1": 0,
+      "r2": 0,
+      "r3": 0
+    }
+  },
+  {
+    "key": "basic | d3d11va | seekSummary.aptsUnavailable",
+    "n": 3,
+    "median": 40,
+    "min": 40,
+    "max": 40,
+    "perRepMedian": {
+      "r1": 40,
+      "r2": 40,
+      "r3": 40
+    }
+  },
+  {
+    "key": "basic | d3d11va | seekSummary.at3600Ms[]",
+    "n": 3,
+    "median": 136.9,
+    "min": 128.2,
+    "max": 494,
+    "perRepMedian": {
+      "r1": 494,
+      "r2": 128.2,
+      "r3": 136.9
+    }
+  },
+  {
+    "key": "basic | d3d11va | seekSummary.avsyncMaxAbsMs",
+    "n": 3,
+    "median": 0,
+    "min": 0,
+    "max": 0,
+    "perRepMedian": {
+      "r1": 0,
+      "r2": 0,
+      "r3": 0
+    }
+  },
+  {
+    "key": "basic | d3d11va | seekSummary.maxMs",
+    "n": 3,
+    "median": 151,
+    "min": 136.9,
+    "max": 560.8,
+    "perRepMedian": {
+      "r1": 560.8,
+      "r2": 151,
+      "r3": 136.9
+    }
+  },
+  {
+    "key": "basic | d3d11va | seekSummary.medianMs",
+    "n": 3,
+    "median": 110.7,
+    "min": 107.9,
+    "max": 475.2,
+    "perRepMedian": {
+      "r1": 475.2,
+      "r2": 107.9,
+      "r3": 110.7
+    }
+  },
+  {
+    "key": "basic | d3d11va | seekSummary.n",
+    "n": 3,
+    "median": 40,
+    "min": 40,
+    "max": 40,
+    "perRepMedian": {
+      "r1": 40,
+      "r2": 40,
+      "r3": 40
+    }
+  },
+  {
+    "key": "basic | d3d11va | seeks[].avsyncMs",
+    "n": 120,
+    "median": 0,
+    "min": 0,
+    "max": 0,
+    "perRepMedian": {
+      "r1": 0,
+      "r2": 0,
+      "r3": 0
+    }
+  },
+  {
+    "key": "basic | d3d11va | seeks[].seekMs",
+    "n": 120,
+    "median": 119.15,
+    "min": 78.1,
+    "max": 560.8,
+    "perRepMedian": {
+      "r1": 475.2,
+      "r2": 107.9,
+      "r3": 110.7
+    }
+  },
+  {
+    "key": "basic | d3d11va | seeks[].targetU",
+    "n": 120,
+    "median": 2796.16,
+    "min": 30,
+    "max": 7100,
+    "perRepMedian": {
+      "r1": 2796.16,
+      "r2": 2796.16,
+      "r3": 2796.16
+    }
+  },
+  {
+    "key": "basic | d3d11va | seeks[].timePosMinusExpectedMs",
+    "n": 120,
+    "median": -1696.5,
+    "min": -2897.3,
+    "max": 49.9,
+    "perRepMedian": {
+      "r1": -1694.1,
+      "r2": -1700.35,
+      "r3": -1692.7
+    }
+  },
+  {
+    "key": "basic | d3d11va | segments",
+    "n": 3,
+    "median": 2398,
+    "min": 2398,
+    "max": 2398,
+    "perRepMedian": {
+      "r1": 2398,
+      "r2": 2398,
+      "r3": 2398
+    }
+  },
+  {
+    "key": "basic | d3d11va | speed[speed=0.25].achievedRatio",
+    "n": 3,
+    "median": 0.25,
+    "min": 0.25,
+    "max": 0.25,
+    "perRepMedian": {
+      "r1": 0.25,
+      "r2": 0.25,
+      "r3": 0.25
+    }
+  },
+  {
+    "key": "basic | d3d11va | speed[speed=0.25].audioSpeedCorrection",
+    "n": 3,
+    "median": 1,
+    "min": 1,
+    "max": 1,
+    "perRepMedian": {
+      "r1": 1,
+      "r2": 1,
+      "r3": 1
+    }
+  },
+  {
+    "key": "basic | d3d11va | speed[speed=0.25].avsyncMeanMs",
+    "n": 3,
+    "median": 0,
+    "min": 0,
+    "max": 0,
+    "perRepMedian": {
+      "r1": 0,
+      "r2": 0,
+      "r3": 0
+    }
+  },
+  {
+    "key": "basic | d3d11va | speed[speed=0.25].cpu.cpuPercentOfAllLogicalCores",
+    "n": 3,
+    "median": 0.17,
+    "min": 0.12,
+    "max": 0.29,
+    "perRepMedian": {
+      "r1": 0.17,
+      "r2": 0.12,
+      "r3": 0.29
+    }
+  },
+  {
+    "key": "basic | d3d11va | speed[speed=0.25].cpu.cpuPercentOfOneCore",
+    "n": 3,
+    "median": 2.73,
+    "min": 1.95,
+    "max": 4.66,
+    "perRepMedian": {
+      "r1": 2.73,
+      "r2": 1.95,
+      "r3": 4.66
+    }
+  },
+  {
+    "key": "basic | d3d11va | speed[speed=0.25].cpu.privateMB",
+    "n": 3,
+    "median": 451.7,
+    "min": 445.5,
+    "max": 462,
+    "perRepMedian": {
+      "r1": 445.5,
+      "r2": 462,
+      "r3": 451.7
+    }
+  },
+  {
+    "key": "basic | d3d11va | speed[speed=0.25].cpu.workingSetMB",
+    "n": 3,
+    "median": 387.9,
+    "min": 382.2,
+    "max": 398.6,
+    "perRepMedian": {
+      "r1": 382.2,
+      "r2": 398.6,
+      "r3": 387.9
+    }
+  },
+  {
+    "key": "basic | d3d11va | speed[speed=0.25].framesDropped",
+    "n": 3,
+    "median": 0,
+    "min": 0,
+    "max": 0,
+    "perRepMedian": {
+      "r1": 0,
+      "r2": 0,
+      "r3": 0
+    }
+  },
+  {
+    "key": "basic | d3d11va | speed[speed=0.25].speed",
+    "n": 3,
+    "median": 0.25,
+    "min": 0.25,
+    "max": 0.25,
+    "perRepMedian": {
+      "r1": 0.25,
+      "r2": 0.25,
+      "r3": 0.25
+    }
+  },
+  {
+    "key": "basic | d3d11va | speed[speed=0.25].videoSpeedCorrection",
+    "n": 3,
+    "median": 1,
+    "min": 1,
+    "max": 1,
+    "perRepMedian": {
+      "r1": 1,
+      "r2": 1,
+      "r3": 1
+    }
+  },
+  {
+    "key": "basic | d3d11va | speed[speed=1].achievedRatio",
+    "n": 3,
+    "median": 1,
+    "min": 1,
+    "max": 1,
+    "perRepMedian": {
+      "r1": 1,
+      "r2": 1,
+      "r3": 1
+    }
+  },
+  {
+    "key": "basic | d3d11va | speed[speed=1].audioSpeedCorrection",
+    "n": 3,
+    "median": 1,
+    "min": 1,
+    "max": 1,
+    "perRepMedian": {
+      "r1": 1,
+      "r2": 1,
+      "r3": 1
+    }
+  },
+  {
+    "key": "basic | d3d11va | speed[speed=1].avsyncMeanMs",
+    "n": 3,
+    "median": 0,
+    "min": 0,
+    "max": 0,
+    "perRepMedian": {
+      "r1": 0,
+      "r2": 0,
+      "r3": 0
+    }
+  },
+  {
+    "key": "basic | d3d11va | speed[speed=1].cpu.cpuPercentOfAllLogicalCores",
+    "n": 3,
+    "median": 0.61,
+    "min": 0.39,
+    "max": 0.68,
+    "perRepMedian": {
+      "r1": 0.61,
+      "r2": 0.68,
+      "r3": 0.39
+    }
+  },
+  {
+    "key": "basic | d3d11va | speed[speed=1].cpu.cpuPercentOfOneCore",
+    "n": 3,
+    "median": 9.74,
+    "min": 6.23,
+    "max": 10.9,
+    "perRepMedian": {
+      "r1": 9.74,
+      "r2": 10.9,
+      "r3": 6.23
+    }
+  },
+  {
+    "key": "basic | d3d11va | speed[speed=1].cpu.privateMB",
+    "n": 3,
+    "median": 459.4,
+    "min": 445.4,
+    "max": 472.1,
+    "perRepMedian": {
+      "r1": 445.4,
+      "r2": 472.1,
+      "r3": 459.4
+    }
+  },
+  {
+    "key": "basic | d3d11va | speed[speed=1].cpu.workingSetMB",
+    "n": 3,
+    "median": 392.1,
+    "min": 377.7,
+    "max": 395.6,
+    "perRepMedian": {
+      "r1": 377.7,
+      "r2": 392.1,
+      "r3": 395.6
+    }
+  },
+  {
+    "key": "basic | d3d11va | speed[speed=1].framesDropped",
+    "n": 3,
+    "median": 0,
+    "min": 0,
+    "max": 0,
+    "perRepMedian": {
+      "r1": 0,
+      "r2": 0,
+      "r3": 0
+    }
+  },
+  {
+    "key": "basic | d3d11va | speed[speed=1].speed",
+    "n": 3,
+    "median": 1,
+    "min": 1,
+    "max": 1,
+    "perRepMedian": {
+      "r1": 1,
+      "r2": 1,
+      "r3": 1
+    }
+  },
+  {
+    "key": "basic | d3d11va | speed[speed=1].videoSpeedCorrection",
+    "n": 3,
+    "median": 1,
+    "min": 1,
+    "max": 1,
+    "perRepMedian": {
+      "r1": 1,
+      "r2": 1,
+      "r3": 1
+    }
+  },
+  {
+    "key": "basic | d3d11va | speed[speed=2].achievedRatio",
+    "n": 3,
+    "median": 2,
+    "min": 2,
+    "max": 2,
+    "perRepMedian": {
+      "r1": 2,
+      "r2": 2,
+      "r3": 2
+    }
+  },
+  {
+    "key": "basic | d3d11va | speed[speed=2].audioSpeedCorrection",
+    "n": 3,
+    "median": 1,
+    "min": 1,
+    "max": 1,
+    "perRepMedian": {
+      "r1": 1,
+      "r2": 1,
+      "r3": 1
+    }
+  },
+  {
+    "key": "basic | d3d11va | speed[speed=2].avsyncMeanMs",
+    "n": 3,
+    "median": 0,
+    "min": 0,
+    "max": 0,
+    "perRepMedian": {
+      "r1": 0,
+      "r2": 0,
+      "r3": 0
+    }
+  },
+  {
+    "key": "basic | d3d11va | speed[speed=2].cpu.cpuPercentOfAllLogicalCores",
+    "n": 3,
+    "median": 0.71,
+    "min": 0.66,
+    "max": 0.73,
+    "perRepMedian": {
+      "r1": 0.66,
+      "r2": 0.71,
+      "r3": 0.73
+    }
+  },
+  {
+    "key": "basic | d3d11va | speed[speed=2].cpu.cpuPercentOfOneCore",
+    "n": 3,
+    "median": 11.3,
+    "min": 10.51,
+    "max": 11.66,
+    "perRepMedian": {
+      "r1": 10.51,
+      "r2": 11.3,
+      "r3": 11.66
+    }
+  },
+  {
+    "key": "basic | d3d11va | speed[speed=2].cpu.privateMB",
+    "n": 3,
+    "median": 469.8,
+    "min": 463.1,
+    "max": 478,
+    "perRepMedian": {
+      "r1": 463.1,
+      "r2": 469.8,
+      "r3": 478
+    }
+  },
+  {
+    "key": "basic | d3d11va | speed[speed=2].cpu.workingSetMB",
+    "n": 3,
+    "median": 406.6,
+    "min": 397.7,
+    "max": 412.8,
+    "perRepMedian": {
+      "r1": 397.7,
+      "r2": 406.6,
+      "r3": 412.8
+    }
+  },
+  {
+    "key": "basic | d3d11va | speed[speed=2].framesDropped",
+    "n": 3,
+    "median": 0,
+    "min": 0,
+    "max": 0,
+    "perRepMedian": {
+      "r1": 0,
+      "r2": 0,
+      "r3": 0
+    }
+  },
+  {
+    "key": "basic | d3d11va | speed[speed=2].speed",
+    "n": 3,
+    "median": 2,
+    "min": 2,
+    "max": 2,
+    "perRepMedian": {
+      "r1": 2,
+      "r2": 2,
+      "r3": 2
+    }
+  },
+  {
+    "key": "basic | d3d11va | speed[speed=2].videoSpeedCorrection",
+    "n": 3,
+    "median": 1,
+    "min": 1,
+    "max": 1,
+    "perRepMedian": {
+      "r1": 1,
+      "r2": 1,
+      "r3": 1
+    }
+  },
+  {
+    "key": "basic | d3d11va | speed[speed=4].achievedRatio",
+    "n": 3,
+    "median": 4,
+    "min": 4,
+    "max": 4,
+    "perRepMedian": {
+      "r1": 4,
+      "r2": 4,
+      "r3": 4
+    }
+  },
+  {
+    "key": "basic | d3d11va | speed[speed=4].audioSpeedCorrection",
+    "n": 3,
+    "median": 1,
+    "min": 1,
+    "max": 1,
+    "perRepMedian": {
+      "r1": 1,
+      "r2": 1,
+      "r3": 1
+    }
+  },
+  {
+    "key": "basic | d3d11va | speed[speed=4].avsyncMeanMs",
+    "n": 3,
+    "median": 0,
+    "min": 0,
+    "max": 0,
+    "perRepMedian": {
+      "r1": 0,
+      "r2": 0,
+      "r3": 0
+    }
+  },
+  {
+    "key": "basic | d3d11va | speed[speed=4].cpu.cpuPercentOfAllLogicalCores",
+    "n": 3,
+    "median": 1.75,
+    "min": 1.41,
+    "max": 2.09,
+    "perRepMedian": {
+      "r1": 2.09,
+      "r2": 1.41,
+      "r3": 1.75
+    }
+  },
+  {
+    "key": "basic | d3d11va | speed[speed=4].cpu.cpuPercentOfOneCore",
+    "n": 3,
+    "median": 28.03,
+    "min": 22.6,
+    "max": 33.51,
+    "perRepMedian": {
+      "r1": 33.51,
+      "r2": 22.6,
+      "r3": 28.03
+    }
+  },
+  {
+    "key": "basic | d3d11va | speed[speed=4].cpu.privateMB",
+    "n": 3,
+    "median": 447.5,
+    "min": 443.8,
+    "max": 455.7,
+    "perRepMedian": {
+      "r1": 443.8,
+      "r2": 455.7,
+      "r3": 447.5
+    }
+  },
+  {
+    "key": "basic | d3d11va | speed[speed=4].cpu.workingSetMB",
+    "n": 3,
+    "median": 382.7,
+    "min": 378.1,
+    "max": 392,
+    "perRepMedian": {
+      "r1": 378.1,
+      "r2": 392,
+      "r3": 382.7
+    }
+  },
+  {
+    "key": "basic | d3d11va | speed[speed=4].framesDropped",
+    "n": 3,
+    "median": 0,
+    "min": 0,
+    "max": 0,
+    "perRepMedian": {
+      "r1": 0,
+      "r2": 0,
+      "r3": 0
+    }
+  },
+  {
+    "key": "basic | d3d11va | speed[speed=4].speed",
+    "n": 3,
+    "median": 4,
+    "min": 4,
+    "max": 4,
+    "perRepMedian": {
+      "r1": 4,
+      "r2": 4,
+      "r3": 4
+    }
+  },
+  {
+    "key": "basic | d3d11va | speed[speed=4].videoSpeedCorrection",
+    "n": 3,
+    "median": 1,
+    "min": 1,
+    "max": 1,
+    "perRepMedian": {
+      "r1": 1,
+      "r2": 1,
+      "r3": 1
+    }
+  },
+  {
+    "key": "basic | d3d11va | steady1x_10s.cpuPercentOfAllLogicalCores",
+    "n": 3,
+    "median": 0.49,
+    "min": 0.29,
+    "max": 0.61,
+    "perRepMedian": {
+      "r1": 0.49,
+      "r2": 0.29,
+      "r3": 0.61
+    }
+  },
+  {
+    "key": "basic | d3d11va | steady1x_10s.cpuPercentOfOneCore",
+    "n": 3,
+    "median": 7.8,
+    "min": 4.68,
+    "max": 9.83,
+    "perRepMedian": {
+      "r1": 7.8,
+      "r2": 4.68,
+      "r3": 9.83
+    }
+  },
+  {
+    "key": "basic | d3d11va | steady1x_10s.privateMB",
+    "n": 3,
+    "median": 269.5,
+    "min": 264.5,
+    "max": 271.3,
+    "perRepMedian": {
+      "r1": 269.5,
+      "r2": 264.5,
+      "r3": 271.3
+    }
+  },
+  {
+    "key": "basic | d3d11va | steady1x_10s.workingSetMB",
+    "n": 3,
+    "median": 206.6,
+    "min": 201.6,
+    "max": 206.7,
+    "perRepMedian": {
+      "r1": 206.6,
+      "r2": 201.6,
+      "r3": 206.7
+    }
+  },
+  {
+    "key": "basic | d3d11va | steady1x_avsyncMeanMs",
+    "n": 3,
+    "median": 0,
+    "min": 0,
+    "max": 0,
+    "perRepMedian": {
+      "r1": 0,
+      "r2": 0,
+      "r3": 0
+    }
+  },
+  {
+    "key": "basic | d3d11va | steady1x_state.audio-delay",
+    "n": 3,
+    "median": 0,
+    "min": 0,
+    "max": 0,
+    "perRepMedian": {
+      "r1": 0,
+      "r2": 0,
+      "r3": 0
+    }
+  },
+  {
+    "key": "basic | d3d11va | steady1x_state.avsync",
+    "n": 3,
+    "median": 0,
+    "min": 0,
+    "max": 0,
+    "perRepMedian": {
+      "r1": 0,
+      "r2": 0,
+      "r3": 0
+    }
+  },
+  {
+    "key": "basic | d3d11va | steady1x_state.decoder-frame-drop-count",
+    "n": 3,
+    "median": 0,
+    "min": 0,
+    "max": 0,
+    "perRepMedian": {
+      "r1": 0,
+      "r2": 0,
+      "r3": 0
+    }
+  },
+  {
+    "key": "basic | d3d11va | steady1x_state.demuxer-start-time",
+    "n": 3,
+    "median": 0,
+    "min": 0,
+    "max": 0,
+    "perRepMedian": {
+      "r1": 0,
+      "r2": 0,
+      "r3": 0
+    }
+  },
+  {
+    "key": "basic | d3d11va | steady1x_state.duration",
+    "n": 3,
+    "median": 7194,
+    "min": 7194,
+    "max": 7194,
+    "perRepMedian": {
+      "r1": 7194,
+      "r2": 7194,
+      "r3": 7194
+    }
+  },
+  {
+    "key": "basic | d3d11va | steady1x_state.estimated-vf-fps",
+    "n": 3,
+    "median": 60.75,
+    "min": 60.75,
+    "max": 60.75,
+    "perRepMedian": {
+      "r1": 60.75,
+      "r2": 60.75,
+      "r3": 60.75
+    }
+  },
+  {
+    "key": "basic | d3d11va | steady1x_state.frame-drop-count",
+    "n": 3,
+    "median": 0,
+    "min": 0,
+    "max": 0,
+    "perRepMedian": {
+      "r1": 0,
+      "r2": 0,
+      "r3": 0
+    }
+  },
+  {
+    "key": "basic | d3d11va | steady1x_state.playback-time",
+    "n": 3,
+    "median": 5529.05,
+    "min": 5529.05,
+    "max": 5529.05,
+    "perRepMedian": {
+      "r1": 5529.05,
+      "r2": 5529.05,
+      "r3": 5529.05
+    }
+  },
+  {
+    "key": "basic | d3d11va | steady1x_state.speed",
+    "n": 3,
+    "median": 1,
+    "min": 1,
+    "max": 1,
+    "perRepMedian": {
+      "r1": 1,
+      "r2": 1,
+      "r3": 1
+    }
+  },
+  {
+    "key": "basic | d3d11va | steady1x_state.time-pos",
+    "n": 3,
+    "median": 5529.05,
+    "min": 5529.05,
+    "max": 5529.05,
+    "perRepMedian": {
+      "r1": 5529.05,
+      "r2": 5529.05,
+      "r3": 5529.05
+    }
+  },
+  {
+    "key": "basic | d3d11va | steady1x_state.vo-delayed-frame-count",
+    "n": 3,
+    "median": 0,
+    "min": 0,
+    "max": 0,
+    "perRepMedian": {
+      "r1": 0,
+      "r2": 0,
+      "r3": 0
+    }
+  },
+  {
+    "key": "coldopen | d3d11va | coldOpen[].firstOpen_fileLoadedMs",
+    "n": 15,
+    "median": 44.9,
+    "min": 43.3,
+    "max": 77.6,
+    "perRepMedian": {
+      "r1": 45,
+      "r2": 44.7,
+      "r3": 44.8
+    }
+  },
+  {
+    "key": "coldopen | d3d11va | coldOpen[].firstOpen_firstFrameMs",
+    "n": 15,
+    "median": 298.5,
+    "min": 282.6,
+    "max": 346.4,
+    "perRepMedian": {
+      "r1": 302.5,
+      "r2": 298.5,
+      "r3": 297
+    }
+  },
+  {
+    "key": "coldopen | d3d11va | coldOpen[].i",
+    "n": 15,
+    "median": 2,
+    "min": 0,
+    "max": 4,
+    "perRepMedian": {
+      "r1": 2,
+      "r2": 2,
+      "r3": 2
+    }
+  },
+  {
+    "key": "coldopen | d3d11va | coldOpen[].secondOpen_firstFrameMs",
+    "n": 15,
+    "median": 80.8,
+    "min": 71.6,
+    "max": 87.9,
+    "perRepMedian": {
+      "r1": 83.2,
+      "r2": 80.6,
+      "r3": 78.2
+    }
+  },
+  {
+    "key": "coldopen | d3d11va | machineLoadAfter.systemCpuBusyPercent",
+    "n": 3,
+    "median": 4.5,
+    "min": 3.3,
+    "max": 19.5,
+    "perRepMedian": {
+      "r1": 19.5,
+      "r2": 3.3,
+      "r3": 4.5
+    }
+  },
+  {
+    "key": "coldopen | d3d11va | machineLoadBefore.systemCpuBusyPercent",
+    "n": 3,
+    "median": 3.8,
+    "min": 3.4,
+    "max": 4.8,
+    "perRepMedian": {
+      "r1": 3.4,
+      "r2": 3.8,
+      "r3": 4.8
+    }
+  },
+  {
+    "key": "eof | d3d11va | A_continueGrown.avsyncMs",
+    "n": 3,
+    "median": 0,
+    "min": 0,
+    "max": 0,
+    "perRepMedian": {
+      "r1": 0,
+      "r2": 0,
+      "r3": 0
+    }
+  },
+  {
+    "key": "eof | d3d11va | A_continueGrown.droppedFrames",
+    "n": 3,
+    "median": 0,
+    "min": 0,
+    "max": 0,
+    "perRepMedian": {
+      "r1": 0,
+      "r2": 0,
+      "r3": 0
+    }
+  },
+  {
+    "key": "eof | d3d11va | A_continueGrown.duration2",
+    "n": 3,
+    "median": 6114.01,
+    "min": 6114.01,
+    "max": 6114.01,
+    "perRepMedian": {
+      "r1": 6114.01,
+      "r2": 6114.01,
+      "r3": 6114.01
+    }
+  },
+  {
+    "key": "eof | d3d11va | A_continueGrown.expectedFirst",
+    "n": 3,
+    "median": 5936.99,
+    "min": 5936.99,
+    "max": 5936.99,
+    "perRepMedian": {
+      "r1": 5936.99,
+      "r2": 5936.99,
+      "r3": 5936.99
+    }
+  },
+  {
+    "key": "eof | d3d11va | A_continueGrown.origin2",
+    "n": 3,
+    "median": 0,
+    "min": 0,
+    "max": 0,
+    "perRepMedian": {
+      "r1": 0,
+      "r2": 0,
+      "r3": 0
+    }
+  },
+  {
+    "key": "eof | d3d11va | A_continueGrown.timePosAfter3_5s",
+    "n": 3,
+    "median": 5937.55,
+    "min": 5937.55,
+    "max": 5937.57,
+    "perRepMedian": {
+      "r1": 5937.55,
+      "r2": 5937.55,
+      "r3": 5937.57
+    }
+  },
+  {
+    "key": "eof | d3d11va | A_continueGrown.timePosRightAfter",
+    "n": 3,
+    "median": 5934.05,
+    "min": 5934.05,
+    "max": 5934.05,
+    "perRepMedian": {
+      "r1": 5934.05,
+      "r2": 5934.05,
+      "r3": 5934.05
+    }
+  },
+  {
+    "key": "eof | d3d11va | A_continueGrown_eofEventToFirstFrameMs",
+    "n": 3,
+    "median": 158.5,
+    "min": 148.3,
+    "max": 167.4,
+    "perRepMedian": {
+      "r1": 148.3,
+      "r2": 167.4,
+      "r3": 158.5
+    }
+  },
+  {
+    "key": "eof | d3d11va | A_continueGrown_loadfileToFirstFrameMs",
+    "n": 3,
+    "median": 152.1,
+    "min": 141.7,
+    "max": 153,
+    "perRepMedian": {
+      "r1": 141.7,
+      "r2": 153,
+      "r3": 152.1
+    }
+  },
+  {
+    "key": "eof | d3d11va | B_startOnTfdtAxis.startGiven",
+    "n": 3,
+    "median": 5936.99,
+    "min": 5936.99,
+    "max": 5936.99,
+    "perRepMedian": {
+      "r1": 5936.99,
+      "r2": 5936.99,
+      "r3": 5936.99
+    }
+  },
+  {
+    "key": "eof | d3d11va | B_startOnTfdtAxis.timePos",
+    "n": 3,
+    "median": 6114.53,
+    "min": 6114.53,
+    "max": 6114.53,
+    "perRepMedian": {
+      "r1": 6114.53,
+      "r2": 6114.53,
+      "r3": 6114.53
+    }
+  },
+  {
+    "key": "eof | d3d11va | C_continueTrimmed.avsyncMs",
+    "n": 3,
+    "median": 0,
+    "min": 0,
+    "max": 0,
+    "perRepMedian": {
+      "r1": 0,
+      "r2": 0,
+      "r3": 0
+    }
+  },
+  {
+    "key": "eof | d3d11va | C_continueTrimmed.expectedTimePosApprox",
+    "n": 3,
+    "median": 5938.49,
+    "min": 5938.49,
+    "max": 5938.49,
+    "perRepMedian": {
+      "r1": 5938.49,
+      "r2": 5938.49,
+      "r3": 5938.49
+    }
+  },
+  {
+    "key": "eof | d3d11va | C_continueTrimmed.startGiven",
+    "n": 3,
+    "median": 89.98,
+    "min": 89.98,
+    "max": 89.98,
+    "perRepMedian": {
+      "r1": 89.98,
+      "r2": 89.98,
+      "r3": 89.98
+    }
+  },
+  {
+    "key": "eof | d3d11va | C_continueTrimmed.timePos",
+    "n": 3,
+    "median": 5935.56,
+    "min": 5935.55,
+    "max": 5935.56,
+    "perRepMedian": {
+      "r1": 5935.55,
+      "r2": 5935.56,
+      "r3": 5935.56
+    }
+  },
+  {
+    "key": "eof | d3d11va | C_trimmedHead.duration3",
+    "n": 3,
+    "median": 5848.2,
+    "min": 5848.2,
+    "max": 5848.2,
+    "perRepMedian": {
+      "r1": 5848.2,
+      "r2": 5848.2,
+      "r3": 5848.2
+    }
+  },
+  {
+    "key": "eof | d3d11va | C_trimmedHead.expectedOrigin",
+    "n": 3,
+    "median": 5847.01,
+    "min": 5847.01,
+    "max": 5847.01,
+    "perRepMedian": {
+      "r1": 5847.01,
+      "r2": 5847.01,
+      "r3": 5847.01
+    }
+  },
+  {
+    "key": "eof | d3d11va | C_trimmedHead.origin3",
+    "n": 3,
+    "median": 5847.01,
+    "min": 5847.01,
+    "max": 5847.01,
+    "perRepMedian": {
+      "r1": 5847.01,
+      "r2": 5847.01,
+      "r3": 5847.01
+    }
+  },
+  {
+    "key": "eof | d3d11va | D_midPlayReload.avsyncMsAfter",
+    "n": 3,
+    "median": 0,
+    "min": 0,
+    "max": 0,
+    "perRepMedian": {
+      "r1": 0,
+      "r2": 0,
+      "r3": 0
+    }
+  },
+  {
+    "key": "eof | d3d11va | D_midPlayReload.lastTimePosEventBeforeMsAgo",
+    "n": 3,
+    "median": 5.7,
+    "min": 3.7,
+    "max": 8.8,
+    "perRepMedian": {
+      "r1": 3.7,
+      "r2": 5.7,
+      "r3": 8.8
+    }
+  },
+  {
+    "key": "eof | d3d11va | D_midPlayReload.loadfileToFirstFrameMs",
+    "n": 3,
+    "median": 161.9,
+    "min": 157.9,
+    "max": 162.6,
+    "perRepMedian": {
+      "r1": 162.6,
+      "r2": 161.9,
+      "r3": 157.9
+    }
+  },
+  {
+    "key": "eof | d3d11va | D_midPlayReload.mediaJumpMs",
+    "n": 3,
+    "median": -1551,
+    "min": -1554.8,
+    "max": -1527,
+    "perRepMedian": {
+      "r1": -1527,
+      "r2": -1551,
+      "r3": -1554.8
+    }
+  },
+  {
+    "key": "eof | d3d11va | D_midPlayReload.timePosBefore",
+    "n": 3,
+    "median": 5896.43,
+    "min": 5896.4,
+    "max": 5896.43,
+    "perRepMedian": {
+      "r1": 5896.4,
+      "r2": 5896.43,
+      "r3": 5896.43
+    }
+  },
+  {
+    "key": "eof | d3d11va | D_midPlayReload.timePosFirstAfter",
+    "n": 3,
+    "median": 5895.05,
+    "min": 5895.05,
+    "max": 5895.05,
+    "perRepMedian": {
+      "r1": 5895.05,
+      "r2": 5895.05,
+      "r3": 5895.05
+    }
+  },
+  {
+    "key": "eof | d3d11va | duration1",
+    "n": 3,
+    "median": 5818.21,
+    "min": 5818.21,
+    "max": 5818.21,
+    "perRepMedian": {
+      "r1": 5818.21,
+      "r2": 5818.21,
+      "r3": 5818.21
+    }
+  },
+  {
+    "key": "eof | d3d11va | eofState.audio-delay",
+    "n": 3,
+    "median": 0,
+    "min": 0,
+    "max": 0,
+    "perRepMedian": {
+      "r1": 0,
+      "r2": 0,
+      "r3": 0
+    }
+  },
+  {
+    "key": "eof | d3d11va | eofState.avsync",
+    "n": 3,
+    "median": 0,
+    "min": 0,
+    "max": 0,
+    "perRepMedian": {
+      "r1": 0,
+      "r2": 0,
+      "r3": 0
+    }
+  },
+  {
+    "key": "eof | d3d11va | eofState.decoder-frame-drop-count",
+    "n": 3,
+    "median": 0,
+    "min": 0,
+    "max": 0,
+    "perRepMedian": {
+      "r1": 0,
+      "r2": 0,
+      "r3": 0
+    }
+  },
+  {
+    "key": "eof | d3d11va | eofState.demuxer-start-time",
+    "n": 3,
+    "median": 0,
+    "min": 0,
+    "max": 0,
+    "perRepMedian": {
+      "r1": 0,
+      "r2": 0,
+      "r3": 0
+    }
+  },
+  {
+    "key": "eof | d3d11va | eofState.duration",
+    "n": 3,
+    "median": 5936.99,
+    "min": 5936.99,
+    "max": 5936.99,
+    "perRepMedian": {
+      "r1": 5936.99,
+      "r2": 5936.99,
+      "r3": 5936.99
+    }
+  },
+  {
+    "key": "eof | d3d11va | eofState.estimated-vf-fps",
+    "n": 3,
+    "median": 60.56,
+    "min": 60.56,
+    "max": 60.56,
+    "perRepMedian": {
+      "r1": 60.56,
+      "r2": 60.56,
+      "r3": 60.56
+    }
+  },
+  {
+    "key": "eof | d3d11va | eofState.frame-drop-count",
+    "n": 3,
+    "median": 0,
+    "min": 0,
+    "max": 0,
+    "perRepMedian": {
+      "r1": 0,
+      "r2": 0,
+      "r3": 0
+    }
+  },
+  {
+    "key": "eof | d3d11va | eofState.playback-time",
+    "n": 3,
+    "median": 5936.99,
+    "min": 5936.99,
+    "max": 5936.99,
+    "perRepMedian": {
+      "r1": 5936.99,
+      "r2": 5936.99,
+      "r3": 5936.99
+    }
+  },
+  {
+    "key": "eof | d3d11va | eofState.speed",
+    "n": 3,
+    "median": 1,
+    "min": 1,
+    "max": 1,
+    "perRepMedian": {
+      "r1": 1,
+      "r2": 1,
+      "r3": 1
+    }
+  },
+  {
+    "key": "eof | d3d11va | eofState.time-pos",
+    "n": 3,
+    "median": 5936.99,
+    "min": 5936.99,
+    "max": 5936.99,
+    "perRepMedian": {
+      "r1": 5936.99,
+      "r2": 5936.99,
+      "r3": 5936.99
+    }
+  },
+  {
+    "key": "eof | d3d11va | eofState.vo-delayed-frame-count",
+    "n": 3,
+    "median": 0,
+    "min": 0,
+    "max": 0,
+    "perRepMedian": {
+      "r1": 0,
+      "r2": 0,
+      "r3": 0
+    }
+  },
+  {
+    "key": "eof | d3d11va | machineLoadAfter.systemCpuBusyPercent",
+    "n": 3,
+    "median": 5,
+    "min": 3.4,
+    "max": 5.5,
+    "perRepMedian": {
+      "r1": 3.4,
+      "r2": 5.5,
+      "r3": 5
+    }
+  },
+  {
+    "key": "eof | d3d11va | machineLoadBefore.systemCpuBusyPercent",
+    "n": 3,
+    "median": 4.5,
+    "min": 3.9,
+    "max": 5.3,
+    "perRepMedian": {
+      "r1": 3.9,
+      "r2": 4.5,
+      "r3": 5.3
+    }
+  },
+  {
+    "key": "eof | d3d11va | origin1",
+    "n": 3,
+    "median": 5817.01,
+    "min": 5817.01,
+    "max": 5817.01,
+    "perRepMedian": {
+      "r1": 5817.01,
+      "r2": 5817.01,
+      "r3": 5817.01
+    }
+  },
+  {
+    "key": "eof | d3d11va | timePosAtEof",
+    "n": 3,
+    "median": 5936.99,
+    "min": 5936.99,
+    "max": 5936.99,
+    "perRepMedian": {
+      "r1": 5936.99,
+      "r2": 5936.99,
+      "r3": 5936.99
+    }
+  },
+  {
+    "key": "eof | d3d11va | uiSecondsAtEof",
+    "n": 3,
+    "median": 119.98,
+    "min": 119.98,
+    "max": 119.98,
+    "perRepMedian": {
+      "r1": 119.98,
+      "r2": 119.98,
+      "r3": 119.98
+    }
+  }
+]
