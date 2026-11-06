@@ -271,8 +271,9 @@ with the window EDL and periodic reload (431 MB after 16 media-minutes of whole-
 | S4 | `trickplay-cost` | Given init + the first fragment (moof + IDR) of each chunk (256 KiB first read, plus an exact second read when the IDR is larger), when decoded keyframe-only on the GPU in one long-lived ffmpeg, then ≤ 15 ms and ≤ 0.6 MB per chunk (mean) | Low | **PARTIAL.** A 2 h session takes 5.3–5.6 s on the GPU; the adaptive read averages 0.27 MB per chunk (0.88 MB max). A fixed 512 KiB prefix truncates 14.9 % of IDRs and a fixed 1 MiB prefix reads 1.0 MB, so no fixed prefix is used. Sprite sheets are 3.9 MB/h at 160 px |
 | S6 | `fastencoder-link` | Given a console harness linking FastEncoder Core, when `Pipeline.EncodeAsync` runs GPU Turbo on a range file with `AudioDelay=0.3`, then it builds with no FastEncoder change and comes out in sync | Low | **VALIDATED.** The delay is applied exactly (waveform correlation, ±0 ms at 1 ms resolution). `AudioSync` gives `Low` confidence on real gameplay, so the app needs a "not applied" path. A lossless 30 s range takes 390 ms warm |
 
-Setup: `tools/bootstrap.ps1` fetches pinned mpv/libmpv, JDK 21, Android cmdline-tools/platform-tools/SDK/build-tools and Gradle
-into `.tools/`. Phone: Developer options → Wireless debugging → `adb pair`, with adb keys under `.tools/`.
+Setup: `tools/bootstrap.ps1` (not written yet) will fetch pinned mpv/libmpv, JDK 21, Android cmdline-tools/SDK/build-tools and
+Gradle into `.tools/`. Android platform-tools (adb) are already in `.tools/platform-tools/`. Phone: Developer options → USB
+debugging (works over cable) or Wireless debugging → `adb pair`; the RSA key must be accepted once (`adb devices` shows `device`).
 
 ### Phase 1: Core library (TDD, no UI)
 Files: `src/SteamPoweredPlayer.csproj`; `src/Core/Steam/{SteamConfig,FolderNames,GameIds,SteamPaths,Vdf,RecordingPb,Timeline}.cs`;
