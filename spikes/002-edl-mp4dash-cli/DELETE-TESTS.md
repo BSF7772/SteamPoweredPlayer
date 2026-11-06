@@ -1,8 +1,8 @@
 <!-- SPDX-License-Identifier: GPL-3.0-or-later -->
 # S2 live delete experiments (maintainer runs these)
 
-**Status: PENDING MAINTAINER RUN.** Nothing here has been run against a live delete. The harness was only verified in dry-run mode
-(it prints `WOULD DELETE <path>` and deletes nothing). The worker that wrote it is not allowed to delete files, and S2Tool itself contains no
+**Status: RUN, results in README** (section "Live delete results (maintainer run)"). The maintainer ran both experiments live (tag `live2`; an earlier `live` attempt was refused by the path check and deleted nothing).
+The harness was first verified in dry-run mode (it prints `WOULD DELETE <path>` and deletes nothing). The worker that wrote it is not allowed to delete files, and S2Tool itself contains no
 delete or move API: the only thing that removes a file is the script **you** pass with `--delete-cmd`.
 
 Questions these runs answer (see README, "Experiments that need the maintainer's approval"):
