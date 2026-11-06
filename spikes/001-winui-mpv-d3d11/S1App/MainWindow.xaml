@@ -1,0 +1,16 @@
+<!-- SPDX-License-Identifier: GPL-3.0-or-later -->
+<Window x:Class="S1App.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+    <Grid Background="Black">
+        <!-- libmpv renders into this panel's swap chain (D3D11 render API) -->
+        <SwapChainPanel x:Name="Panel" x:FieldModifier="public" />
+        <!-- plain XAML drawn over the video: proves composition of UI over the swap chain -->
+        <StackPanel x:Name="Overlay" x:FieldModifier="public" Orientation="Horizontal" VerticalAlignment="Bottom" HorizontalAlignment="Left"
+                    Margin="16" Padding="10" Spacing="12" Background="#99000000" CornerRadius="8">
+            <Button x:Name="FsButton" x:FieldModifier="public" Content="Fullscreen" />
+            <Button x:Name="PauseButton" Content="Pause" />
+            <TextBlock x:Name="StatsText" x:FieldModifier="public" Foreground="White" VerticalAlignment="Center" FontFamily="Consolas" Text="starting..." />
+        </StackPanel>
+    </Grid>
+</Window>
