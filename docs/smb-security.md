@@ -2,6 +2,10 @@
 
 How to share a Steam recording folder from Windows so the Android companion (or another PC) can read it securely.
 
+## Client requirement
+The app's SMB client must negotiate SMB 3.x encryption when the server or share requests it (and signing when required). A client
+that cannot is reported clearly (dialect, cipher and signing are shown on the connection screen), never silently downgraded.
+
 ## Signing is not encryption
 Recent Windows 11 builds **require SMB signing** by default. Signing proves packets weren't altered and blocks relay attacks, but
 file contents still travel readable. The login itself never sends the password in clear text (NTLMv2/Kerberos challenge-response).
