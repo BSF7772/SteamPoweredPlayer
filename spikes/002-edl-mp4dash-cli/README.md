@@ -104,7 +104,7 @@ Paused exact seeks (16 targets) compared with an independent ffmpeg decode of th
 * **mpv opens chunk files with `FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE`.** Method: Restart Manager lists which files mpv holds; for each, a probe opens the file
   (OPEN_EXISTING, all share flags, never writes or deletes) asking for DELETE / write-data / read-data access: a sharing violation would mean the holder lacks that share bit.
   Result on 100 files over 4 phases: 0 denials for all three. The probe's sensitivity was proven with a control (`probe-selftest`: holders opened with Read, ReadWrite, Read|Delete, ReadWrite|Delete are classified correctly, 4/4).
-* Whether a delete of such a file *succeeds* and what Steam sees is **not tested** (needs approval, see `needs_owner`).
+* Whether a delete of such a file *succeeds*: tested later by the maintainer, it does (immediate, not delete-pending); see "Live delete results (maintainer run)".
 * mpv **never closes played chunks** within one timeline: held chunk files grow with playback (3 after open → 200 after 40 s at 4×, i.e. both tracks of every chunk played; process handle count +1.7 per chunk).
   With share-delete this should not block a delete, but a deleted-while-open file stays "delete pending" (name and disk space) until mpv closes it. A reload closes them.
 * Memory grows with played media: working set 206 MB at open → 236 / 279 / 321 / 356 / 397 / 431 MB after 160 / 320 / 480 / 640 / 800 / 960 s of media (d3d11va; cpu decode +160 MB higher). **≈ 0.23 MB per media-second**.
@@ -142,7 +142,7 @@ Paused exact seeks (16 targets) compared with an independent ffmpeg decode of th
 4. S1 (WinUI render API) should re-measure CPU and RAM with the app's own render path; this spike used mpv's own window.
 5. Hardware decode is required for the seek budget (`hwdec=no` misses it by 1.5–3×: a seek decodes up to 3 s of 1440p60 HEVC). The plan's "CPU option everywhere" holds for playback (1×–4× keep up) but not for instant seeks.
 
-## Experiments that need the maintainer's approval (not run: they delete files)
+## Experiments that needed the maintainer's approval (they delete files; since run, see "Live delete results")
 Both run **only on copies** under `.tools/fixtures-local/s2/` (never in `BackgroundRecordPath`), with mpv playing from the copy, using the lead EDL:
 1. **Delete a chunk mpv has open.** Copy the 100-chunk fixture to `del-test`; play it (hardware decode, `--input-ipc-server`); after 20 s pick one chunk that Restart Manager lists as held by mpv
    (S2Tool `probe <copy> --pid <mpv pid>`); delete it with `File.Delete` (and once more with `Remove-Item`). Record: delete succeeds or sharing violation; whether the name still
@@ -168,13 +168,54 @@ external `--delete-cmd` script; dry run without it). S2Tool has no file-delete o
 
 Consequence: head trimming needs no timeline bookkeeping. Rebuild the EDL from the chunks on disk, keep the axis, and a seek is the same `loadfile start=` as before.
 
-**(b) Live delete experiments: pending maintainer run** (see DELETE-TESTS.md). Dry runs of the harness only (nothing deleted, so these say nothing about Windows delete behaviour):
+**(b) Live delete experiments: run by the maintainer, results in "Live delete results (maintainer run)" below.** The dry runs of the harness (nothing deleted, so they said nothing about Windows delete behaviour):
 * Experiment 1 on a 15-chunk copy: Restart Manager names mpv as the holder of the playhead chunk; playback continuous (max jump ±0.018 s); no handles after the reload.
 * Experiment 2 on a 40-chunk copy: 20 ticks of 3 s, 40 "WOULD DELETE" lines; 223 samples over 58 s, max jump +0.029 s / −0.027 s, no stall; mpv log errors 0 at every tick; rebuilt EDL (20 chunks) reload in 87 ms, advanced 3.999 s in 4.012 s of wall time; no process holds any of the 40 files.
 * Harness bug found and fixed on the way: the sampler task and the main loop wrote to the mpv IPC pipe concurrently (hang, then `TaskCanceledException`). `Mpv.CmdRaw` now serializes writes, has a 30 s reply timeout with a descriptive error, and records read-loop diagnostics.
 
+## Live delete results (maintainer run)
+The maintainer ran both experiments on copies under `.tools/s2d/` with `deltest` (hardware decode, lead EDL, mpv 0.42 CLI), see [DELETE-TESTS.md](DELETE-TESTS.md). The machine was in normal desktop use (light load), so
+stall and latency numbers are **indicative, not budget results**. A first attempt was refused by the maintainer's own path check and removed nothing; it is ignored here. The raw files (`deltest-exp{1,2}-live2.*`) stay in the maintainer's
+`.tools/s2d/live/`; the figures below are digested from them. The removal scripts only called the removal API and printed the outcome.
+
+Method: experiment 1 plays a 15-chunk copy for 20 s, picks a chunk that Restart Manager lists as held by mpv, removes it with the .NET file-delete call (one-shot PowerShell script), watches 10 s, reloads (`loadfile start=`) with the stale EDL and with a rebuilt EDL, then quits mpv.
+Experiment 2 plays a 40-chunk copy at 1×, and every 3 s for 20 ticks removes the oldest remaining chunk (both streams, 40 removals) with the **PowerShell file-removal cmdlet**, then rebuilds the EDL without them and reloads.
+
+| | Exp 1: .NET file-delete call, 1 chunk held by mpv | Exp 2: PowerShell removal cmdlet, 40 chunks (20 ticks) |
+|---|---|---|
+| Remover result | exit 0, 272 ms, no stderr | 40 of 40 exit 0, 264 .. 347 ms each, no stderr, none timed out |
+| Held by mpv before the removal | yes (Restart Manager: one holder, mpv; chunk size 12.7 MB, the playhead chunk) | yes for all 40 (boolean only; holder PIDs not recorded in this run) |
+| File state right after | **gone**: not listed, new open fails with Win32 2 (not found). **Not** delete-pending (that would show as listed-but-not-openable, Win32 5) | 40 of 40 gone, new open Win32 2 |
+| Holders right after | none listed (the name is gone) | – |
+| Free space | +32 KB 1.5 s after the removal; +12.74 MB after mpv closed (file was 12.72 MB) | −0.5 KB during playback; +172.4 MB after mpv closed (removed 172.8 MB; both noisy, machine in use) |
+| `time-pos` after the removals | 36 samples in the 11.8 s after the removal: max jump +0.756 s / −0.567 s, **longest stall 793 ms** (see below) | 225 samples over about 60 s: max jump +0.081 / −0.081 s, **longest stall 0 ms**, axis drift 0.006 s |
+| mpv log | no error or warning naming any chunk; the chunk had been opened 3 s before the removal; audio-underrun warnings both before and after it | 0 errors, 0 warnings; no underruns, no desync lines |
+| Reload, stale EDL (still lists the removed chunk) | ok, `playback-restart` in 63 ms, advanced 4.07 s | – |
+| Reload, rebuilt EDL | ok, 60 ms, advanced 3.60 s (offset 0.536 s is the harness's 0.5 s read delay) | ok, 88 ms, advanced 4.016 s; rebuilt run = 20 chunks |
+| Handles to removed files after the reload | – | **0 of 40 held by any process** |
+| End | mpv exited cleanly, file still gone | 40 files gone; mpv exited, EOF on the rebuilt EDL |
+
+**The 793 ms stall in experiment 1 is not the removal.** `time-pos` froze for 793 ms about 9.7 s *after* the removal, roughly 9 s of media later, in a chunk two after the removed one (the removed chunk was fully played and
+behind the playhead). The mpv log for that span shows an audio-device underrun, three "Discontinuous source PTS" lines (the last a 0.53 s jump) and `[timeline] switch to segment 10`, i.e. mpv opening and probing the next
+not-yet-opened chunk. Audio underruns had also been logged in the seconds before the removal. The mpv log clock and the sampler clock are not aligned exactly, so this is a correlation by time span, not a proof.
+Most plausible reading: a chunk-open plus audio-underrun hiccup under desktop load. Experiment 2 (40 removals, every chunk held by mpv, keeping pace with 1× playback, so at or just behind the playhead) had no stall at all, which also argues against the removal as the cause.
+Next run: repeat experiment 1 a few times on an idle machine, once without any removal, and compare the hiccup rate. (From the CSV: the first sample after the freeze advanced 1.019 s over a 264 ms step; the JSON's 0.756 s is its windowed figure.)
+
+### Conclusions for the app design
+1. **Steam can remove chunks that we have open, provided every reader opens with `FILE_SHARE_DELETE`.** mpv does, and both removal methods succeeded on 41 of 41 held chunks. Our own readers (scanner, index, trickplay, export) must use the same share flags, as AGENTS.md already says; otherwise Steam's trim would hit a sharing violation, or ours would fail.
+2. **The removal is immediate, not delete-pending, as far as the name is concerned:** the name disappears at once (new opens fail with "not found", never "access denied"), so a rescan or a rebuilt EDL never sees a half-removed file. The disk space is **not** returned while mpv holds the handle (it came back after mpv closed; exp 2 saw no refund during playback). Likely cause, not verified here: Windows 10+ "POSIX semantics" removal on NTFS unlinks the name immediately and frees the blocks on last close. Consequences: handle lifetime decides how long a trimmed chunk's space stays used, and "file absent" does not mean "handle released". A reload drops the handles (0 of 40 after the reload in exp 2), so the periodic reload from section 7 also bounds this.
+3. **Playback survives the removal of open chunks**: no mpv error, no stall attributable to a removal, `time-pos` axis stable (exp 2 drift 6 ms), and the already-open chunk stays readable. A chunk that mpv has *not* opened yet disappears for real (its EDL entry is skipped, section 6) and costs a forward jump; those are the ones to avoid.
+4. **The recovery path works as designed:** watcher event on the session folder → rebuild the EDL from the chunks on disk → `loadfile start=<time-pos>` with the rebuilt EDL. Exp 2: 88 ms to `playback-restart`, 4.016 s of media in 4.012 s of wall time, 0 handles left. Even the stale EDL (naming the removed chunk) reloaded fine in exp 1 (63 ms), because mpv skips missing entries, but the rebuilt EDL is the one to use since it also releases the handles.
+5. **Avoid playing inside the head region Steam is about to trim.** Keep the playhead a margin of a few chunks away from the oldest chunk on disk of a live cache session, clamp the timeline start to the oldest chunk on disk, and reload at the new start when the playhead gets within the margin. These runs only removed chunks at or behind the playhead; a trim reaching *ahead* of the playhead is covered only by the earlier missing-entry test (section 6, 1 s resolution), not by a live run.
+6. **The playhead chunk vanishing is harmless while it is open** (mpv keeps reading it and the chunk plays to its end). The next chunk being gone gives a chunk-length forward jump: the UI should treat a `time-pos` jump that follows a watcher "chunk removed" event as a trim (clamp the scrubber start to the new first chunk), not as a seek, and reload at the new start if the playhead ends up before the new first chunk.
+7. **No polling and no holder queries in the app:** the Restart Manager call that named mpv is a diagnostic only; the file watcher event is the trigger.
+
+Caveats: the removals came from user-mode scripts, not from Steam itself; Steam's cleanup may use another API (the share-mode result does not depend on it, the removal semantics might). Local NTFS only: not tested on a network share (SMB share-delete semantics differ), not with H.264, not with libmpv. One machine, light desktop load.
+
+**S2 verdict:** unchanged, **PARTIAL**. The open delete question is answered favourably, but the reasons for PARTIAL (cold first open about 300 ms, RAM above 250 MB after many media-minutes, 9 of 90 windowed seeks above 150 ms, CPU-decode seeks, `mp4_dash` pinned to mpv 0.42) are not touched by these runs.
+
 ## Open issues
-* s2d: live delete behaviour (delete-pending, new-open errors, playback continuing across a deleted open chunk, handles after reload) is untested until the maintainer runs DELETE-TESTS.md.
+* s2d: delete behaviour is now measured (see "Live delete results"); still open: a live removal *ahead of* the playhead, a repeat of experiment 1 on an idle machine (the 793 ms hiccup), removal on a network share, and Steam's own delete API.
 * s2d: mpv logs a `[vo/gpu-next] Loading failed.` line at each reload; no error is counted and playback is fine, cause not investigated.
 * Budget "CPU < 3 %": measured 5.2 % of one core, 0.32 % of all logical cores for mpv's own window; unclear which the plan means (S1).
 * Seek budget with reload: 9 of 90 windowed reloads (35 of 90 whole-session reloads) exceeded 150 ms with hardware decode (max 192 ms windowed); CPU decode is out of budget (83 of 90).
