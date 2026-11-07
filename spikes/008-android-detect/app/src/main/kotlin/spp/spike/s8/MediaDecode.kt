@@ -37,6 +37,7 @@ object MediaDecode {
         val enc = if (fmt.containsKey(MediaFormat.KEY_ENCODER_DELAY)) fmt.getInteger(MediaFormat.KEY_ENCODER_DELAY) else null
         ex.seekTo(startUs, MediaExtractor.SEEK_TO_PREVIOUS_SYNC)
         val codec = MediaCodec.createDecoderByType(fmt.getString(MediaFormat.KEY_MIME)!!)
+        val codecName = codec.name   // read before stop/release: getName throws on a released codec
         codec.configure(fmt, null, null, 0)
         codec.start()
         var sr = fmt.getInteger(MediaFormat.KEY_SAMPLE_RATE)
@@ -88,7 +89,7 @@ object MediaDecode {
         codec.stop(); codec.release(); ex.release()
         val total = min(written, ((lenUs / 1e6) * sr).toInt())
         val mono = pcm.copyOf(max(0, total))
-        return AudioInfo(resample(mono, sr, AudioSync.SR), firstPts, sr, chans, codec.name, enc, gaps)
+        return AudioInfo(resample(mono, sr, AudioSync.SR), firstPts, sr, chans, codecName, enc, gaps)
     }
 
     /** Windowed-sinc (Blackman) resampler, cutoff 0.45 of the lower rate. */
@@ -142,6 +143,7 @@ object MediaDecode {
         val fmt = ex.getTrackFormat(t)
         ex.seekTo(startUs, MediaExtractor.SEEK_TO_PREVIOUS_SYNC)
         val codec = MediaCodec.createDecoderByType(fmt.getString(MediaFormat.KEY_MIME)!!)
+        val name = codec.name
         fmt.setInteger(MediaFormat.KEY_COLOR_FORMAT, MediaCodecInfo.CodecCapabilities.COLOR_FormatYUV420Flexible)
         codec.configure(fmt, null, null, 0)
         codec.start()
@@ -204,7 +206,6 @@ object MediaDecode {
             }
         }
         val total = (System.nanoTime() - t0) / 1_000_000
-        val name = codec.name
         codec.stop(); codec.release(); ex.release()
         return VideoInfo(acc.result(), acc.count, firstPts, name, w, h, total - scaleNs / 1_000_000, scaleNs / 1_000_000)
     }
