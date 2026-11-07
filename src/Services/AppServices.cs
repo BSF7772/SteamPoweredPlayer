@@ -6,8 +6,11 @@ using SteamPoweredPlayer.Core.Steam;
 
 namespace SteamPoweredPlayer.Services;
 
-/// <summary>Command line: <c>--sample</c> (synthetic library), <c>--first-run</c> (pretend nothing is confirmed), <c>--theme light|dark</c>, <c>--page library|settings|player</c>.</summary>
-public sealed record AppOptions(bool Sample, bool FirstRun, ElementTheme Theme, string Page)
+/// <summary>
+/// Command line: <c>--sample</c> (synthetic library), <c>--first-run</c> (pretend nothing is confirmed), <c>--theme light|dark</c>,
+/// <c>--page library|settings|player</c>, <c>--data &lt;dir&gt;</c> (use and confirm that data folder for this run only; settings.json is neither read nor written).
+/// </summary>
+public sealed record AppOptions(bool Sample, bool FirstRun, ElementTheme Theme, string Page, string? DataDir = null)
 {
     public static AppOptions Parse(string[] args)
     {
@@ -17,12 +20,12 @@ public sealed record AppOptions(bool Sample, bool FirstRun, ElementTheme Theme, 
             return i >= 0 && i + 1 < args.Length ? args[i + 1] : null;
         }
         var theme = Value("--theme")?.ToLowerInvariant() switch { "dark" => ElementTheme.Dark, "light" => ElementTheme.Light, _ => ElementTheme.Default };
-        return new(args.Contains("--sample"), args.Contains("--first-run"), theme, Value("--page")?.ToLowerInvariant() ?? "library");
+        return new(args.Contains("--sample"), args.Contains("--first-run"), theme, Value("--page")?.ToLowerInvariant() ?? "library", Value("--data"));
     }
 }
 
 /// <summary>What Steam's own config says (read-only). Everything is optional: Steam may not be installed on this machine.</summary>
-public sealed record SteamInfo(bool SteamFound, string? RecordingsPath, TimeSpan? MaxKeep);
+public sealed record SteamInfo(bool SteamFound, string? RecordingsPath, TimeSpan? MaxKeep, SteamPaths? Paths = null, uint? AccountId = null);
 
 /// <summary>The Player page receives this as its navigation parameter. <see cref="RecordingKey"/> is <c>RecordingEntry.RelativeFolder</c>.</summary>
 public sealed record PlayerRequest(string RecordingKey, double? StartSeconds = null);
@@ -37,10 +40,13 @@ public static class AppServices
     public static DataFolder? DataFolder { get; private set; }
     public static MainWindow? Window { get; set; }
 
+    /// <summary>Raised when a library source was created and before it starts, so the shell can subscribe to its first events.</summary>
+    public static event Action<ILibrarySource>? LibraryCreated;
+
     public static void Init(AppOptions options)
     {
         Options = options;
-        Settings = options.Sample ? new AppSettings() : AppSettings.Load();
+        Settings = options.Sample ? new AppSettings() : options.DataDir is { } dir ? new AppSettings { DataFolder = dir } : AppSettings.Load();
     }
 
     /// <summary>Reads Steam's config (never writes). In sample mode returns made-up values.</summary>
@@ -52,19 +58,21 @@ public static class AppServices
         {
             string? recordings = null;
             TimeSpan? keep = null;
+            uint? account = null;
             var paths = SteamPaths.FromRegistry();
             if (paths is not null)
             {
                 var user = await paths.ReadActiveUserAsync(ct).ConfigureAwait(false);
                 if (user is not null)
                 {
+                    account = user.AccountId;
                     var cfg = await SteamConfig.LoadAsync(paths.LocalConfig(user.AccountId), ct).ConfigureAwait(false);
                     recordings = cfg.BackgroundRecordPath;
                     keep = cfg.BackgroundMaxKeep;
                 }
             }
             recordings ??= Settings.RecordingsFolder;
-            return Steam = new SteamInfo(paths is not null, recordings, keep);
+            return Steam = new SteamInfo(paths is not null, recordings, keep, paths, account);
         }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException or InvalidDataException)
         {
@@ -78,9 +86,20 @@ public static class AppServices
     /// <summary>Set when the first-run card was confirmed in this process (<c>--first-run</c> keeps asking otherwise).</summary>
     public static bool FirstRunDone { get; set; }
 
-    /// <summary>Creates the library source for the current settings and starts it.</summary>
+    /// <summary>The real library source (null in sample mode), for the members only it has.</summary>
+    public static LibraryServiceSource? Service => Library as LibraryServiceSource;
+
+    /// <summary>Background trickplay generation (null in sample mode). The player calls <c>Pause()</c> / <c>Resume()</c> around opening a recording.</summary>
+    public static TrickplayQueue? Trickplay { get; private set; }
+
+    /// <summary>The game selected in the Library page; its recordings get their trickplay first.</summary>
+    public static string? PreferredGameId { get; set; }
+
+    /// <summary>Creates the library source for the current settings and starts it (the saved index is shown at once, the scan runs in the background).</summary>
     public static async Task StartLibraryAsync()
     {
+        Trickplay?.Dispose();
+        Trickplay = null;
         if (Library is IDisposable d) d.Dispose();
         Library = null;
         DataFolder = null;
@@ -89,16 +108,31 @@ public static class AppServices
         {
             Library = new SampleLibrarySource();
         }
-        else if (Settings.DataFolder is { } folder && Steam.RecordingsPath is { } brp)
+        else
         {
-            var check = Core.Library.DataFolder.Validate(folder, brp);
-            if (check.IsValid)
-            {
+            // Unconfirmed (first run) = in memory: nothing is written until the card's Confirm calls ConfirmDataFolder.
+            if (!NeedsFirstRun && Settings.DataFolder is { } folder && Steam.RecordingsPath is { } brp && Core.Library.DataFolder.Validate(folder, brp).IsValid)
                 DataFolder = Core.Library.DataFolder.Open(folder, brp);
-                Library = new IndexFileLibrarySource(DataFolder);
-            }
+            var ui = Microsoft.UI.Dispatching.DispatcherQueue.GetForCurrentThread();
+            var source = new LibraryServiceSource(ui, Steam.RecordingsPath, Steam.Paths, Steam.AccountId, DataFolder);
+            Library = source;
+            Trickplay = new TrickplayQueue(source, () => Settings.Decoding, () => PreferredGameId);
         }
-        if (Library is not null) await Library.StartAsync().ConfigureAwait(true);
+        LibraryCreated?.Invoke(Library);
+        await Library.StartAsync().ConfigureAwait(true);
+    }
+
+    /// <summary>The first-run card or Settings picked a valid data folder: save the choice and let the running library start writing there.</summary>
+    public static void ConfirmDataFolder(string path)
+    {
+        if (Steam.RecordingsPath is not { } brp) return;
+        var folder = Core.Library.DataFolder.Open(path, brp);
+        Settings.DataFolder = folder.Root;
+        Settings.Save();
+        FirstRunDone = true;
+        DataFolder = folder;
+        Service?.AttachDataFolder(folder);
+        Trickplay?.Kick();
     }
 
     public static void Toast(string title, string? message = null, InfoBarSeverity severity = InfoBarSeverity.Informational, int seconds = 6) =>

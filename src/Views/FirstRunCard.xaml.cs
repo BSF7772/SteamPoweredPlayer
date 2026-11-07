@@ -47,7 +47,7 @@ public sealed partial class FirstRunCard : UserControl
         Problem.Title = check.IsValid ? "" : "Can't use this folder";
     }
 
-    private static string Explain(DataFolderProblem p) => p switch
+    internal static string Explain(DataFolderProblem p) => p switch
     {
         DataFolderProblem.InvalidPath => "That is not a valid, full folder path.",
         DataFolderProblem.InsideRecordingPath => "That folder is inside Steam's recording folder. SteamPoweredPlayer never writes there, because Steam trims it on its own.",
@@ -56,7 +56,7 @@ public sealed partial class FirstRunCard : UserControl
         _ => "",
     };
 
-    private async Task<string?> PickFolderAsync()
+    internal static async Task<string?> PickFolderAsync()
     {
         var picker = new FolderPicker();
         // Unpackaged apps must tell the picker which window owns it.
@@ -91,20 +91,21 @@ public sealed partial class FirstRunCard : UserControl
         AppServices.Settings.RecordingsFolder = path;
         AppServices.Settings.Save();
         await AppServices.LoadSteamAsync();
+        await AppServices.StartLibraryAsync();     // the running source was created without a recordings folder
         Refresh();
+        Confirmed?.Invoke(this, EventArgs.Empty);
     }
 
-    private async void Confirm_Click(object sender, RoutedEventArgs e)
+    private void Confirm_Click(object sender, RoutedEventArgs e)
     {
         var brp = AppServices.Steam.RecordingsPath;
         if (_candidate is null || brp is null) return;
         var check = DataFolder.Validate(_candidate, brp);
         if (!check.IsValid) { Show(check); return; }
 
-        AppServices.Settings.DataFolder = check.Path;
-        AppServices.Settings.Save();
-        AppServices.FirstRunDone = true;
-        if (AppServices.Window is { } w) await w.RestartLibraryAsync();
+        // The library is already running in memory: attaching the folder makes it start saving there, no restart.
+        AppServices.ConfirmDataFolder(check.Path!);
+        AppServices.Window?.RefreshChips();
         AppServices.Toast("Library folder set", "The first scan will fill it.", InfoBarSeverity.Success, 4);
         Confirmed?.Invoke(this, EventArgs.Empty);
     }

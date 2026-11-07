@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
+using System.ComponentModel;
 using System.Globalization;
 using Microsoft.UI.Xaml.Media;
 using Microsoft.UI.Xaml.Media.Imaging;
@@ -69,6 +70,10 @@ public sealed class GameTile
     public int Sessions { get; init; }
     public long SizeBytes { get; init; }
     public DateTimeOffset LastUtc { get; init; }
+    public string CoverPath { get; init; } = "";
+
+    /// <summary>Changes whenever anything the rail shows changed; the page replaces a tile only then (so selection and scroll survive a refresh).</summary>
+    public string Sig => string.Create(CultureInfo.InvariantCulture, $"{Name}|{Clips}|{Sessions}|{SizeBytes}|{LastUtc.Ticks}|{CoverPath}");
 
     public string Initial => Name.Length > 0 ? Name[..1].ToUpperInvariant() : "?";
     public string Caption => Sessions > 0 ? $"{Fmt.Plural(Clips, "clip")} · {Fmt.Plural(Sessions, "session")}" : Fmt.Plural(Clips, "clip");
@@ -77,11 +82,29 @@ public sealed class GameTile
     public bool NoCover => Cover is null;
 }
 
-/// <summary>One card of the clips grid.</summary>
-public sealed class ClipTile
+/// <summary>One card of the clips grid. <see cref="Thumb"/> arrives later (first tile of the clip's trickplay sheet), hence the change notification.</summary>
+public sealed class ClipTile : INotifyPropertyChanged
 {
+    private ImageSource? _thumb;
+
     public required RecordingEntry Entry { get; init; }
-    public ImageSource? Thumb { get; init; }
+
+    public ImageSource? Thumb
+    {
+        get => _thumb;
+        set
+        {
+            if (ReferenceEquals(_thumb, value)) return;
+            _thumb = value;
+            PropertyChanged?.Invoke(this, new(nameof(Thumb)));
+            PropertyChanged?.Invoke(this, new(nameof(NoThumb)));
+        }
+    }
+
+    public event PropertyChangedEventHandler? PropertyChanged;
+
+    /// <summary>The trickplay tile is being (or was) loaded; avoids queueing it again on every refresh.</summary>
+    public bool ThumbRequested { get; set; }
 
     public string Key => Entry.RelativeFolder;
     public string Title => Entry.Title ?? "Clip";
@@ -94,5 +117,5 @@ public sealed class ClipTile
     public bool HasMarkers => Entry.MarkerCount > 0;
     public string Markers => "🏆 " + Entry.MarkerCount.ToString(CultureInfo.InvariantCulture);
     public string Meta => $"{When}  ·  {KindText}";
-    public bool NoThumb => Thumb is null;
+    public bool NoThumb => _thumb is null;
 }

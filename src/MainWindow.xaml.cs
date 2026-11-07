@@ -41,6 +41,13 @@ public sealed partial class MainWindow : Window
 
         ContentFrame.Navigated += (_, e) => SyncNav(e.SourcePageType);
         Root.Loaded += Root_Loaded;
+        AppServices.LibraryCreated += WireSource;
+        Closed += (_, _) =>
+        {
+            // Flushes the index and scan cache (when a data folder is confirmed) and stops the watcher.
+            AppServices.Trickplay?.Dispose();
+            if (AppServices.Library is IDisposable d) d.Dispose();
+        };
     }
 
     // =====================================================================================
@@ -71,9 +78,9 @@ public sealed partial class MainWindow : Window
         RefreshChips("Starting…");
         try
         {
+            _ = GpuInfo.LoadAsync().ContinueWith(_ => DispatcherQueue.TryEnqueue(() => RefreshChips()), TaskScheduler.Default);
             await AppServices.LoadSteamAsync();
             await AppServices.StartLibraryAsync();
-            WireSource();
         }
         catch (Exception ex)
         {
@@ -93,29 +100,30 @@ public sealed partial class MainWindow : Window
         }
     }
 
-    private void WireSource()
+    private bool _scanBusy;
+
+    /// <summary>Wired before the source starts, so the first progress events (the index load, "indexing 3/204") are not missed. Events arrive on the UI thread.</summary>
+    private void WireSource(ILibrarySource src)
     {
-        if (AppServices.Library is not { } src) return;
-        src.IndexChanged += (_, _) => DispatcherQueue.TryEnqueue(() => RefreshChips());
-        src.ScanProgress += (_, p) => DispatcherQueue.TryEnqueue(() =>
+        src.IndexChanged += (_, _) => RefreshChips(_scanBusy ? _scanText : null);
+        src.ScanProgress += (_, p) =>
         {
-            if (p.Active) { SetBusy(true); RefreshChips(p.Message); }
-            else { SetBusy(false); RefreshChips(); }
-        });
+            // One BusyLine reference for the whole scan, however many progress events there are.
+            if (p.Active)
+            {
+                if (!_scanBusy) { _scanBusy = true; SetBusy(true); }
+                _scanText = p.Message;
+                RefreshChips(p.Message);
+            }
+            else
+            {
+                if (_scanBusy) { _scanBusy = false; SetBusy(false); }
+                RefreshChips();
+            }
+        };
     }
 
-    /// <summary>Re-reads the source after the first-run card or Settings changed the data folder.</summary>
-    public async Task RestartLibraryAsync()
-    {
-        SetBusy(true);
-        try
-        {
-            await AppServices.StartLibraryAsync();
-            WireSource();
-        }
-        finally { SetBusy(false); }
-        RefreshChips();
-    }
+    private string? _scanText;
 
     // =====================================================================================
     //  navigation
@@ -162,8 +170,8 @@ public sealed partial class MainWindow : Window
         }
         else AddChip("No library yet", Windows.UI.Color.FromArgb(255, 156, 163, 175));
 
-        // The real adapter name comes with the decoder work; until then the chip shows the chosen mode.
-        AddChip(AppServices.Settings.Decoding == DecodeMode.Cpu ? "CPU decoding" : "GPU decoding (auto)", Windows.UI.Color.FromArgb(255, 156, 163, 175));
+        // The adapter DXGI hands to D3D11 by default; "CPU decoding" when the setting says so.
+        AddChip(AppServices.Settings.Decoding == Core.DecodeMode.Cpu ? "CPU decoding" : GpuInfo.Name ?? "GPU decoding", Windows.UI.Color.FromArgb(255, 156, 163, 175));
     }
 
     private void AddChip(string text, Windows.UI.Color dotColor)

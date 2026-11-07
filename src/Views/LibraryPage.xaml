@@ -192,9 +192,9 @@
                                             <StackPanel Spacing="6">
                                                 <Border CornerRadius="8" Height="122" Background="{ThemeResource ControlFillColorSecondaryBrush}">
                                                     <Grid>
-                                                        <Border Style="{StaticResource ArtPlaceholder}" Visibility="{x:Bind NoThumb}" />
-                                                        <FontIcon Glyph="&#xE768;" FontSize="30" Foreground="#CCFFFFFF" Visibility="{x:Bind NoThumb}" />
-                                                        <Image Source="{x:Bind Thumb}" Stretch="UniformToFill" />
+                                                        <Border Style="{StaticResource ArtPlaceholder}" Visibility="{x:Bind NoThumb, Mode=OneWay}" />
+                                                        <FontIcon Glyph="&#xE768;" FontSize="30" Foreground="#CCFFFFFF" Visibility="{x:Bind NoThumb, Mode=OneWay}" />
+                                                        <Image Source="{x:Bind Thumb, Mode=OneWay}" Stretch="UniformToFill" />
                                                         <Border Style="{StaticResource Pill}" HorizontalAlignment="Right" VerticalAlignment="Bottom" Margin="8">
                                                             <TextBlock Text="{x:Bind Length}" Style="{StaticResource Timecode}" Foreground="White" />
                                                         </Border>

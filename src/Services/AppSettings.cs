@@ -1,10 +1,19 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using SteamPoweredPlayer.Core;
 
 namespace SteamPoweredPlayer.Services;
 
-public enum DecodeMode { GpuAuto, Cpu }
+/// <summary>Reads the decoding choice from settings.json: <c>"GpuAuto"</c> (earlier builds) and <c>"Gpu"</c> both mean <see cref="DecodeMode.Gpu"/>.</summary>
+public sealed class DecodeModeJsonConverter : JsonConverter<DecodeMode>
+{
+    public override DecodeMode Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options) =>
+        string.Equals(reader.GetString(), "Cpu", StringComparison.OrdinalIgnoreCase) ? DecodeMode.Cpu : DecodeMode.Gpu;
+
+    public override void Write(Utf8JsonWriter writer, DecodeMode value, JsonSerializerOptions options) =>
+        writer.WriteStringValue(value == DecodeMode.Cpu ? "Cpu" : "GpuAuto");
+}
 
 /// <summary>
 /// The app's own small settings file (per Windows user, not in Steam's folder and not in the shared data folder):
@@ -18,8 +27,9 @@ public sealed class AppSettings
     /// <summary>Only used when Steam's own <c>BackgroundRecordPath</c> cannot be read.</summary>
     public string? RecordingsFolder { get; set; }
 
-    [JsonConverter(typeof(JsonStringEnumConverter))]
-    public DecodeMode Decoding { get; set; } = DecodeMode.GpuAuto;
+    /// <summary>GPU (D3D11VA, falls back to the CPU by itself) or CPU. Core's <see cref="DecodeMode"/> is the one shared type.</summary>
+    [JsonConverter(typeof(DecodeModeJsonConverter))]
+    public DecodeMode Decoding { get; set; } = DecodeMode.Gpu;
 
     public static string FilePath => Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "SteamPoweredPlayer", "settings.json");
@@ -37,7 +47,7 @@ public sealed class AppSettings
 
     public void Save()
     {
-        if (AppServices.Options.Sample) return;   // design mode never touches the real settings file
+        if (AppServices.Options.Sample || AppServices.Options.DataDir is not null) return;   // design and test modes never touch the real settings file
         try
         {
             Directory.CreateDirectory(Path.GetDirectoryName(FilePath)!);

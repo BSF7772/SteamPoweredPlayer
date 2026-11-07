@@ -22,7 +22,9 @@ public sealed class IndexFileLibrarySource : ILibrarySource, IDisposable
 
     public LibraryIndex? Current { get; private set; }
     public string? Problem { get; private set; }
-    public event EventHandler? IndexChanged;
+    public event EventHandler<IndexChangedArgs>? IndexChanged;
+    public event EventHandler<MediaChangedArgs>? MediaChanged { add { } remove { } }
+    public event EventHandler<string>? DerivedChanged { add { } remove { } }
     public event EventHandler<ScanProgressInfo>? ScanProgress;
 
     public async Task StartAsync(CancellationToken ct = default)
@@ -69,7 +71,7 @@ public sealed class IndexFileLibrarySource : ILibrarySource, IDisposable
                     Problem = "No library yet. The first scan creates it.";
                     break;
             }
-            IndexChanged?.Invoke(this, EventArgs.Empty);
+            IndexChanged?.Invoke(this, new IndexChangedArgs([]));
         }
         finally
         {
@@ -87,6 +89,9 @@ public sealed class IndexFileLibrarySource : ILibrarySource, IDisposable
     }
 
     public IReadOnlyList<MarkerSpot> MarkersFor(RecordingEntry recording) => [];
+    public SessionMedia? GetMedia(string relativeFolder) => null;
+    public IReadOnlyList<Core.Steam.Marker> FullMarkersFor(string relativeFolder) => [];
+    public TrickplayIndex? TrickplayFor(string relativeFolder) => TrickplayIndex.TryLoad(_folder, relativeFolder);
 
     public void Dispose()
     {
