@@ -1,0 +1,9 @@
+# mpv EDL v0
+!no_chapters
+!mp4_dash,init=%69%C:/rec/Gäme, 100% über 🎮/bg_730_20250101_120000/init-stream0.m4s
+%76%C:/rec/Gäme, 100% über 🎮/bg_730_20250101_120000/chunk-stream0-00001.m4s,length=3
+%76%C:/rec/Gäme, 100% über 🎮/bg_730_20250101_120000/chunk-stream0-00002.m4s,length=3
+!new_stream
+!mp4_dash,init=%69%C:/rec/Gäme, 100% über 🎮/bg_730_20250101_120000/init-stream1.m4s
+%76%C:/rec/Gäme, 100% über 🎮/bg_730_20250101_120000/chunk-stream1-00001.m4s,length=3
+%76%C:/rec/Gäme, 100% über 🎮/bg_730_20250101_120000/chunk-stream1-00002.m4s,length=3

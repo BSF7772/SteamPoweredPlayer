@@ -1,0 +1,7 @@
+# mpv EDL v0
+!no_chapters
+!mp4_dash,init=%46%C:/rec/bg_730_20250101_120000/init-stream0.m4s
+%53%C:/rec/bg_730_20250101_120000/chunk-stream0-00007.m4s,length=21
+!new_stream
+!mp4_dash,init=%46%C:/rec/bg_730_20250101_120000/init-stream1.m4s
+%53%C:/rec/bg_730_20250101_120000/chunk-stream1-00007.m4s,length=21
