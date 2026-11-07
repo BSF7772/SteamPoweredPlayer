@@ -1,0 +1,49 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+//
+// Reverse-engineered, PARTIAL schema of Steam's game-recording protobuf files. Documentation only: this file is NOT compiled.
+// The product code (src/Core/Steam/RecordingPb*.cs) reads the wire format by hand and keeps every unknown field byte-for-byte.
+// Types marked "?" were seen as varint in some files and as length-delimited (decimal text) in others; the reader accepts both.
+// Validate any change against many real files (opt-in test: SPP_REAL_LIBRARY), never one. Related upstream names:
+// SteamTracking/Protobufs webui/service_gamerecordingclip.proto (CMsgVideoGameRecordingDef).
+syntax = "proto2";
+
+// Field 5 of a timeline entry: the bg session this timeline belongs to (present only while the cache folder still exists).
+message SessionRef {
+  optional string bg_folder   = 1;   // bg_<gameid>_<yyyyMMdd>_<HHmmss>
+  optional uint64 start_ms    = 2;   // NOT the offset (for a trimmed session it is field 10 + the trimmed time)
+  optional uint64 duration_ms = 3;   // retained duration
+  // 4..9 unknown (kept)
+  optional uint64 offset_ms   = 10;  // EXACT offset of the bg session start inside the timeline: media tfdt = entry.time - offset_ms
+}
+
+message TimelineRef {                // gamerecording.pb field 1 (repeated); clip.pb field 1 (single)
+  optional string      timeline_id   = 1;   // ? string or varint
+  optional uint64      gameid        = 2;   // appid, or (shortcutAppId << 32) | 0x02000000
+  optional uint64      date_recorded = 3;   // unix seconds
+  optional uint64      duration_ms   = 4;
+  optional SessionRef  session       = 5;
+}
+
+message Tag           { optional string name = 1; optional string group = 2; optional string icon = 3; optional uint64 priority = 4; }
+message TagOccurrence { optional string timeline_id = 2; optional uint64 offset_ms = 3; }
+message TagIndexEntry {              // gamerecording.pb field 4 (repeated), per app
+  optional uint64 appid = 1;
+  optional Tag tag = 2;
+  repeated TagOccurrence occurrences = 3;
+}
+
+message GameRecordingPb {
+  repeated TimelineRef timelines = 1;
+  // 2: unknown (kept)
+  repeated TagIndexEntry tag_index = 4;
+}
+
+message ClipPb {
+  optional TimelineRef timeline = 1;
+  optional uint64 created = 3;       // unix seconds
+  optional uint64 gameid  = 4;
+  optional string title   = 7;
+  optional uint32 width   = 12;
+  optional uint32 height  = 13;
+  // everything else: unknown (kept)
+}
