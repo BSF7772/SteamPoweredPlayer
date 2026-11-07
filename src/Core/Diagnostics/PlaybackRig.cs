@@ -14,16 +14,32 @@ public sealed class PlaybackRig : IAsyncDisposable
     /// <summary>mpv's hardware decode that works without a video output (frames are copied back to system memory).</summary>
     public const string HeadlessGpuHwdec = "d3d11va-copy";
 
-    private PlaybackRig(MpvPlayer player, PlaybackSession session, DecodeMode mode)
+    private readonly HiddenWindow? _window;
+
+    private PlaybackRig(MpvPlayer player, PlaybackSession session, DecodeMode mode, HiddenWindow? window)
     {
         Player = player;
         Session = session;
         Mode = mode;
+        _window = window;
     }
 
     public MpvPlayer Player { get; }
     public PlaybackSession Session { get; }
     public DecodeMode Mode { get; }
+
+    /// <summary>Wid of the hidden render window (null for <c>vo=null</c>); the mpv CLI reference renders into the same kind of window.</summary>
+    public string? Wid => _window?.Wid;
+
+    /// <summary>The mpv options that make hardware decode zero-copy into mpv's D3D11 renderer on a hidden window.</summary>
+    public static IReadOnlyDictionary<string, string> RenderOptions(string wid) => new Dictionary<string, string>
+    {
+        ["vo"] = "gpu",
+        ["gpu-api"] = "d3d11",
+        ["gpu-context"] = "d3d11",
+        ["wid"] = wid,
+        ["hwdec"] = "d3d11va",
+    };
 
     /// <summary>mpv's <c>hwdec-current</c>: <c>no</c> when software decode is in use (also before anything is loaded).</summary>
     public string HwdecCurrent => Player.GetString("hwdec-current") is { Length: > 0 } s ? s : "no";
@@ -31,7 +47,11 @@ public sealed class PlaybackRig : IAsyncDisposable
     /// <summary>True when mpv really decodes on the GPU right now.</summary>
     public bool UsesHardware => !string.Equals(HwdecCurrent, "no", StringComparison.OrdinalIgnoreCase);
 
-    public static PlaybackRig Create(DecodeMode mode, int? windowCount = null, MpvPlayerOptions? options = null)
+    /// <param name="renderHidden">
+    /// With <see cref="DecodeMode.Gpu"/>: render into a hidden window (<c>vo=gpu</c>, <c>hwdec=d3d11va</c>, zero-copy) instead of
+    /// <c>vo=null</c> with <c>d3d11va-copy</c>. Falls back to the copy-back path when no window can be created. Ignored for CPU decode.
+    /// </param>
+    public static PlaybackRig Create(DecodeMode mode, int? windowCount = null, MpvPlayerOptions? options = null, bool renderHidden = false)
     {
         DiagnosticsEnvironment.PrepareMpv();
         var o = (options ?? new MpvPlayerOptions()) with
@@ -41,11 +61,26 @@ public sealed class PlaybackRig : IAsyncDisposable
             InitialVolume = 0,
             LogLevel = "no",
         };
-        if (mode == DecodeMode.Gpu)
-            o = o with { Extra = new Dictionary<string, string>(o.Extra ?? new Dictionary<string, string>()) { ["hwdec"] = HeadlessGpuHwdec } };
-        var player = new MpvPlayer(o);
-        var session = windowCount is { } c ? new PlaybackSession(player, null, c) : new PlaybackSession(player);
-        return new(player, session, mode);
+        var window = renderHidden ? HiddenWindow.TryCreate() : null;
+        var extra = new Dictionary<string, string>(o.Extra ?? new Dictionary<string, string>());
+        if (window is not null)
+        {
+            foreach (var (k, v) in RenderOptions(window.Wid)) extra[k] = v;
+            if (mode == DecodeMode.Cpu) extra["hwdec"] = "no";
+        }
+        else if (mode == DecodeMode.Gpu) extra["hwdec"] = HeadlessGpuHwdec;
+        o = o with { Extra = extra };
+        try
+        {
+            var player = new MpvPlayer(o);
+            var session = windowCount is { } c ? new PlaybackSession(player, null, c) : new PlaybackSession(player);
+            return new(player, session, mode, window);
+        }
+        catch
+        {
+            window?.Dispose();
+            throw;
+        }
     }
 
     /// <summary>Loads the tiny pre-warm EDL (plan §3 item 0) so the next open does not pay mpv's first-load cost.</summary>
@@ -62,6 +97,7 @@ public sealed class PlaybackRig : IAsyncDisposable
     {
         await Session.DisposeAsync().ConfigureAwait(false);
         await Player.DisposeAsync().ConfigureAwait(false);
+        _window?.Dispose();
     }
 }
 

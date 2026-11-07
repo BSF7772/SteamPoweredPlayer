@@ -13,7 +13,7 @@ namespace SteamPoweredPlayer.Core.Diagnostics;
 public sealed record BenchOptions(string? Library = null, bool Quick = false);
 
 /// <summary>
-/// <c>SteamPoweredPlayer.exe --bench &lt;out.txt&gt; [--library &lt;BackgroundRecordPath&gt;] [--quick]</c>: the desktop-local budgets of plan §5
+/// <c>SteamPoweredPlayer.exe --bench &lt;out.txt&gt; [--library &lt;BackgroundRecordPath&gt;] [--quick]</c>: the desktop-local budgets of plan Â§5
 /// measured on a real library. <b>Read-only on the library</b>: the data folder (index, scan cache, art, trickplay sheets) is a temp
 /// directory that is deleted at the end; the session files are only read (mpv, the scanner, <see cref="Export.RangeSource"/>).
 /// Playback is headless libmpv (<c>vo=null</c>): the render path (D3D11 swap chain, XAML) is not included; the Player page measures
@@ -78,6 +78,7 @@ public static class Bench
         private double _start, _end;
         private DecodeMode _primary = DecodeMode.Cpu;
         private bool _gpu;
+        private bool _renderHidden = true;
         private int _cores;
 
         private TimeSpan SoakDuration => options.Quick ? TimeSpan.FromSeconds(60) : TimeSpan.FromMinutes(5);
@@ -109,8 +110,8 @@ public static class Bench
             _cores = hw.LogicalCores;
             report.AddHeader("Hardware: " + hw.Describe());
             report.AddHeader("Mode: " + (options.Quick ? "quick (1 min playback soak)" : "full (5 min playback soak)"));
-            report.AddHeader("Method: headless libmpv (vo=null, ao=null), render path not included; hardware decode is hwdec=d3d11va-copy (frames are copied back), "
-                + "plain d3d11va needs the renderer's device. Machine load was not controlled. The library is only read; the data folder is a deleted temp directory.");
+            report.AddHeader("Method: libmpv without a visible window (audio off). The render path of the app (XAML swap chain) is not included; the Player page measures its own open and seek. "
+                + "Machine load was not controlled. The library is only read; the data folder is a deleted temp directory.");
 
             var (root, source, paths, account) = await ResolveLibraryAsync(options.Library, ct).ConfigureAwait(false);
             report.AddHeader("Library source: " + source);
@@ -150,12 +151,13 @@ public static class Bench
                 finally { await svc.DisposeAsync().ConfigureAwait(false); }
 
                 await DetectHardwareDecode(ct).ConfigureAwait(false);
+                // RAM first: the process is still close to idle, so the "before playback" figure is the floor and not the residue of the other sections.
+                await Step("bench.ram", "RAM", () => RamSection(ct)).ConfigureAwait(false);
                 await Step("bench.open", "Open", () => OpenSection(ct)).ConfigureAwait(false);
                 await Step("bench.seek", "Seek", () => SeekSection(ct)).ConfigureAwait(false);
                 await Step("bench.export", "Export", () => ExportSection(ct)).ConfigureAwait(false);
                 await Step("bench.trickplay", "Trickplay", () => TrickplaySection(ct)).ConfigureAwait(false);
                 await Step("bench.cpu", "CPU", () => CpuSection(ct)).ConfigureAwait(false);
-                await Step("bench.ram", "RAM", () => RamSection(ct)).ConfigureAwait(false);
             }
             finally
             {
@@ -237,22 +239,37 @@ public static class Bench
 
         private async Task DetectHardwareDecode(CancellationToken ct)
         {
-            try
+            // 1) hwdec=d3d11va into mpv's own D3D11 renderer on a hidden window (zero-copy, what the app does);
+            // 2) hwdec=d3d11va-copy with vo=null (copy-back: slower, but needs no window); 3) software.
+            string? why = null;
+            foreach (var hidden in new[] { true, false })
             {
-                await using var rig = PlaybackRig.Create(DecodeMode.Gpu);
-                await rig.Session.OpenAsync(_media, Mid(0.5), play: true, ct).ConfigureAwait(false);
-                await Task.Delay(400, ct).ConfigureAwait(false);
-                _gpu = rig.UsesHardware;
-                Add(_gpu
-                    ? CheckResult.Info("bench.hwdec", "Hardware decode in headless mpv", "hwdec-current " + rig.HwdecCurrent)
-                    : CheckResult.Skip("bench.hwdec", "Hardware decode in headless mpv", "not available: mpv decodes in software; budgets are measured with CPU decode"));
+                try
+                {
+                    await using var rig = PlaybackRig.Create(DecodeMode.Gpu, renderHidden: hidden);
+                    if (hidden && rig.Wid is null) { why = "no window could be created"; continue; }
+                    await rig.Session.OpenAsync(_media, Mid(0.5), play: true, ct).ConfigureAwait(false);
+                    await Task.Delay(400, ct).ConfigureAwait(false);
+                    if (!rig.UsesHardware) { why = "mpv decoded in software"; continue; }
+                    _gpu = true;
+                    _renderHidden = hidden;
+                    Add(CheckResult.Info("bench.hwdec", "Hardware decode", $"hwdec-current {rig.HwdecCurrent}, "
+                        + (hidden ? "zero-copy into mpv's D3D11 renderer on a hidden window" : "copy-back with vo=null (the zero-copy path was not available: " + why + ")")));
+                    break;
+                }
+                catch (Exception e) when (e is not OperationCanceledException)
+                {
+                    why = "probe failed: " + S(e.Message);
+                }
             }
-            catch (Exception e) when (e is not OperationCanceledException)
+            if (!_gpu)
             {
-                Add(CheckResult.Skip("bench.hwdec", "Hardware decode in headless mpv", "probe failed: " + S(e.Message)));
+                _renderHidden = false;
+                Add(CheckResult.Skip("bench.hwdec", "Hardware decode", "not available (" + why + "); budgets are measured with CPU decode"));
             }
             _primary = _gpu ? DecodeMode.Gpu : DecodeMode.Cpu;
-            report.AddHeader("Decoder for the budgets: " + (_gpu ? "d3d11va-copy (hardware)" : "software (no hardware decode available)"));
+            report.AddHeader("Decoder for the budgets: " + (_gpu ? (_renderHidden ? "d3d11va (hardware, zero-copy)" : "d3d11va-copy (hardware, copy-back)") : "software (no hardware decode available)"));
+            report.AddHeader("Video output: " + (_renderHidden ? "mpv vo=gpu (D3D11) on a hidden 1280x720 window" : "vo=null (nothing is rendered)"));
         }
 
         private double Mid(double fraction) => PlaybackSession.Snap(_media, _start + (_end - _start) * fraction);
@@ -265,14 +282,14 @@ public static class Bench
             var fresh = new List<double>();
             for (var i = 0; i < OpenRuns; i++)
             {
-                await using (var rig = PlaybackRig.Create(_primary))
+                await using (var rig = PlaybackRig.Create(_primary, renderHidden: _renderHidden))
                 {
                     if (!await rig.PreWarmAsync(_media, ct).ConfigureAwait(false)) throw new TimeoutException("the pre-warm load did not deliver a frame");
                     var sw = Stopwatch.StartNew();
                     await rig.Session.OpenAsync(_media, null, play: true, ct).ConfigureAwait(false);
                     warm.Add(sw.Elapsed.TotalMilliseconds);
                 }
-                await using (var rig = PlaybackRig.Create(_primary))
+                await using (var rig = PlaybackRig.Create(_primary, renderHidden: _renderHidden))
                 {
                     var sw = Stopwatch.StartNew();
                     await rig.Session.OpenAsync(_media, null, play: true, ct).ConfigureAwait(false);
@@ -306,7 +323,7 @@ public static class Bench
 
         private async Task<List<double>> TimeSeeks(DecodeMode mode, CancellationToken ct)
         {
-            await using var rig = PlaybackRig.Create(mode);
+            await using var rig = PlaybackRig.Create(mode, renderHidden: _renderHidden);
             await rig.PreWarmAsync(_media, ct).ConfigureAwait(false);
             await rig.Session.OpenAsync(_media, null, play: false, ct).ConfigureAwait(false);
             var times = new List<double>();
@@ -394,8 +411,8 @@ public static class Bench
             var modes = _gpu ? new[] { DecodeMode.Gpu, DecodeMode.Cpu } : [DecodeMode.Cpu];
             foreach (var mode in modes)
             {
-                var hwdec = mode == DecodeMode.Gpu ? PlaybackRig.HeadlessGpuHwdec : "no";
-                var label = mode == DecodeMode.Gpu ? "d3d11va-copy" : "CPU decode";
+                var hwdec = mode == DecodeMode.Gpu ? (_renderHidden ? "d3d11va" : PlaybackRig.HeadlessGpuHwdec) : "no";
+                var label = mode == DecodeMode.Gpu ? hwdec : "CPU decode";
                 var start = Mid(0.3);
                 var app = await MeasureApp(mode, start, ct).ConfigureAwait(false);
                 var (appOne, appAll) = BudgetRules.CpuPercent(app.Cpu, app.Media, _cores);
@@ -422,7 +439,7 @@ public static class Bench
 
         private async Task<(double Cpu, double Media)> MeasureApp(DecodeMode mode, double start, CancellationToken ct)
         {
-            await using var rig = PlaybackRig.Create(mode);
+            await using var rig = PlaybackRig.Create(mode, renderHidden: _renderHidden);
             await rig.PreWarmAsync(_media, ct).ConfigureAwait(false);
             await rig.Session.OpenAsync(_media, start, play: true, ct).ConfigureAwait(false);
             await Task.Delay(CpuWarm, ct).ConfigureAwait(false);
@@ -443,13 +460,18 @@ public static class Bench
             var edlFile = Path.Combine(_temp, "reference.edl");
             await File.WriteAllTextAsync(edlFile, Edl.Build(_media, window, p => p), ct).ConfigureAwait(false);
             var psi = new ProcessStartInfo(exe) { UseShellExecute = false, CreateNoWindow = true, RedirectStandardError = true, RedirectStandardOutput = true };
-            foreach (var a in new[]
-            {
-                "--no-config", "--vo=null", "--ao=null", "--no-terminal", "--really-quiet", "--hwdec=" + hwdec, "--pause=no", "--keep-open=no",
+            // The same video output as the app run: a hidden window with mpv's D3D11 renderer, or vo=null.
+            using var hiddenWindow = _renderHidden ? HiddenWindow.TryCreate() : null;
+            var output = hiddenWindow is null
+                ? new[] { "--vo=null" }
+                : new[] { "--vo=gpu", "--gpu-api=d3d11", "--gpu-context=d3d11", "--wid=" + hiddenWindow.Wid };
+            foreach (var a in output.Concat(
+            [
+                "--no-config", "--ao=null", "--no-terminal", "--really-quiet", "--hwdec=" + hwdec, "--pause=no", "--keep-open=no",
                 "--hr-seek=yes", "--demuxer-max-bytes=" + MpvPlayerOptions.DefaultDemuxerMaxBytes.ToString(CultureInfo.InvariantCulture),
                 "--demuxer-max-back-bytes=" + MpvPlayerOptions.DefaultDemuxerMaxBackBytes.ToString(CultureInfo.InvariantCulture),
                 "--start=" + start.ToString("0.###", CultureInfo.InvariantCulture), edlFile,
-            }) psi.ArgumentList.Add(a);
+            ])) psi.ArgumentList.Add(a);
             using var p = Process.Start(psi) ?? throw new InvalidOperationException("the mpv CLI did not start");
             _ = p.StandardOutput.ReadToEndAsync(ct);
             _ = p.StandardError.ReadToEndAsync(ct);
@@ -482,7 +504,7 @@ public static class Bench
             double Rss() { proc.Refresh(); return proc.WorkingSet64 / 1048576.0; }
             var baseline = Rss();
 
-            await using var rig = PlaybackRig.Create(_primary);
+            await using var rig = PlaybackRig.Create(_primary, renderHidden: _renderHidden);
             await rig.PreWarmAsync(_media, ct).ConfigureAwait(false);
             await rig.Session.OpenAsync(_media, Mid(0.1), play: true, ct).ConfigureAwait(false);
 
@@ -528,7 +550,7 @@ public static class Bench
             var ram = BudgetRules.Ram("bench.ram", $"RAM after {F(sw.Elapsed.TotalMinutes, "0.0")} min of playback with periodic reload", peak);
             Add(ram with
             {
-                Value = $"{F(peak)} MB peak, {F(final)} MB at the end, {F(baseline)} MB before playback (whole process, working set); played {F(played, "0")} media s, {reloads} forced reloads",
+                Value = $"{F(peak)} MB peak ({F(peak - baseline)} MB over the {F(baseline)} MB before playback), {F(final)} MB at the end (whole process, working set); played {F(played, "0")} media s, {reloads} forced reloads",
                 Note = peak < Budgets.RamMb ? null : "S1: the maintainer accepted RAM/CPU overhead unless it is a leak; the slope below is the leak signal",
             });
             Add(BudgetRules.Leak("bench.ram.slope", $"RAM slope after {F(warmup, "0")} s warm-up (leak signal)", slope));
