@@ -86,12 +86,30 @@ public sealed class EventRow
     public SolidColorBrush Stroke => MarkerIcons.Brush(Marker.Kind);
 }
 
-/// <summary>One row of the "Up next" list: another recording of the same game.</summary>
-public sealed class UpNextRow
+/// <summary>One row of the playlist (F5): a recording of the current game, with its thumbnail once loaded (F7).</summary>
+public sealed class PlaylistRow : System.ComponentModel.INotifyPropertyChanged
 {
+    private ImageSource? _thumb;
+
     public required string Key { get; init; }
     public required string Title { get; init; }
     public required string Meta { get; init; }
     public required string Glyph { get; init; }
     public bool Live { get; init; }
+
+    /// <summary>Keeps what the thumbnail decodes from alive as long as the image can be shown (XAML may read it again).</summary>
+    internal object? ThumbKeepAlive { get; set; }
+
+    public ImageSource? Thumb
+    {
+        get => _thumb;
+        set
+        {
+            if (ReferenceEquals(_thumb, value)) return;
+            _thumb = value;
+            PropertyChanged?.Invoke(this, new System.ComponentModel.PropertyChangedEventArgs(nameof(Thumb)));
+        }
+    }
+
+    public event System.ComponentModel.PropertyChangedEventHandler? PropertyChanged;
 }
