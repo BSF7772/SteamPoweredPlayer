@@ -1,5 +1,6 @@
 <!-- SPDX-License-Identifier: GPL-3.0-or-later -->
-<!-- Trickplay filmstrip + playhead (design after FastEncoder's trim strip, MIT) with the markers lane under it. -->
+<!-- Trickplay filmstrip with a single white pointer line (design after FastEncoder's trim strip, MIT), the markers lane under it, and the
+     zoom bar (scroll when zoomed, - / + buttons). -->
 <UserControl
     x:Class="SteamPoweredPlayer.Views.Player.TimelineControl"
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
@@ -9,24 +10,47 @@
         <Grid.RowDefinitions>
             <RowDefinition Height="54" />
             <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
         </Grid.RowDefinitions>
 
         <Grid x:Name="Strip" Height="54" CornerRadius="6" Background="{ThemeResource ControlFillColorSecondaryBrush}"
+              AutomationProperties.AutomationId="TimelineStrip"
               PointerPressed="Strip_PointerPressed" PointerMoved="Strip_PointerMoved" PointerReleased="Strip_PointerReleased"
-              PointerCaptureLost="Strip_PointerCaptureLost" PointerExited="Strip_PointerExited" SizeChanged="Strip_SizeChanged">
+              PointerCaptureLost="Strip_PointerCaptureLost" PointerExited="Strip_PointerExited" SizeChanged="Strip_SizeChanged"
+              PointerWheelChanged="Strip_PointerWheelChanged" DoubleTapped="Strip_DoubleTapped">
             <Grid x:Name="Film" />
             <Canvas x:Name="Overlay" IsHitTestVisible="False">
-                <Rectangle x:Name="PlayedRect" Height="54" Width="0" Fill="#557C3AED" />
-                <Rectangle x:Name="LoopRect" Height="54" Width="0" Fill="#7706B6D4" Stroke="#06B6D4" StrokeThickness="2" Visibility="Collapsed" />
-                <Rectangle x:Name="LoopA" Width="3" Height="54" Fill="#06B6D4" Visibility="Collapsed" />
-                <Rectangle x:Name="LoopB" Width="3" Height="54" Fill="#06B6D4" Visibility="Collapsed" />
-                <Rectangle x:Name="HoverLine" Width="1" Height="54" Fill="#AAFFFFFF" Visibility="Collapsed" />
-                <Rectangle x:Name="PlayheadHalo" Width="7" Height="62" Canvas.Top="-4" RadiusX="3.5" RadiusY="3.5" Fill="#99000000" />
-                <Rectangle x:Name="Playhead" Width="3" Height="62" Canvas.Top="-4" RadiusX="1.5" RadiusY="1.5" Fill="White" />
+                <Rectangle x:Name="LoopRect" Height="54" Width="0" Fill="#4006B6D4" Visibility="Collapsed" />
+                <Rectangle x:Name="LoopA" Width="2" Height="54" Fill="#06B6D4" Visibility="Collapsed" />
+                <Rectangle x:Name="LoopB" Width="2" Height="54" Fill="#06B6D4" Visibility="Collapsed" />
+                <Rectangle x:Name="HoverLine" Width="1" Height="54" Fill="#88FFFFFF" Visibility="Collapsed" />
+                <Rectangle x:Name="Playhead" Width="2" Height="54" Fill="White" />
             </Canvas>
         </Grid>
 
         <Canvas x:Name="Lane" Grid.Row="1" Height="28" />
+
+        <Grid Grid.Row="2" ColumnSpacing="6">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="Auto" />
+            </Grid.ColumnDefinitions>
+            <ScrollBar x:Name="ViewScroll" Orientation="Horizontal" IndicatorMode="MouseIndicator" Minimum="0" Maximum="0" ViewportSize="1"
+                       VerticalAlignment="Center" Visibility="Collapsed" IsTabStop="False" ValueChanged="ViewScroll_ValueChanged"
+                       AutomationProperties.AutomationId="TimelineScroll" />
+            <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="2" VerticalAlignment="Center">
+                <Button x:Name="ZoomOutButton" Style="{StaticResource IconButton}" Padding="6,2" IsTabStop="False" Click="ZoomOut_Click"
+                        AutomationProperties.AutomationId="TimelineZoomOut" ToolTipService.ToolTip="Zoom out (Ctrl+wheel; double-click the strip shows everything)">
+                    <FontIcon Glyph="&#xE71F;" FontSize="12" />
+                </Button>
+                <TextBlock x:Name="ZoomText" Text="1×" Style="{StaticResource Timecode}" FontSize="12" MinWidth="34" TextAlignment="Center"
+                           VerticalAlignment="Center" AutomationProperties.AutomationId="TimelineZoomLevel" />
+                <Button x:Name="ZoomInButton" Style="{StaticResource IconButton}" Padding="6,2" IsTabStop="False" Click="ZoomIn_Click"
+                        AutomationProperties.AutomationId="TimelineZoomIn" ToolTipService.ToolTip="Zoom in (Ctrl+wheel)">
+                    <FontIcon Glyph="&#xE8A3;" FontSize="12" />
+                </Button>
+            </StackPanel>
+        </Grid>
 
         <Popup x:Name="Preview" IsLightDismissEnabled="False" HorizontalAlignment="Left" VerticalAlignment="Top">
             <Border CornerRadius="8" Background="#EE101018" BorderBrush="#33FFFFFF" BorderThickness="1" Padding="4" IsHitTestVisible="False">
