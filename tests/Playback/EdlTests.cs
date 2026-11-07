@@ -7,6 +7,7 @@ using SteamPoweredPlayer.Core.Playback;
 
 namespace SteamPoweredPlayer.Tests.Playback;
 
+[Collection(BudgetCollection.Name)]
 public sealed class EdlTests
 {
     private const string Folder = "C:/rec/bg_730_20250101_120000";

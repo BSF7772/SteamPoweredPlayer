@@ -56,6 +56,7 @@ internal sealed class FixedTimeProvider(DateTimeOffset now) : TimeProvider
     public override DateTimeOffset GetUtcNow() => now;
 }
 
+[Collection(BudgetCollection.Name)]
 public sealed class ScannerTests
 {
     private static readonly DateTime Now = new(2025, 1, 1, 15, 0, 0, DateTimeKind.Utc);

@@ -7,6 +7,7 @@ using SteamPoweredPlayer.Core.Steam;
 
 namespace SteamPoweredPlayer.Tests.Library;
 
+[Collection(BudgetCollection.Name)]
 public sealed class LibraryIndexTests
 {
     private static readonly Guid TestId = Guid.Parse("11111111-2222-3333-4444-555555555555");
