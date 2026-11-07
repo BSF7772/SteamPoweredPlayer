@@ -10,6 +10,8 @@
     <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.11.1" />
     <PackageReference Include="xunit" Version="2.9.2" />
     <PackageReference Include="xunit.runner.visualstudio" Version="2.8.2" />
+    <!-- Builds synthetic .pb fixtures only; Core reads the wire format itself (byte-exact round trips). -->
+    <PackageReference Include="Google.Protobuf" Version="3.36.2" />
   </ItemGroup>
 
   <ItemGroup>

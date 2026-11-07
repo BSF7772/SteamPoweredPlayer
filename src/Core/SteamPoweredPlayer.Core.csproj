@@ -20,10 +20,6 @@
     <Compile Include="$(FastEncoderDir)src\Core\Pipeline.cs" Link="FastEncoder\Pipeline.cs" />
     <Compile Include="$(FastEncoderDir)src\Core\AudioSync.cs" Link="FastEncoder\AudioSync.cs" />
   </ItemGroup>
-  <ItemGroup>
-    <PackageReference Include="Google.Protobuf" Version="3.36.2" />
-    <PackageReference Include="ValveKeyValue" Version="0.80.0.542" />
-  </ItemGroup>
 
   <Target Name="CheckFastEncoder" BeforeTargets="BeforeBuild" Condition="!Exists('$(FastEncoderDir)src\Core\Ff.cs')">
     <Error Text="FastEncoder not found at $(FastEncoderDir). Run: git submodule update --init" />

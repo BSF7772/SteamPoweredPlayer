@@ -7,3 +7,5 @@
 *.jpg binary
 *.ico binary
 *.pb binary
+# golden files are shared byte-for-byte with the Kotlin tests
+tests/fixtures/golden/** text eol=lf
