@@ -28,6 +28,10 @@ public static class Edl
     /// </list>
     /// The parts therefore end at (n_last)·S and mpv's <c>time-pos</c> equals the session's media time. Every part length is the integer
     /// number of chunks times S, so it is exact in a double and written with the invariant culture.
+    /// <para>With an axis shift A (<see cref="SessionMedia.AxisShiftSeconds"/>: a saved clip, whose chunk 1 sits at its real tfdt) every
+    /// start above moves by A; only part 0 changes length (it starts at 0 either way), by + A. A is a whole number of segments, so the
+    /// lengths stay exact. mp4_dash plays the fragments' own timestamps, so without the shift a clip's time-pos is its tfdt (e.g. 588 s)
+    /// on an axis whose parts end at 6 s.</para>
     /// </remarks>
     /// <param name="media">Supplies the folder and the segment length (its runs are not consulted: <paramref name="chunks"/> is the window).</param>
     /// <param name="url">Maps a local path (forward slashes) to what mpv opens: the path itself, a cache path or a loopback URL.</param>
@@ -60,9 +64,11 @@ public static class Edl
         {
             var n = chunks[i];
             var next = i + 1 < chunks.Count ? chunks[i + 1] : n + 1;
-            var units = i == 0 ? next - 1 : next - n;     // first part: from 0 to the end of its stretch; others: n → next
+            // First part: from 0 to the end of its stretch, plus the axis shift (a clip's chunk 1 starts at its real tfdt);
+            // others: n → next. A shift of 0 adds nothing, so cache-session EDLs are unchanged byte for byte.
+            var length = i == 0 ? (next - 1) * seg + media.AxisShiftSeconds : (next - n) * seg;
             AppendEscaped(sb, url(dir + "/" + FolderNames.ChunkFile(stream, n)));
-            sb.Append(",length=").Append((units * seg).ToString(CultureInfo.InvariantCulture)).Append('\n');
+            sb.Append(",length=").Append(length.ToString(CultureInfo.InvariantCulture)).Append('\n');
         }
     }
 

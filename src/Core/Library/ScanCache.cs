@@ -8,6 +8,15 @@ namespace SteamPoweredPlayer.Core.Library;
 public readonly record struct CachedChunk(long Length, long LastWriteTicks, HeadCheck Head);
 
 /// <summary>
+/// The real tfdt (seconds) of video chunk <see cref="Chunk"/>, the first chunk on disk when it was read (<see cref="ScanTfdt"/>), with
+/// that file's length and last write time: trusted while they are unchanged and the chunk is still the first one.
+/// </summary>
+public readonly record struct CachedTfdt(int Chunk, long Length, long LastWriteTicks, double Seconds)
+{
+    public bool Matches(int chunk, long length, long lastWriteTicks) => Chunk == chunk && Length == length && LastWriteTicks == lastWriteTicks;
+}
+
+/// <summary>
 /// The chunk heads already validated in one media folder (only <see cref="HeadCheck.Valid"/> and <see cref="HeadCheck.ZeroFilled"/> are
 /// remembered; anything else is read again). A remembered result is trusted only while the file's name, length and last write time are
 /// unchanged. Immutable.
@@ -18,12 +27,20 @@ public sealed class FolderHeads
 
     private readonly Dictionary<string, CachedChunk> _chunks;
 
-    private FolderHeads(Dictionary<string, CachedChunk> chunks) => _chunks = chunks;
+    private FolderHeads(Dictionary<string, CachedChunk> chunks, CachedTfdt? tfdt = null)
+    {
+        _chunks = chunks;
+        Tfdt = tfdt;
+    }
 
-    /// <summary>Wraps (and takes ownership of) <paramref name="chunks"/>; null or empty gives <see cref="Empty"/>.</summary>
-    internal static FolderHeads From(Dictionary<string, CachedChunk>? chunks) => chunks is null or { Count: 0 } ? Empty : new(chunks);
+    /// <summary>Wraps (and takes ownership of) <paramref name="chunks"/>; null or empty (and no tfdt) gives <see cref="Empty"/>.</summary>
+    internal static FolderHeads From(Dictionary<string, CachedChunk>? chunks, CachedTfdt? tfdt = null) =>
+        chunks is null or { Count: 0 } && tfdt is null ? Empty : new(chunks ?? new(0, StringComparer.Ordinal), tfdt);
 
     public int Count => _chunks.Count;
+
+    /// <summary>The first chunk's real tfdt, when it was read (scan-cache entries written before it existed have none: read once).</summary>
+    public CachedTfdt? Tfdt { get; }
 
     public IReadOnlyDictionary<string, CachedChunk> Chunks => _chunks;
 
@@ -42,7 +59,7 @@ public sealed class FolderHeads
     public bool SameAs(FolderHeads other)
     {
         if (ReferenceEquals(this, other)) return true;
-        if (_chunks.Count != other._chunks.Count) return false;
+        if (_chunks.Count != other._chunks.Count || Tfdt != other.Tfdt) return false;
         foreach (var (k, v) in _chunks)
             if (!other._chunks.TryGetValue(k, out var o) || o != v) return false;
         return true;
@@ -56,7 +73,9 @@ public sealed record ScanCacheParse(ScanCacheStatus Status, ScanCache Cache, str
 /// <summary>
 /// <c>scan-cache.json</c> (desktop only, never read by phones): per recording folder (key = <c>RelativeFolder</c> as in
 /// <c>library.json</c>) the chunk heads already validated, so a warm start does one directory listing per folder and head-reads only
-/// new or changed files (plan §9: a cold scan of 21 000 chunks took 142 s). Format in <c>docs/data-folder.md</c>. Immutable.
+/// new or changed files (plan §9: a cold scan of 21 000 chunks took 142 s). Format in <c>docs/data-folder.md</c>. Since Phase 2.1 a
+/// folder may also carry <c>"tfdt": [chunk, length, lastWriteTicks, seconds]</c> (<see cref="CachedTfdt"/>); readers that predate it
+/// ignore the key, and entries without it are read once. Immutable.
 /// </summary>
 public sealed class ScanCache
 {
@@ -73,7 +92,7 @@ public sealed class ScanCache
     public static ScanCache From(IEnumerable<KeyValuePair<string, FolderHeads>> folders)
     {
         var d = new Dictionary<string, FolderHeads>(StringComparer.Ordinal);
-        foreach (var (k, v) in folders) if (v.Count > 0) d[k] = v;
+        foreach (var (k, v) in folders) if (v.Count > 0 || v.Tfdt is not null) d[k] = v;
         return d.Count == 0 ? Empty : new(d);
     }
 
@@ -106,6 +125,15 @@ public sealed class ScanCache
                     w.WriteEndArray();
                 }
                 w.WriteEndArray();
+                if (heads.Tfdt is { } t && double.IsFinite(t.Seconds))
+                {
+                    w.WriteStartArray("tfdt");
+                    w.WriteNumberValue(t.Chunk);
+                    w.WriteNumberValue(t.Length);
+                    w.WriteNumberValue(t.LastWriteTicks);
+                    w.WriteNumberValue(t.Seconds);
+                    w.WriteEndArray();
+                }
                 w.WriteEndObject();
             }
             w.WriteEndObject();
@@ -147,7 +175,14 @@ public sealed class ScanCache
                             if (head is { } h) chunks[FolderNames.ChunkFile(stream, number)] = new(length, ticks, h);
                         }
                     }
-                    if (chunks.Count > 0) folders[f.Name] = FolderHeads.From(chunks);
+                    CachedTfdt? tfdt = null;
+                    if (f.Value.TryGetProperty("tfdt", out var td) && td.ValueKind == JsonValueKind.Array && td.GetArrayLength() == 4)
+                    {
+                        var chunk = td[0].GetInt32();
+                        var seconds = td[3].GetDouble();
+                        if (chunk >= 0 && double.IsFinite(seconds) && seconds >= 0) tfdt = new(chunk, td[1].GetInt64(), td[2].GetInt64(), seconds);
+                    }
+                    if (chunks.Count > 0 || tfdt is not null) folders[f.Name] = FolderHeads.From(chunks, tfdt);
                 }
             }
             return new(ScanCacheStatus.Ok, folders.Count == 0 ? Empty : new(folders), null);

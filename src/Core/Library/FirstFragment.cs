@@ -105,6 +105,77 @@ public static class FirstFragment
         return false;
     }
 
+    /// <summary>Bytes to read from a chunk's start for <see cref="BaseMediaDecodeTime"/> (the first <c>moof</c> is 108 B in real chunks).</summary>
+    public const int TfdtHeadBytes = 4096;
+
+    /// <summary>
+    /// The <c>baseMediaDecodeTime</c> of the first <c>moof/traf/tfdt</c> (timescale units of the track), or null when the head does not
+    /// hold a complete first <c>moof</c> with a <c>tfdt</c>. This is the chunk's real start on the session's tfdt axis.
+    /// </summary>
+    public static ulong? BaseMediaDecodeTime(ReadOnlySpan<byte> head)
+    {
+        long pos = 0;
+        while (ReadBox(head, pos, out var type, out var size, out var header, out _))
+        {
+            if (pos + size > head.Length) return null;
+            if (type == "mdat") return null;
+            if (type == "moof")
+            {
+                var moof = head.Slice((int)(pos + header), (int)(size - header));
+                if (Child(moof, "traf"u8) is not { } t) return null;
+                var traf = moof.Slice(t.Start, t.Length);
+                if (Child(traf, "tfdt"u8) is not { } d) return null;
+                var tfdt = traf.Slice(d.Start, d.Length);
+                if (tfdt.Length < 8) return null;
+                return tfdt[0] == 1
+                    ? (tfdt.Length >= 12 ? BinaryPrimitives.ReadUInt64BigEndian(tfdt[4..]) : null)
+                    : BinaryPrimitives.ReadUInt32BigEndian(tfdt[4..]);
+            }
+            pos += size;
+        }
+        return null;
+    }
+
+    /// <summary>The media timescale (<c>moov/trak/mdia/mdhd</c>) of an init segment (<c>init-stream0.m4s</c>), or null.</summary>
+    public static uint? Timescale(ReadOnlySpan<byte> init)
+    {
+        long pos = 0;
+        while (ReadBox(init, pos, out var type, out var size, out var header, out _))
+        {
+            if (pos + size > init.Length) return null;
+            if (type == "moov")
+            {
+                var moov = init.Slice((int)(pos + header), (int)(size - header));
+                if (Child(moov, "trak"u8) is not { } tk) return null;
+                var trak = moov.Slice(tk.Start, tk.Length);
+                if (Child(trak, "mdia"u8) is not { } md) return null;
+                var mdia = trak.Slice(md.Start, md.Length);
+                if (Child(mdia, "mdhd"u8) is not { } h) return null;
+                var mdhd = mdia.Slice(h.Start, h.Length);
+                var at = mdhd.Length > 0 && mdhd[0] == 1 ? 20 : 12;   // version 1: 64-bit creation/modification times
+                if (mdhd.Length < at + 4) return null;
+                var ts = BinaryPrimitives.ReadUInt32BigEndian(mdhd[at..]);
+                return ts == 0 ? null : ts;
+            }
+            pos += size;
+        }
+        return null;
+    }
+
+    /// <summary>Body (start, length) of the first direct child box of <paramref name="type"/> inside <paramref name="children"/>.</summary>
+    private static (int Start, int Length)? Child(ReadOnlySpan<byte> children, ReadOnlySpan<byte> type)
+    {
+        var p = 0;
+        while (p + 8 <= children.Length)
+        {
+            var sz = BinaryPrimitives.ReadUInt32BigEndian(children[p..]);
+            if (sz < 8 || p + (long)sz > children.Length) return null;
+            if (children[(p + 4)..(p + 8)].SequenceEqual(type)) return (p + 8, (int)sz - 8);
+            p += (int)sz;
+        }
+        return null;
+    }
+
     private static FirstFragmentInfo Bad(FragmentStatus status, string error) => new(status, 0, 0, 0, error);
     private static FirstFragmentInfo More(long required) => new(FragmentStatus.NeedMore, 0, 0, required);
 }

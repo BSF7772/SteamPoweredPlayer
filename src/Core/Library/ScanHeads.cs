@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 using System.Text;
+using SteamPoweredPlayer.Core.Steam;
 
 namespace SteamPoweredPlayer.Core.Library;
 
@@ -46,6 +47,48 @@ public static class ScanHeads
         catch (OperationCanceledException) { throw; }
         catch (IOException) { return HeadCheck.Unreadable; }
         catch (UnauthorizedAccessException) { return HeadCheck.Unreadable; }
+    }
+}
+
+/// <summary>
+/// The real start of a recording on the tfdt axis: the <c>tfdt</c> of the first video fragment of one chunk, divided by the video track's
+/// timescale from <c>init-stream0.m4s</c>. Two small reads (the init segment, at most <see cref="MaxInitBytes"/>, and
+/// <see cref="FirstFragment.TfdtHeadBytes"/> of the chunk), Read | Write | Delete sharing.
+/// </summary>
+public static class ScanTfdt
+{
+    public const int MaxInitBytes = 64 * 1024;
+
+    /// <summary>Pure: seconds from an init segment and a chunk head, or null when either is not understood.</summary>
+    public static double? Seconds(ReadOnlySpan<byte> init, ReadOnlySpan<byte> chunkHead) =>
+        FirstFragment.Timescale(init) is { } ts && FirstFragment.BaseMediaDecodeTime(chunkHead) is { } t ? t / (double)ts : null;
+
+    /// <summary>tfdt (seconds) of video chunk <paramref name="chunk"/> in <paramref name="folder"/>; null when unreadable. Never throws except for cancellation.</summary>
+    public static async ValueTask<double?> ReadSecondsAsync(string folder, int chunk, CancellationToken ct)
+    {
+        var init = await ReadHeadAsync(Path.Combine(folder, FolderNames.InitFile(0)), MaxInitBytes, ct).ConfigureAwait(false);
+        if (init is null) return null;
+        var head = await ReadHeadAsync(Path.Combine(folder, FolderNames.ChunkFile(0, chunk)), FirstFragment.TfdtHeadBytes, ct).ConfigureAwait(false);
+        return head is null ? null : Seconds(init, head);
+    }
+
+    private static async ValueTask<byte[]?> ReadHeadAsync(string path, int max, CancellationToken ct)
+    {
+        try
+        {
+            using var h = File.OpenHandle(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete, FileOptions.Asynchronous);
+            var buf = new byte[(int)Math.Min(max, Math.Max(0, RandomAccess.GetLength(h)))];
+            var read = 0;
+            while (read < buf.Length)
+            {
+                var n = await RandomAccess.ReadAsync(h, buf.AsMemory(read), read, ct).ConfigureAwait(false);
+                if (n == 0) break;
+                read += n;
+            }
+            return read == buf.Length ? buf : buf[..read];
+        }
+        catch (OperationCanceledException) { throw; }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException) { return null; }
     }
 }
 

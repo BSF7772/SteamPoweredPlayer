@@ -50,6 +50,8 @@ public sealed class FakeMpvPlayer : IMpvPlayer
     public void SetVolume(double percent) { }
     public void SetMute(bool muted) { }
     public void SetAudioDelay(double seconds) { }
+    public DemuxerCachePlan? DemuxerCache { get; private set; }
+    public void SetDemuxerCache(DemuxerCachePlan plan) => DemuxerCache = plan;
     public void FrameStep() { FrameSteps++; Paused = true; }
     public void SetAbLoop(double? a, double? b) { }
     public Task ScreenshotToFileAsync(string path, CancellationToken cancellationToken = default) => Task.CompletedTask;

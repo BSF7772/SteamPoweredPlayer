@@ -1,0 +1,13 @@
+# mpv EDL v0
+!no_chapters
+!mp4_dash,init=%77%C:/rec/clip_730_20250101_120000/video/bg_730_20250101_115000/init-stream0.m4s
+%84%C:/rec/clip_730_20250101_120000/video/bg_730_20250101_115000/chunk-stream0-00001.m4s,length=588
+%84%C:/rec/clip_730_20250101_120000/video/bg_730_20250101_115000/chunk-stream0-00002.m4s,length=3
+%84%C:/rec/clip_730_20250101_120000/video/bg_730_20250101_115000/chunk-stream0-00003.m4s,length=3
+%84%C:/rec/clip_730_20250101_120000/video/bg_730_20250101_115000/chunk-stream0-00004.m4s,length=3
+!new_stream
+!mp4_dash,init=%77%C:/rec/clip_730_20250101_120000/video/bg_730_20250101_115000/init-stream1.m4s
+%84%C:/rec/clip_730_20250101_120000/video/bg_730_20250101_115000/chunk-stream1-00001.m4s,length=588
+%84%C:/rec/clip_730_20250101_120000/video/bg_730_20250101_115000/chunk-stream1-00002.m4s,length=3
+%84%C:/rec/clip_730_20250101_120000/video/bg_730_20250101_115000/chunk-stream1-00003.m4s,length=3
+%84%C:/rec/clip_730_20250101_120000/video/bg_730_20250101_115000/chunk-stream1-00004.m4s,length=3

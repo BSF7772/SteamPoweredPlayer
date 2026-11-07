@@ -58,6 +58,16 @@ as a clip). Regex: `^(bg|fg)_(\d+)_(\d{8})_(\d{6})(?:_(\d+))?$`. Empty `video/bg
   time**: chunk N starts at about (N−1) × 3 s (+ up to 8 ms) in live sessions and also in trimmed sessions (a session whose chunk
   1881 sits at 5640.006 s). Clips restart the chunk numbers at 1 but **not** `tfdt` (chunk 1 of one clip starts at 585.0 s).
   Playback time, markers and the trickplay all use this axis (plan §3).
+- **Axis shift (Phase 2.1).** The real start is read from the first chunk on disk: `tfdt` of its first `moof/traf/tfdt` (version 0 or
+  1) divided by the video timescale (`init-stream0.m4s` → `moov/trak/mdia/mdhd`, 1 000 000 in every real file; audio is 48 000).
+  `shift = round((tfdt − (N0 − 1) × 3 s) / 3 s) × 3 s`, and chunk N starts at `(N − 1) × 3 s + shift`. Measured on a real library:
+  13 of 13 clips sampled have `tfdt` ≫ 0 (e.g. 588.044 s for chunk 1), always a whole number of segments plus 0–73 ms of jitter, so
+  their shift is a multiple of 3 s; every cache session gives shift 0 (the largest jitter seen, 0.36 s, was at the trimmed head of
+  one session, chunk 113 at 336.364 s). The scanner keeps the value in `scan-cache.json` (desktop only); `library.json` is unchanged.
+- Without the shift a clip plays at its real `tfdt` (mp4_dash keeps the fragments' timestamps) on an EDL axis that ends at
+  `chunks × 3 s`: the UI shows `25:36 / 0:12`, every seek is clamped wrongly, markers fall "after the end", and **mpv drops the audio**
+  (`audio-pts` stayed unset for the first 2 s and again after a reload in a synthetic clip-like session; with the shift audio follows
+  the first frame).
 - **Layout of a video chunk (one fragment per frame):** each `moof` (108 B) is followed by an `mdat` with one frame, and `tfhd` carries
   the defaults. The first fragment holds `VPS SPS PPS SEI IDR_W_RADL` (the IDR), so **the first fragment alone is enough to decode a
   thumbnail**. IDR sizes seen: 1 KB to 906 KB, median 247–359 KB, p99 570–689 KB (so no fixed 512 KB prefix is safe: a fixed 512 KiB
@@ -95,7 +105,8 @@ segments on demand and `!new_stream` adds the audio track. Escape values as `%<u
 
 What S2 found with real sessions:
 - **Do not give every segment `length=3`.** Seeks then land early, audio can be lost and a gap freezes. Use the **lead EDL**: the first
-  part is `N0 × 3 s` long and the part before each gap is stretched over the gap, so mpv's `time-pos` equals the `tfdt` media time.
+  part is `N0 × 3 s` long (`N0 × 3 s + shift` for a clip, see "Axis shift") and the part before each gap is stretched over the
+  gap, so mpv's `time-pos` equals the `tfdt` media time.
 - **Seek = reload:** every seek or back-step across chunks is `loadfile <edl> start=<t>`, over a window of about 60 chunks around the
   playhead (RAM grows with the media length, so the window is rebuilt and the file is reloaded periodically). The measured reload
   median is 95 ms with hardware decode.

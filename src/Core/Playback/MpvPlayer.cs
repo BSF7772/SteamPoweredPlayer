@@ -19,7 +19,8 @@ public sealed record MpvPlayerOptions
     /// Read-ahead ceiling of mpv's demuxer cache. mpv's default is 150 MiB forward + 50 MiB back; spike S1 saw RSS grow about 19 MB/min
     /// until it reached that 200 MiB. At Steam's ~22 Mbit/s (2.75 MB/s) 64 MiB is ~23 s of read-ahead, more than seven 3 s chunks, which
     /// is plenty for local files and for the download-first cache; and 32 MiB behind the playhead (~11 s) keeps a short rewind cheap.
-    /// Together about 96 MiB instead of 200 MiB, i.e. roughly 100 MB less RSS at steady state.
+    /// Together about 96 MiB instead of 200 MiB, i.e. roughly 100 MB less RSS at steady state. These are the start-up values;
+    /// <see cref="PlaybackSession.OpenAsync"/> resizes the cache per recording from its bitrate (<see cref="DemuxerCache"/>, D-RAM).
     /// </summary>
     public long DemuxerMaxBytes { get; init; } = DefaultDemuxerMaxBytes;
 
@@ -139,6 +140,7 @@ public sealed class MpvPlayer : IMpvPlayer
         Opt("pause", "yes");
         Opt("volume", o.InitialVolume.ToString("R", inv));
         Opt("hwdec", o.Decode == DecodeMode.Gpu ? "d3d11va" : "no");
+        Opt("demuxer-readahead-secs", DemuxerCache.ReadaheadSeconds.ToString("R", inv));
         Opt("demuxer-max-bytes", o.DemuxerMaxBytes.ToString(inv));
         Opt("demuxer-max-back-bytes", o.DemuxerMaxBackBytes.ToString(inv));
         if (o.Output == MpvOutput.Render) Opt("vo", "libmpv");
@@ -359,6 +361,16 @@ public sealed class MpvPlayer : IMpvPlayer
     public void SetVolume(double percent) => SetDouble("volume", Math.Clamp(double.IsNaN(percent) ? 100 : percent, 0, 130));
 
     public void SetMute(bool muted) => SetFlag("mute", muted);
+
+    /// <summary>Demuxer cache in seconds + byte ceilings (D-RAM). mpv reads these when it opens the next file, so call it before a load.</summary>
+    public void SetDemuxerCache(DemuxerCachePlan plan)
+    {
+        ArgumentNullException.ThrowIfNull(plan);
+        var inv = CultureInfo.InvariantCulture;
+        SetString("demuxer-readahead-secs", plan.ReadaheadSeconds.ToString("R", inv));
+        SetString("demuxer-max-bytes", plan.MaxBytes.ToString(inv));
+        SetString("demuxer-max-back-bytes", plan.MaxBackBytes.ToString(inv));
+    }
 
     /// <summary>Audio delay in seconds (positive = audio later), live.</summary>
     public void SetAudioDelay(double seconds) => SetDouble("audio-delay", seconds);
