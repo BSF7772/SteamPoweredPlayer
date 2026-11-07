@@ -109,10 +109,38 @@ public sealed class TrickplayIndexTests
     [Fact]
     public void MapFrames_uses_order_when_counts_match_and_pts_when_a_frame_was_lost()
     {
-        Assert.Equal([5, 6, 7], Trickplay.MapFrames([5, 6, 7], [12.0, 15.0, 18.0], 3.0));
-        // chunk 6 failed to decode: 2 frames for 3 fed chunks; pts 12 -> chunk 5, 18 -> chunk 7
-        Assert.Equal([5, 7], Trickplay.MapFrames([5, 6, 7], [12.0, 18.2], 3.0));
-        Assert.Equal([0, 7], Trickplay.MapFrames([5, 6, 7], [double.NaN, 18.0], 3.0));
+        // ffmpeg (no -copyts) rebases pts to the first fed fragment: measured on a real saved clip whose tfdt starts far from 0,
+        // showinfo printed pts 0, 2.998, 6.001. So pts p belongs to chunk fed[0] + round(p / segment).
+        Assert.Equal([5, 6, 7], Trickplay.MapFrames([5, 6, 7], [0.0, 3.0, 6.0], 3.0));
+        // chunk 6 failed to decode: 2 frames for 3 fed chunks; pts 0 -> chunk 5, 6.2 -> chunk 7
+        Assert.Equal([5, 7], Trickplay.MapFrames([5, 6, 7], [0.0, 6.2], 3.0));
+        Assert.Equal([0, 7], Trickplay.MapFrames([5, 6, 7], [double.NaN, 6.0], 3.0));
+        // a gap in what was fed is a gap in the tfdt too: 5, 9 fed, chunk 5 lost -> pts 12 is chunk 9
+        Assert.Equal([9], Trickplay.MapFrames([5, 9], [12.0], 3.0));
+    }
+
+    [Fact]
+    public void MapFrames_on_a_trimmed_cache_or_a_clip_does_not_assume_chunk_1_is_at_pts_0_of_the_session()
+    {
+        // head trimmed to chunk 500 (tfdt 1497 s), one frame lost: the old absolute mapping gave chunk 1 / 3 (not fed) -> nothing
+        Assert.Equal([500, 502], Trickplay.MapFrames([500, 501, 502], [0.0, 6.0], 3.0));
+    }
+
+    [Fact]
+    public void A_clip_index_maps_media_time_through_the_axis_shift()
+    {
+        // a saved clip: chunks 1-4 on disk, chunk 1 at tfdt 585 s -> AxisShift = 585 - 0 = 585
+        var media = new SessionMedia(@"C:\c", [new SegmentRun(1, 4)], 3.0, Live: false, Temporary: false, AxisShiftSeconds: 585);
+        var idx = new TrickplayIndex(Manifest([1, 2, 3, 4]), @"C:\d\trick\k", media.AxisShiftSeconds);
+        Assert.Equal(media.ChunkAt(585.5), idx.ChunkAt(585.5));
+        Assert.Equal(1, idx.Find(585.5)!.Chunk);
+        Assert.Equal(2, idx.Find(588.0)!.Chunk);
+        Assert.Equal(4, idx.Find(596.9)!.Chunk);
+        Assert.Null(idx.Find(600.0));                                 // past the tail
+        Assert.Equal(1, idx.FindNearest(media.TfdtOriginSeconds)!.Chunk);
+        Assert.Equal(1, idx.FindNearest(0)!.Chunk);                    // before the head clamps to the first chunk
+        // without a shift (a cache session) nothing changes
+        Assert.Equal(2, new TrickplayIndex(Manifest([1, 2, 3, 4]), @"C:\d").Find(3.5)!.Chunk);
     }
 
     [Fact]
