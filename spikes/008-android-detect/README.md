@@ -38,11 +38,15 @@ and "matches C#" cannot both hold for a faithful port. The bias belongs to the d
 self-test accepts `|AudioLate − 0.3| < 0.035`. Proposal: S8 passes on "matches C# within 1 ms + High confidence", and the 300 ±
 35 ms window from FastEncoder's self-test.
 
-### 2. On the phone (MediaCodec decode + analysis, 75 s budget) - NOT RUN YET
-The APK builds (AGP 9.5.1, compileSdk 36, minSdk 29). The device run needs the phone on USB; see "Run on the device".
-Expected differences: the decode substrate differs (framework AAC decoder, our resampler, box-downscale of the luma plane), so
-the device result is compared with C# within a tolerance, not bit for bit. The `raw` mode runs the analysis on the phone over the
-same dumped inputs, which separates "ART gives the same numbers" from "MediaCodec decodes the same samples".
+### 2. On the phone (test phone, Android 13, 75 s fixture, 3 runs) - PASS
+| mode | result | time per 75 s |
+|---|---|---|
+| `raw` (the dumped ffmpeg inputs, analysis on ART) | **+277.413 ms**, High 12/12 (= C#) | analysis 2.1 s |
+| `file` (MediaExtractor + MediaCodec decode, then analysis) | **+276.608 ms**, High 12/12, identical over 3 runs | 8.0 - 10.8 s total (decode 5.8 - 8.5 s, analysis 2.1 - 2.3 s) |
+
+Decoders: `c2.android.aac.decoder` (audio), `OMX.qcom.video.decoder.avc` (video). The Android decode path lands 0.8 ms from
+the C# result (different AAC decoder, resampler and downscale), well inside FastEncoder's ±35 ms. Time budget: 30 s, used ≤ 11 s.
+Bug found on the device and fixed: `MediaCodec.getName()` was read after `release()` (throws `IllegalStateException`).
 
 ## Build
 ```bash
@@ -66,4 +70,4 @@ adb shell am start -S -n spp.spike.s8/.MainActivity --es raw late300_75s --ei re
 adb pull $F/results .
 ```
 
-Verdict: PENDING (port matches C# exactly on the JVM; the phone run and the 300 ± 10 ms vs "matches C#" decision are open)
+Verdict: **PASS** on "matches C# + High + < 30 s". The literal "300 ± 10 ms" fails for C# itself (+277 ms); maintainer decision on the criterion still open.
