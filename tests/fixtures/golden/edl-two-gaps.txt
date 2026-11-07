@@ -1,0 +1,13 @@
+# mpv EDL v0
+!no_chapters
+!mp4_dash,init=%46%C:/rec/bg_730_20250101_120000/init-stream0.m4s
+%53%C:/rec/bg_730_20250101_120000/chunk-stream0-00100.m4s,length=303
+%53%C:/rec/bg_730_20250101_120000/chunk-stream0-00102.m4s,length=24
+%53%C:/rec/bg_730_20250101_120000/chunk-stream0-00110.m4s,length=3
+%53%C:/rec/bg_730_20250101_120000/chunk-stream0-00111.m4s,length=3
+!new_stream
+!mp4_dash,init=%46%C:/rec/bg_730_20250101_120000/init-stream1.m4s
+%53%C:/rec/bg_730_20250101_120000/chunk-stream1-00100.m4s,length=303
+%53%C:/rec/bg_730_20250101_120000/chunk-stream1-00102.m4s,length=24
+%53%C:/rec/bg_730_20250101_120000/chunk-stream1-00110.m4s,length=3
+%53%C:/rec/bg_730_20250101_120000/chunk-stream1-00111.m4s,length=3
