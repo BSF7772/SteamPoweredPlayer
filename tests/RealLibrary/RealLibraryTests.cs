@@ -197,6 +197,42 @@ public sealed class RealLibraryTests(ITestOutputHelper output)
         output.WriteLine("recording_type by folder kind: " + Fmt(types));
     }
 
+    [Fact]
+    public async Task Library_builder_cold_then_warm_pass_reads_no_heads_the_second_time()
+    {
+        if (Root is not { } root) return;
+        var temp = Path.Combine(Path.GetTempPath(), "spp-real-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            // The data folder is a temp folder outside the recording root; the recording root is only read.
+            var data = DataFolder.Open(temp, root);
+            var steam = SteamPaths.FromRegistry();
+            var user = steam is null ? null : await steam.ReadActiveUserAsync(default);
+            var names = steam is null ? null : new GameNameResolver(steam, user?.AccountId);
+            var reads = 0;
+            var scan = new ScanOptions { HeadReader = (p, ct) => { Interlocked.Increment(ref reads); return ScanHeads.ReadAsync(p, ct); } };
+            var builder = new LibraryBuilder(root, names, new ArtworkStore(data), scan: scan);
+            var id = Guid.NewGuid();
+
+            var cold = await builder.ScanAllAsync(null, id, parallelism: 4);
+            await new ScanCacheStore(data).WriteAsync(cold.Cache);
+            var coldReads = reads;
+            reads = 0;
+
+            var loaded = (await new ScanCacheStore(data).ReadAsync()).Cache;
+            var warm = await new LibraryBuilder(root, names, null, scan: scan).ScanAllAsync(loaded, id, parallelism: 4);
+            output.WriteLine($"folders {cold.Folders}, recordings {cold.Index.Recordings.Count}, games {cold.Index.Games.Count}, cache folders {loaded.Folders.Count}");
+            output.WriteLine($"cold: {cold.Elapsed.TotalSeconds:F1} s, head reads {coldReads}; warm: {warm.Elapsed.TotalSeconds:F1} s, head reads {reads}");
+            output.WriteLine($"markers in index {cold.Index.Recordings.Sum(r => r.MarkerCount)}, with exact offset {cold.Index.Recordings.Count(r => r.ExactOffsetMs is not null)}");
+            Assert.True(reads <= Math.Max(10, coldReads / 50), $"warm pass read {reads} heads");      // a few new chunks may appear in between
+            Assert.InRange(Math.Abs(warm.Index.Recordings.Count - cold.Index.Recordings.Count), 0, Math.Max(3, cold.Folders / 20));
+        }
+        finally
+        {
+            try { Directory.Delete(temp, true); } catch (IOException) { } catch (UnauthorizedAccessException) { }
+        }
+    }
+
     private static void Bump(Dictionary<string, int> d, string k) => d[k] = d.GetValueOrDefault(k) + 1;
     private static string Fmt(Dictionary<string, int> d) => d.Count == 0 ? "none" : string.Join(", ", d.OrderBy(k => k.Key).Select(k => $"{k.Key} {k.Value}"));
 }

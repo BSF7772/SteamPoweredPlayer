@@ -31,6 +31,7 @@ public sealed class DataFolder
     public const string FolderName = "SteamPoweredPlayer";
     public const string LibraryJsonName = "library.json";
     public const string LibraryIdName = "library-id";
+    public const string ScanCacheName = "scan-cache.json";
 
     public string Root { get; }
     public string BackgroundRecordPath { get; }
@@ -43,6 +44,9 @@ public sealed class DataFolder
 
     public string LibraryJson => System.IO.Path.Combine(Root, LibraryJsonName);
     public string LibraryJsonTemp => LibraryJson + ".tmp";
+    /// <summary>Desktop-only scan cache (<see cref="ScanCache"/>); phones never read it.</summary>
+    public string ScanCacheJson => System.IO.Path.Combine(Root, ScanCacheName);
+    public string ScanCacheJsonTemp => ScanCacheJson + ".tmp";
     public string LibraryIdFile => System.IO.Path.Combine(Root, LibraryIdName);
     public string ArtDir => System.IO.Path.Combine(Root, "art");
     public string TrickDir => System.IO.Path.Combine(Root, "trick");
@@ -103,6 +107,9 @@ public sealed class DataFolder
         if (!Validate(Root, BackgroundRecordPath).IsValid) throw new InvalidOperationException("Data folder overlaps the recording path");
         Directory.CreateDirectory(Root);
     }
+
+    /// <summary>The library GUID if <c>library-id</c> exists and is valid; null otherwise. Read-only: creates nothing.</summary>
+    public Guid? ReadLibraryId() => TryReadId(out var id) ? id : null;
 
     /// <summary>Returns the library GUID, creating the file on first use (atomic create; a racing creator's value wins).</summary>
     public Guid ReadOrCreateLibraryId()
