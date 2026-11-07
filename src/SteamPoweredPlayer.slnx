@@ -1,5 +1,7 @@
-<Solution>
+﻿<Solution>
   <Project Path="Core/SteamPoweredPlayer.Core.csproj" />
-  <Project Path="SteamPoweredPlayer.csproj" />
+  <Project Path="SteamPoweredPlayer.csproj">
+    <Platform Solution="*|Any CPU" Project="x64" />
+  </Project>
   <Project Path="../tests/SteamPoweredPlayer.Tests.csproj" />
 </Solution>

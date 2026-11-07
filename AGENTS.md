@@ -18,7 +18,7 @@ Requirements every change must serve:
 7. Cuts, auto sync and speed-up, exactly like FastEncoder.
 8. Android companion: secure SMB (3.1.1, encryption), read-only access to the library, editing and exporting on the device.
 
-**Status: Phase 1 (Core library, no UI).** The approved plan lives in `.hermes/plans/`; don't start a phase the maintainer hasn't
+**Status: Phase 2 (desktop player MVP) code complete; Phase 3 not approved yet.** The approved plan lives in `.hermes/plans/`; don't start a phase the maintainer hasn't
 approved. Spikes (`spikes/NNN-name/`) are throwaway and must end with a `Verdict:` line.
 
 ## Commands
@@ -52,8 +52,9 @@ src/Core/Library/    scanner (event-driven), index, data folder, artwork, trickp
 src/Core/Playback/   libmpv binding, D3D11 renderer, EDL builder, cache follower
 src/Core/Export/     lossless range source, export queue, delete service (the only code allowed to delete)
 src/Core/Net/        remote-library access, link-type detection, chunk downloader
+src/Core/Diagnostics/ --selftest and --bench (reports carry no personal data)
 external/FastEncoder/ git submodule (never edit it from this repo; change FastEncoder upstream, then bump the pin)
-src/                 MainWindow.xaml(.cs) and the views
+src/                 SteamPoweredPlayer.csproj (WinUI app): MainWindow, Views/, Services/, Themes/
 android/             phone app (Gradle), mirrors Core: smb/ data/ play/ edit/ export/ ui/
 tests/               SteamPoweredPlayer.Tests.csproj, xUnit tests mirroring src/Core folders, tests/fixtures (synthetic), tests/fixtures/golden (shared with Android tests)
 docs/                format notes (steam-recording-format.md), SMB security, bench results

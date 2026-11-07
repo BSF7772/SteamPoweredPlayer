@@ -24,6 +24,7 @@ needed. Remote clients pick by link type: **wired → stream; wireless → downl
 | 3.1 | Licence decided: **GPL-3.0-or-later** (§2 D19). FastEncoder will be published (MIT) and consumed as a **git submodule** (D5). Linux clients are **out of scope** (the CLI idea was dropped). Repository recreated with a clean history |
 | 3 | **Repo is treated as public:** all machine/user specifics removed (they live in the maintainer's local notes); AGENTS.md rewritten to the agents.md conventions; format notes moved to `docs/`. **Download-first** on wireless links, streaming only on wired (§4.3). **Export folder chosen by the user** (no default). **Delete feature with safety rails** (§4.5). SMB "access denied" root cause and options (`docs/smb-security.md`). Android `minSdk 29`. A cross-platform CLI for Linux clients (question in §9) |
 | 5 | **Phase 1 approved (2026-11-07).** S3b and S9 deferred ("later", after Phase 4); S10 and every delete/clean-up feature moved to the **last phase** (Phase 6). FastEncoder submodule tracks its latest `main` (no separate pin confirmation). `tools/bootstrap.ps1` merged with task 1.11 and moved to Phase 2. Network resilience rule: reconnect on its own after drops and Wi-Fi → Wi-Fi changes, give up after **30 s** without reaching the server (§4.3). 2× phone export: accurate colours by default, verified against the source, a hidden toggle for the fast path (§4.4). Core is its own project (`src/Core/SteamPoweredPlayer.Core.csproj`) so tests never reference the WinUI app |
+| 6 | **Phase 2 approved and built (2026-11-07).** Desktop player MVP in `src/` (WinUI 3 app) plus Core playback/library/diagnostics; 1.11 done (`tools/deps.json`, `bootstrap.ps1`, `env.ps1`, `Dependencies.targets`, `docs/third-party.md`). New desktop-only `scan-cache.json` in the data folder (library.json v1 unchanged). Results and open budget questions in §9 |
 | 4 | **End of Phase 0 (S2, S4, S5, S6 measured; S1, S3, S3b, S7, S8, S9, S10 still planned).** Playback uses the **lead EDL** (first part `N0·3 s`, the part before each gap stretched) so mpv `time-pos` equals the tfdt media time, **every seek that crosses chunks is a reload** (`loadfile <edl> start=<t>`, because revisiting an opened chunk breaks decode), mpv is **pre-warmed** at app start, and a **~60-chunk window EDL** with a reload policy bounds RAM and handles; the scanner **checks chunk heads** (zero-filled chunks exist); mpv's share mode is READ\|WRITE\|DELETE. Trickplay reads the chunk's **first fragment** (256 KiB first read plus an exact second read), not a fixed 512 KB prefix; default sheet 160 px JPEG q10 every 3 s (about 4 MB/h). Markers use **Steam's exact millisecond offset** (`gamerecording.pb` / `clip.pb` field 1.5.10), the folder-name time (±1 s) is a fallback; marker position equals media tfdt. FastEncoder is the submodule `external/FastEncoder` (relative URL `../FastEncoder.git`, pin ≥ `b4ccf39`, not added yet); default export preset TBD; AudioSync is Low confidence on real gameplay, so export has a "not applied" path. New Phase 1 task 1.11 (ffmpeg + libmpv shipped beside the exe from a pinned manifest, `docs/third-party.md`). The fixed "< 3 % CPU" budget is replaced by a relative, reproducible CPU-efficiency definition. SMB client requirement added to §4.6. Phase 0 rows carry a status |
 
 ---
@@ -373,7 +374,7 @@ static string Esc(string v) => $"%{Encoding.UTF8.GetByteCount(v)}%{v}";
 (If the first part of a window is also followed by a gap, its length is `N0·3` plus the gap stretch; the golden tests cover that case.
 `Window(SessionMedia, positionSeconds, count = 60)` picks the chunk numbers; the reload policy lives in `CacheFollower`.)
 
-### Phase 2: Desktop player MVP (detailed after the S1 verdict; S2 is PARTIAL and its result is applied in §3)
+### Phase 2: Desktop player MVP (code complete 2026-11-07; results in §9)
 Shell (Mica, title bar, BusyLine, toasts, FastEncoder styles) → `Mpv.cs` (wakeup-driven event loop, **mpv pre-warmed at app start**) →
 `MpvD3D11Renderer` → Library page (games rail, Cache strip, grids, filters, search) → Player page (markers lane with icon map,
 trickplay filmstrip, transport, keys, resume, A-B loop, fullscreen overlay; every seek or back-step across chunks is a
@@ -474,6 +475,38 @@ Phase 6, 1.11 → Phase 2). Notes from the implementation:
   2–3 s warm. Phase 2 must persist which chunks were head-checked (index) and only check new ones, and show the library from the
   index while a first scan runs in the background.
 - Still unseen: `BackgroundMaxKeep` forms above 2 h (unknown forms are reported, not guessed).
+
+**Phase 2 code complete (2026-11-07), 594 tests green, `--selftest` exit 0 (25 PASS, 5 SKIP for Phase 3/6 items).** Delivered:
+- 1.11: pinned manifest + `tools/bootstrap.ps1` (SHA-256 checked, seeds from a local archive), `tools/env.ps1`, and
+  `tools/Dependencies.targets` (the build fails on a missing or wrong-hash `libmpv-2.dll`; libmpv, ffmpeg if bootstrapped, and
+  `licenses/` are copied beside the exe). The optional ffmpeg entry (BtbN, pinned by the publisher's checksum) was never extracted.
+- Core/Playback: `MpvNative` (LibraryImport), `MpvPlayer` (wakeup-driven events, explicit pause on every load, demuxer cache
+  64 + 32 MiB), `MpvD3D11Renderer`, `PlaybackSession` (seek-by-reload, coalescing, window EDL + reload policy with hysteresis),
+  `CacheFollower` (trim → jump to new head + "Steam removed X s", live EOF waits for growth), A-B loop in the app (reload to A),
+  resume positions in `%LocalAppData%` (desktop-local), playback metrics.
+- Core/Library: `ScanCache` (`scan-cache.json`, desktop-only; warm start does 0 head reads), `LibraryBuilder`, event-driven
+  `LibraryService` (index from disk first, FSW with per-folder debounce 0.5–2.5 s, overflow → full rescan, coalesced saves),
+  trickplay (`FirstFragment`, `Trickplay`, `TrickplayIndex`, sheets of 10×10 160 px tiles) with a background queue that pauses
+  while a recording opens. One `DecodeMode` (Core) for playback and trickplay.
+- App: shell in FastEncoder's design language, Library page (games rail, Cache strip with markers, clips grid with trickplay
+  thumbnails), first-run data-folder card, Settings (decoding, data folder), Player page (3 columns, filmstrip + hover preview,
+  markers lane, events list, transport, keys, fullscreen overlay, live follow, debug overlay Ctrl+Shift+D). `--sample`, `--data`.
+- `--selftest` and `--bench` (`src/Core/Diagnostics`, method in `docs/bench.md`). Bugs they found and fixed: reload after EOF
+  came up paused; a seek into the last ~0.2 s before a gap landed in the next run (targets now snap 0.3 s before the gap).
+
+**Bench, real library, desktop-local, one run while other work loaded the machine:** library visible from index (warm) 91 ms ✅;
+open → first frame pre-warmed 48 ms ✅ (fresh 256 ms); seek with d3d11va median 78 / p90 127 / max 160 ms, 2 of 60 over 150 ms;
+lossless 30 s export 293 ms ✅; trickplay for a 2 h session 4.9 s ✅; CPU per media-second 0.9× the mpv CLI reference with
+d3d11va (1.3× with CPU decode); **RAM 459 MB peak / 388 MB at the end of a 5-minute soak ❌ (< 250 MB), slope −3.4 MB/min, so
+no leak** (the S1 situation the maintainer accepted). Hardware decode needs a real video output: `hwdec=d3d11va` with `vo=null`
+silently decodes in software, so the bench renders into a hidden window. Cold scan on this run 1.6–25 s (OS cache), so the
+142 s cold-disk figure was not reproduced.
+
+**Waiting for the maintainer (budgets):** (1) RAM: keep 250 MB as a failing gate, or report it and gate only on the leak slope as
+decided for S1? (2) Seek: the bench gates on p90 < 150 ms; the budget says "< 150 ms anywhere" (S2 itself saw ~10 % over).
+**Not verified in Phase 2:** the Player page on the real library (agents drove it on the synthetic `--sample` session only; a
+real-library click-through is the first thing to do next), device-lost recovery (logged, renderer not recreated), non-100 % DPI,
+GPU trickplay on real 1440p HEVC inside the app, a 60 fps gap session.
 
 Open: one writer per chunk key in the download queue (Phase 3).
 
