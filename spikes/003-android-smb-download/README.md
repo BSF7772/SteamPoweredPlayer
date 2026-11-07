@@ -39,13 +39,23 @@ Re-runs with the fixes below (same 100 chunks, Wi-Fi off, no mobile data, so no 
 | 75 s | 202 files, 0 failed, **0 bytes re-fetched**, 2 `.part` resumes, SHA-256 202/202 == server |
 | 20 s, with fix 3 | 202 files, 0 failed, **0 bytes re-fetched**, 2 resumes, SHA-256 202/202; reconnected **35 ms** after Wi-Fi validated |
 
+Then with mobile data on, so the VPN rode on cellular (`cell+vpn`) while Wi-Fi was off:
+
+| run | result |
+|---|---|
+| cap: 90 s drop, 20 MB cap | VPN connected 9 s after the drop; cap hit after 6.5 s, **20.14 MB** via VPN (138 KB overshoot), VPN not used again; LAN resumed 0.3 s after Wi-Fi returned. 202 files, 0 failed, 0 re-fetched, SHA-256 202/202 |
+| fail-back: 13 s drop, 40 MB cap | VPN carried 35.67 MB; **fail-back fired 37 ms after Wi-Fi validated**, LAN connected 1 s later, cap not reached. 202 files, 0 failed, 0 re-fetched, SHA-256 202/202 |
+
+Every connection: SMB 3.1.1, encrypted, AES-128-GCM, signing enforced.
+
+Notes for the product: closing the fallback context does not abort a read already in flight (that 5.9 MB file finished over the VPN), so
+fail-back takes effect at the next connect and the cap stays the hard limit. Over LTE at about 3.3 MB/s, even a 40 MB cap lasts only 12 s.
+
 **Bugs found on the device:**
 1. The fallback byte cap was checked only when connecting, so once on the VPN the whole rest of the range (494 MB) came over the
-   VPN, part of it over mobile data. Now enforced on every read; when used up, workers wait for a network change.
-   **Fixed in code, not yet exercised on a device:** the re-runs had no route to the VPN during the drop.
+   VPN, part of it over mobile data. Now enforced on every read; when used up, workers wait for a network change. **Fixed and verified.**
 2. No fail-back: after Wi-Fi returned the download stayed on the VPN. Now a network callback probes the LAN profile and drops the
-   fallback session when LAN is reachable; in-flight files resume their `.part` on LAN.
-   **Fixed in code, not yet exercised on a device,** for the same reason.
+   fallback session when LAN is reachable; remaining files continue on LAN. **Fixed and verified.**
 3. The network callback never fired under a VPN. With a VPN up, the default network *is* the VPN and it survives Wi-Fi coming and
    going: only its capabilities change (`wifi+vpn` → `vpn` → `wifi+vpn`), with no `onLost`/`onAvailable`. So fix 2 could not trigger
    and retries were never woken early. Fixed and verified: a second callback on a non-VPN request reports the real networks, plus
@@ -72,5 +82,5 @@ adb pull /sdcard/Android/data/spp.spike.s3/files/results .
 Server side (Windows, elevated): `Get-SmbSession | Select ClientComputerName, Dialect, …` and `Get-SmbConnection`/event
 1046 to see the session's dialect and encryption. Corruption check: compare the recorded SHA-256 values with the server files.
 
-Verdict: PARTIAL. **PASS on integrity, resume and encryption**; the fallback cap and LAN fail-back are fixed in code but still need
-one device run with a working route to the VPN while Wi-Fi is off.
+Verdict: VALIDATED for download, integrity, resume, encryption, failover, fallback cap and fail-back. Not covered: AP roaming and
+playback from local chunks during the download (both in the plan's criterion).
