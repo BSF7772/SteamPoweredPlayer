@@ -21,9 +21,22 @@ and the server shows an encrypted 3.1.1 session.
 - Credentials: host, share and user can be set over adb; **the password is typed on the phone** and stored with a
   non-exportable Android Keystore AES-256-GCM key. Nothing about the server lives in this repo.
 
-## Status
-The APK builds (AGP 9.5.1, jcifs 3.0.4 + BouncyCastle, minSdk 29). It has not run on a phone yet; whether jcifs 3.0.4 (Java 17
-bytecode, BouncyCastle) works on API 29+ ART is the first thing the device run answers.
+## Results (test phone, Android 13, Windows 11 SMB server, share with EncryptData on; 100 chunks = 5 min, 514 MB)
+| run | result |
+|---|---|
+| probe | LAN and VPN (Tailscale): **SMB 3.1.1, encrypted AES-128-GCM, signing enforced**. jcifs 3.0.4 runs fine on ART |
+| LAN | 202 files, 514 MB in 49.3 s = **10.4 MB/s**, 0 failed, 0 re-fetched |
+| 2 Wi-Fi drops (20 s each) | 0 failed, **0 bytes re-fetched** (2 `.part` resumes), failover LAN→VPN in 13 s, 137 s total |
+| VPN only (Wi-Fi under Tailscale) | 42 files, 106 MB in 12.5 s = 8.5 MB/s |
+| integrity | SHA-256 of all 446 downloaded files == server files: **0 corrupt** |
+
+AES-128-GCM was negotiated, not AES-256-GCM: Windows chose it; jcifs offers both.
+
+**Bugs found on the device (fixed in code, re-run pending):**
+1. The fallback byte cap was checked only when connecting, so once on the VPN the whole rest of the range (494 MB) came over the
+   VPN, part of it over mobile data. Now enforced on every read; when used up, workers wait for a network change.
+2. No fail-back: after Wi-Fi returned the download stayed on the VPN. Now a network callback probes the LAN profile and drops the
+   fallback session when LAN is reachable; in-flight files resume their `.part` on LAN.
 
 ## Device runbook
 ```bash
@@ -41,4 +54,4 @@ adb pull /sdcard/Android/data/spp.spike.s3/files/results .
 Server side (Windows, elevated): `Get-SmbSession | Select ClientComputerName, Dialect, …` and `Get-SmbConnection`/event
 1046 to see the session's dialect and encryption. Corruption check: compare the recorded SHA-256 values with the server files.
 
-Verdict: PENDING (built, device run not done)
+Verdict: **PASS on integrity, resume and encryption**; failover policy bugs fixed, needs one re-run of the drop test.
