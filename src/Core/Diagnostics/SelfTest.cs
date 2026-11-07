@@ -29,6 +29,7 @@ public static class SelfTest
             report.Add(CheckResult.Fail("selftest.crash", "Self-test crashed", Redactor.Describe(e)));
             report.Abort("unexpected exception");
         }
+        runner.AddTimings();
         report.Add(CheckResult.Info("selftest.elapsed", "Elapsed", BudgetRules.F(sw.Elapsed.TotalSeconds) + " s", number: sw.Elapsed.TotalSeconds, unit: "s"));
         report.WriteTo(reportPath);
         return report.ExitCode;
@@ -68,21 +69,33 @@ public static class SelfTest
 
         private static bool Wanted(string id) => OnlyPrefixes.Length == 0 || OnlyPrefixes.Any(p => id.StartsWith(p, StringComparison.Ordinal));
 
+        private readonly List<(string Id, double Seconds)> _timings = [];
+
         private async Task Step(string id, string name, Func<Task<CheckResult>> body)
         {
             if (!Wanted(id)) return;
+            var sw = Stopwatch.StartNew();
             try { Add(await body().ConfigureAwait(false)); }
             catch (Exception e) when (e is not OperationCanceledException)
             {
                 Add(CheckResult.Fail(id, name, "exception", Redactor.Describe(e)));
             }
+            _timings.Add((id, sw.Elapsed.TotalSeconds));
         }
+
+        /// <summary>D-TEST keeps <c>--selftest</c> under 30 s: the slowest steps are printed so a regression is easy to find.</summary>
+        public void AddTimings() =>
+            report.Add(CheckResult.Info("selftest.timings", "Step timings, slowest first",
+                string.Join(", ", _timings.OrderByDescending(t => t.Seconds).Take(40).Select(t => $"{t.Id} {F(t.Seconds, "0.0")} s"))
+                + $"; all steps {F(_timings.Where(t => t.Id != "env.hardware").Sum(t => t.Seconds), "0.0")} s"));
 
         private static string F(double v, string f = "0.#") => BudgetRules.F(v, f);
 
         public async Task RunAsync(CancellationToken ct)
         {
+            var setup = Stopwatch.StartNew();
             report.AddHeader("Hardware: " + HardwareClass.Detect().Describe());
+            _timings.Add(("env.hardware", setup.Elapsed.TotalSeconds));
             Ff.Locate();
             if (!Ff.Available)
             {
@@ -102,15 +115,19 @@ public static class SelfTest
             }
             await using (var probe = PlaybackRig.Create(DecodeMode.Cpu))
                 Add(CheckResult.Pass("env.libmpv", "libmpv loads", "mpv " + (probe.Player.GetString("mpv-version") ?? "?")));
+            _timings.Add(("env", setup.Elapsed.TotalSeconds));
 
             var gen = Stopwatch.StartNew();
             _s = await SyntheticSession.CreateAsync(parent: null, ct: ct).ConfigureAwait(false);
             using (_s)
             {
                 Add(CheckResult.Pass("synth.generate", "Synthetic session generated", $"{_s.Chunks} chunks x 3 s (320x180, 30 fps) in {F(gen.Elapsed.TotalSeconds)} s"));
+                _timings.Add(("synth.generate", gen.Elapsed.TotalSeconds));
 
                 await ScannerChecks(ct).ConfigureAwait(false);
+                var probeGpu = Stopwatch.StartNew();
                 await DetectGpu(ct).ConfigureAwait(false);
+                _timings.Add(("env.hwdec", probeGpu.Elapsed.TotalSeconds));
                 await PlaybackChecks(DecodeMode.Cpu, ct).ConfigureAwait(false);
                 if (_gpu) await PlaybackChecks(DecodeMode.Gpu, ct).ConfigureAwait(false);
                 await Step("play.pause-reload", "Pause preserved across reloads", () => PauseAcrossReloads(ct)).ConfigureAwait(false);
@@ -134,13 +151,12 @@ public static class SelfTest
 
         private async Task ScannerChecks(CancellationToken ct)
         {
-            async Task Case(string id, string name, SyntheticVariant v, Func<ScanResult, bool> ok)
+            // The cases are independent folders: they are built and scanned in parallel (D-TEST), and reported in order.
+            var pending = new List<(string Id, string Name, Task<ScanResult> Scan, Func<ScanResult, bool> Ok)>();
+            Task Case(string id, string name, SyntheticVariant v, Func<ScanResult, bool> ok)
             {
-                await Step(id, name, async () =>
-                {
-                    var r = await Scanner.ScanAsync(_s.Build(v), null, ct).ConfigureAwait(false);
-                    return CheckResult.From(ok(r), id, name, Describe(r));
-                }).ConfigureAwait(false);
+                if (Wanted(id)) pending.Add((id, name, Task.Run(() => Scanner.ScanAsync(_s.Build(v), null, ct), ct), ok));
+                return Task.CompletedTask;
             }
 
             await Case("scan.normal", "Scanner: normal session", SyntheticVariant.Normal, r =>
@@ -163,6 +179,12 @@ public static class SelfTest
                 r.Status == ScanStatus.Playable && Runs(r.Media) == "1-7,9-20" && r.Issues.Any(i => i.Kind == ScanIssueKind.MissingAudioChunk && i.Chunk == 8)).ConfigureAwait(false);
             await Case("scan.zero-chunk", "Scanner: zero-filled chunk with a normal name", SyntheticVariant.ZeroFilledChunk, r =>
                 r.Status == ScanStatus.Playable && Runs(r.Media) == "1-8,10-20" && r.Issues.Any(i => i.Kind == ScanIssueKind.ZeroFilledChunk && i.Chunk == 9)).ConfigureAwait(false);
+            foreach (var (id, name, scan, ok) in pending)
+                await Step(id, name, async () =>
+                {
+                    var r = await scan.ConfigureAwait(false);
+                    return CheckResult.From(ok(r), id, name, Describe(r));
+                }).ConfigureAwait(false);
         }
 
         // ---- playback ---------------------------------------------------------------------------------------------
@@ -178,6 +200,11 @@ public static class SelfTest
             return condition();
         }
 
+        private SessionMedia? _normal;
+
+        /// <summary>One shared normal session for the checks that only read it (D-TEST: building a copy per check cost ~0.3 s each).</summary>
+        private async Task<SessionMedia> NormalMedia(CancellationToken ct) => _normal ??= await MediaOf(_s.Build(SyntheticVariant.Normal), ct).ConfigureAwait(false);
+
         private async Task<SessionMedia> MediaOf(string folder, CancellationToken ct) =>
             (await Scanner.ScanAsync(folder, null, ct).ConfigureAwait(false)).Media ?? throw new InvalidOperationException("synthetic session is not playable");
 
@@ -185,7 +212,7 @@ public static class SelfTest
         {
             try
             {
-                var media = await MediaOf(_s.Build(SyntheticVariant.Normal), ct).ConfigureAwait(false);
+                var media = await NormalMedia(ct).ConfigureAwait(false);
                 await using var rig = PlaybackRig.Create(DecodeMode.Gpu);
                 await rig.Session.OpenAsync(media, 0, play: true, ct).ConfigureAwait(false);
                 await Task.Delay(300, ct).ConfigureAwait(false);
@@ -207,24 +234,25 @@ public static class SelfTest
         {
             await Step($"play.lead-edl.{ModeId(mode)}", $"Lead EDL plays headless ({ModeName(mode)})", async () =>
             {
-                var media = await MediaOf(_s.Build(SyntheticVariant.Normal), ct).ConfigureAwait(false);
+                var media = await NormalMedia(ct).ConfigureAwait(false);
                 await using var rig = PlaybackRig.Create(mode);
                 var sw = Stopwatch.StartNew();
                 await rig.Session.OpenAsync(media, null, play: true, ct).ConfigureAwait(false);
                 var open = sw.Elapsed.TotalMilliseconds;
+                await Task.Delay(300, ct).ConfigureAwait(false);      // past the decoder's start-up, then 1 s of steady playback
                 var t0 = rig.TimePos;
                 sw.Restart();
-                await Task.Delay(2000, ct).ConfigureAwait(false);
+                await Task.Delay(1000, ct).ConfigureAwait(false);
                 var advanced = rig.TimePos - t0;
                 var wall = sw.Elapsed.TotalSeconds;
-                var ok = advanced is > 1.7 and < 2.4 && (mode == DecodeMode.Cpu || rig.UsesHardware) && (mode == DecodeMode.Gpu || !rig.UsesHardware);
+                var ok = advanced > 0.8 * wall && advanced < 1.25 * wall && (mode == DecodeMode.Cpu || rig.UsesHardware) && (mode == DecodeMode.Gpu || !rig.UsesHardware);
                 return CheckResult.From(ok, $"play.lead-edl.{ModeId(mode)}", $"Lead EDL plays headless ({ModeName(mode)})",
                     $"advanced {F(advanced, "0.00")} s in {F(wall, "0.00")} s, first frame {F(open)} ms, hwdec-current {rig.HwdecCurrent}");
             }).ConfigureAwait(false);
 
             await Step($"play.seek.{ModeId(mode)}", $"Seek-by-reload accuracy +-1 frame ({ModeName(mode)})", async () =>
             {
-                var media = await MediaOf(_s.Build(SyntheticVariant.Normal), ct).ConfigureAwait(false);
+                var media = await NormalMedia(ct).ConfigureAwait(false);
                 var rng = new Random(20261107);
                 var targets = new List<double>();
                 for (var i = 0; i < 20; i++) targets.Add(Math.Round(rng.NextDouble() * 119, 3));
@@ -244,16 +272,22 @@ public static class SelfTest
 
         private static async Task<CheckResult> SeekAccuracy(string id, string name, SessionMedia media, DecodeMode mode, IReadOnlyList<double> targets, CancellationToken ct)
         {
-            // The copy-back hardware path reloads 10-20x slower than software decode on tiny synthetic frames: a third of the targets keeps the run short.
-            if (mode == DecodeMode.Gpu) targets = [.. targets.Where((_, i) => i % 3 == 0)];
+            // D-TEST (--selftest < 30 s): the copy-back hardware path reloads 10-20x slower than software decode on tiny frames, and a
+            // busy GPU (a game running) makes it up to a second per reload. The hardware pass takes every 4th target and stops after
+            // 2.5 s once 4 seeks are done; software decode runs every target.
+            if (mode == DecodeMode.Gpu) targets = [.. targets.Where((_, i) => i % 4 == 0)];
             await using var rig = PlaybackRig.Create(mode);
             await rig.Session.OpenAsync(media, null, play: false, ct).ConfigureAwait(false);
             double worst = 0, worstTarget = 0, worstAt = 0;
             var bad = 0;
             var times = new List<double>();
             var sw = new Stopwatch();
+            var budget = Stopwatch.StartNew();
+            var done = 0;
             foreach (var t in targets)
             {
+                if (mode == DecodeMode.Gpu && done >= 4 && budget.Elapsed > TimeSpan.FromSeconds(2.5)) break;
+                done++;
                 var expected = PlaybackSession.Snap(media, t);
                 sw.Restart();
                 await rig.Session.SeekAsync(t, ct).ConfigureAwait(false);
@@ -264,13 +298,13 @@ public static class SelfTest
                 if (err > FrameTolerance || rig.Player.GetFlag("pause") != true) bad++;
             }
             return CheckResult.From(bad == 0, id, name,
-                $"{targets.Count} seeks, max error {F(worst * 1000)} ms (limit {F(FrameTolerance * 1000)}), {bad} off{(bad > 0 ? $" (worst: target {F(worstTarget)} s, snapped {F(PlaybackSession.Snap(media, worstTarget))} s, landed {F(worstAt, "0.000")} s)" : "")}, median reload {F(BudgetRules.Median(times))} ms, hwdec-current {rig.HwdecCurrent}",
+                $"{done} seeks, max error {F(worst * 1000)} ms (limit {F(FrameTolerance * 1000)}), {bad} off{(bad > 0 ? $" (worst: target {F(worstTarget)} s, snapped {F(PlaybackSession.Snap(media, worstTarget))} s, landed {F(worstAt, "0.000")} s)" : "")}, median reload {F(BudgetRules.Median(times))} ms, hwdec-current {rig.HwdecCurrent}",
                 number: worst * 1000, unit: "ms", budget: "<= " + F(FrameTolerance * 1000) + " ms");
         }
 
         private async Task<CheckResult> PauseAcrossReloads(CancellationToken ct)
         {
-            var media = await MediaOf(_s.Build(SyntheticVariant.Normal), ct).ConfigureAwait(false);
+            var media = await NormalMedia(ct).ConfigureAwait(false);
             await using var rig = PlaybackRig.Create(DecodeMode.Cpu);
             var s = rig.Session;
             await s.OpenAsync(media, 3, play: true, ct).ConfigureAwait(false);
@@ -298,23 +332,23 @@ public static class SelfTest
 
         private async Task<CheckResult> SpeedTwo(CancellationToken ct)
         {
-            var media = await MediaOf(_s.Build(SyntheticVariant.Normal), ct).ConfigureAwait(false);
+            var media = await NormalMedia(ct).ConfigureAwait(false);
             await using var rig = PlaybackRig.Create(DecodeMode.Cpu);
             await rig.Session.OpenAsync(media, 2, play: true, ct).ConfigureAwait(false);
             rig.Session.SetSpeed(2);
             await Task.Delay(300, ct).ConfigureAwait(false);
             var t0 = rig.TimePos;
             var sw = Stopwatch.StartNew();
-            await Task.Delay(2000, ct).ConfigureAwait(false);
+            await Task.Delay(1000, ct).ConfigureAwait(false);
             var rate = (rig.TimePos - t0) / sw.Elapsed.TotalSeconds;
             var speedOk = Math.Abs(rig.Player.GetDouble("speed") - 2) < 1e-6;
 
-            // 4x across two chunk boundaries
-            await rig.Session.SeekAsync(7.0, ct).ConfigureAwait(false);
+            // 4x across two chunk boundaries (9 s and 12 s)
+            await rig.Session.SeekAsync(8.4, ct).ConfigureAwait(false);
             rig.Session.SetPause(false);
             rig.Session.SetSpeed(4);
             sw.Restart();
-            var crossed = await WaitFor(() => rig.TimePos >= 13.5, TimeSpan.FromSeconds(8)).ConfigureAwait(false);
+            var crossed = await WaitFor(() => rig.TimePos >= 12.3, TimeSpan.FromSeconds(8)).ConfigureAwait(false);
             return CheckResult.From(rate is >= 1.6 and <= 2.4 && speedOk && crossed, "play.speed2x", "Speed 2x and chunk boundaries",
                 $"2x plays at {F(rate, "0.00")}x, 4x crossed two chunk boundaries in {F(sw.Elapsed.TotalMilliseconds)} ms: {crossed}", number: rate, unit: "x");
         }
@@ -357,10 +391,12 @@ public static class SelfTest
             rig.Session.Reloaded += _ => Interlocked.Increment(ref reloads);
             follower.Trimmed += _ => Interlocked.Increment(ref trimmedEvents);
 
-            await rig.Session.OpenAsync(media, 3.0, play: true, ct).ConfigureAwait(false);   // the playhead starts at the head's neighbour
+            // D-TEST: a chunk every 0.6 s (Steam: one per 3 s) keeps the check short; the playhead starts right after the trimmed chunks.
+            const int lastTrimmed = 3;
+            var trimEvery = TimeSpan.FromSeconds(0.6);
+            await rig.Session.OpenAsync(media, lastTrimmed * media.SegmentSeconds, play: true, ct).ConfigureAwait(false);
             var gate = new SemaphoreSlim(1);
-            const int lastTrimmed = 5;
-            using var trimmer = _s.StartHeadTrim(folder, 1, lastTrimmed, TimeSpan.FromSeconds(3));
+            using var trimmer = _s.StartHeadTrim(folder, 1, lastTrimmed, trimEvery);
             trimmer.Done += _ => Task.Run(async () =>
             {
                 await gate.WaitAsync(CancellationToken.None).ConfigureAwait(false);
@@ -375,14 +411,14 @@ public static class SelfTest
 
             await Task.Delay(300, ct).ConfigureAwait(false);
             var mon = new StallMonitor(() => rig.TimePos);
-            await mon.RunAsync(TimeSpan.FromSeconds(lastTrimmed * 3 + 1), ct).ConfigureAwait(false);
+            await mon.RunAsync(trimEvery * lastTrimmed + TimeSpan.FromSeconds(1), ct).ConfigureAwait(false);
             await gate.WaitAsync(ct).ConfigureAwait(false);      // the last rescan finished
             gate.Release();
 
             var left = (await Scanner.ScanAsync(folder, null, ct).ConfigureAwait(false)).Media;
             var ok = failures == 0 && mon.MaxStallMs < 1000 && mon.Advanced >= 0.85 * mon.Elapsed && left?.FirstChunk == lastTrimmed + 1 && !rig.Session.AtEnd;
             return CheckResult.From(ok, "play.head-trim", "Steam-style head trim under playback",
-                $"{lastTrimmed} head chunks deleted (one per 3 s), played {F(mon.Advanced, "0.0")} s in {F(mon.Elapsed, "0.0")} s, max stall {F(mon.MaxStallMs)} ms, reloads {reloads}, failures {failures}, jumps {trimmedEvents}",
+                $"{lastTrimmed} head chunks deleted (one per {F(trimEvery.TotalSeconds)} s), played {F(mon.Advanced, "0.0")} s in {F(mon.Elapsed, "0.0")} s, max stall {F(mon.MaxStallMs)} ms, reloads {reloads}, failures {failures}, jumps {trimmedEvents}",
                 number: mon.MaxStallMs, unit: "ms", budget: "stall < 1000 ms");
         }
 
@@ -427,7 +463,7 @@ public static class SelfTest
             rig.Session.ReloadFailed += e => { lock (failures) failures.Add(e.GetType().Name + ": " + Redactor.Scrub(e.Message)); };
             var live = media.Live;
             var chunks = media.ChunkCount;
-            using var writer = _s.StartLive(folder, 13, TimeSpan.FromSeconds(3));
+            using var writer = _s.StartLive(folder, 13, TimeSpan.FromSeconds(1.2));
             writer.Done += _ => Task.Run(async () =>
             {
                 await gate.WaitAsync(CancellationToken.None).ConfigureAwait(false);
@@ -443,19 +479,19 @@ public static class SelfTest
                 finally { gate.Release(); }
             }, CancellationToken.None);
 
-            var oldEnd = media.ChunkCount * media.SegmentSeconds;                     // 36 s
+            var oldEnd = media.ChunkEndSeconds(media.LastChunk!.Value);                 // 36 s (the tfdt axis)
             var eof = new TaskCompletionSource<double>(TaskCreationOptions.RunContinuationsAsynchronously);
             rig.Session.ReachedEnd += pos => eof.TrySetResult(pos);
-            await rig.Session.OpenAsync(media, oldEnd - 1.5, play: true, ct).ConfigureAwait(false);
+            await rig.Session.OpenAsync(media, oldEnd - 0.5, play: true, ct).ConfigureAwait(false);
             var sw = Stopwatch.StartNew();
             var reachedEnd = await Task.WhenAny(eof.Task, Task.Delay(8000, ct)).ConfigureAwait(false) == eof.Task;
             var eofAt = sw.Elapsed.TotalMilliseconds;
             var resumed = await WaitFor(() => rig.TimePos >= oldEnd + 2.0, TimeSpan.FromSeconds(12)).ConfigureAwait(false);
             var resumedAt = sw.Elapsed.TotalMilliseconds;
-            var continued = await WaitFor(() => rig.TimePos >= oldEnd + 4.0, TimeSpan.FromSeconds(12)).ConfigureAwait(false);
+            var continued = await WaitFor(() => rig.TimePos >= oldEnd + 3.2, TimeSpan.FromSeconds(12)).ConfigureAwait(false);   // into the second new chunk
             var ok = reachedEnd && resumed && continued && live && !rig.Session.AtEnd;
             return CheckResult.From(ok, "play.live-eof", "EOF on a live session continues after growth",
-                $"EOF after {F(eofAt)} ms, passed the old end by 2 s after {F(resumedAt)} ms, then by 4 s: {continued}; session {chunks} chunks and still live: {live}; reloads [{string.Join(' ', reloadLog)}], final time-pos {F(rig.TimePos, "0.00")} s, at end {rig.Session.AtEnd}, mpv pause {rig.Player.GetFlag("pause")} eof {rig.Player.GetFlag("eof-reached")} core-idle {rig.Player.GetFlag("core-idle")} cache {rig.Player.GetFlag("paused-for-cache")}, window {string.Join('-', rig.Session.Window.Take(1).Concat(rig.Session.Window.TakeLast(1)))}" + (failures.Count == 0 ? "" : "; errors: " + string.Join(" | ", failures.Take(3))));
+                $"EOF after {F(eofAt)} ms, passed the old end by 2 s after {F(resumedAt)} ms, then by 3.2 s: {continued}; session {chunks} chunks and still live: {live}; reloads [{string.Join(' ', reloadLog)}], final time-pos {F(rig.TimePos, "0.00")} s, at end {rig.Session.AtEnd}, mpv pause {rig.Player.GetFlag("pause")} eof {rig.Player.GetFlag("eof-reached")} core-idle {rig.Player.GetFlag("core-idle")} cache {rig.Player.GetFlag("paused-for-cache")}, window {string.Join('-', rig.Session.Window.Take(1).Concat(rig.Session.Window.TakeLast(1)))}" + (failures.Count == 0 ? "" : "; errors: " + string.Join(" | ", failures.Take(3))));
         }
 
         // ---- export, trickplay --------------------------------------------------------------------------------------
@@ -470,7 +506,7 @@ public static class SelfTest
 
         private async Task<CheckResult> Export(CancellationToken ct)
         {
-            var media = await MediaOf(_s.Build(SyntheticVariant.Normal), ct).ConfigureAwait(false);
+            var media = await NormalMedia(ct).ConfigureAwait(false);
             var scratch = _s.Scratch("export");
             var outFile = Path.Combine(scratch, "out.mp4");
             var sw = Stopwatch.StartNew();
