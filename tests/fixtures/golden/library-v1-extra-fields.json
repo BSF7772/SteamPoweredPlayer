@@ -1,0 +1,21 @@
+{
+  "schemaVersion": 1,
+  "libraryId": "11111111-2222-3333-4444-555555555555",
+  "generatedUtc": "2025-06-01T08:30:00Z",
+  "futureTopLevel": { "anything": [1, 2, 3] },
+  "games": [
+    { "gameId": "730", "name": "Test Game", "isShortcut": false, "playtimeHours": 12.5, "art": { "cover": "art/730/cover.jpg", "banner": "art/730/banner.jpg" } }
+  ],
+  "recordings": [
+    {
+      "kind": "clip",
+      "gameId": "730",
+      "startUtc": "2025-01-01T12:00:00Z",
+      "relativeFolder": "clips/clip_730_20250101_120000",
+      "runs": [[1, 5]],
+      "durationSeconds": 15,
+      "codec": "av1",
+      "tags": ["a", "b"]
+    }
+  ]
+}

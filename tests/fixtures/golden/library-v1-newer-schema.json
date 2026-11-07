@@ -1,0 +1,7 @@
+{
+  "schemaVersion": 7,
+  "libraryId": "11111111-2222-3333-4444-555555555555",
+  "generatedUtc": 1780000000,
+  "games": { "730": { "title": "Test Game" } },
+  "items": [ { "type": "somethingNew", "when": 1780000000 } ]
+}
