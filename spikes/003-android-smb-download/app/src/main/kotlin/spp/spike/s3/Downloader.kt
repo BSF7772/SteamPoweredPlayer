@@ -58,10 +58,23 @@ class Downloader(
     val connInfos = JSONArray()
     private val viaFallback = AtomicLong()
 
+    /**
+     * Network changed: wake waiting retries, and fail back to the first (LAN) profile when it is reachable again while a
+     * fallback profile is active. Dropping the fallback session makes in-flight reads fail; they resume their .part on LAN.
+     * Event-driven only (ConnectivityManager callbacks), no polling.
+     */
     fun onNetworkChange(what: String) {
         event("net", what)
         lock.withLock { netChanged.signalAll() }
+        val a = active ?: return
+        if (a === profiles.first()) return
+        val gen = generation
+        Thread {
+            if (Smb.reachable(profiles.first().host)) { event("failback", "${profiles.first().name} reachable again"); invalidate(gen) }
+        }.start()
     }
+
+    private class BudgetExceeded : java.io.IOException("fallback byte budget used up")
 
     private fun connect(): Pair<Profile, CIFSContext> {
         lock.withLock {
@@ -180,7 +193,8 @@ class Downloader(
                             if (n < 0) break
                             out.write(b, 0, n)
                             i.fetched += n; total.addAndGet(n.toLong())
-                            if (p !== profiles.first()) viaFallback.addAndGet(n.toLong())
+                            // the fallback budget is enforced per read, not only at connect: a VPN over mobile data must stop
+                            if (p !== profiles.first() && viaFallback.addAndGet(n.toLong()) >= vpnMaxBytes) throw BudgetExceeded()
                         }
                         out.fd.sync()
                     }
@@ -191,6 +205,10 @@ class Downloader(
                 return true
             } catch (e: IllegalStateException) {
                 event("refuse", e.message ?: e.toString()); return false
+            } catch (e: BudgetExceeded) {
+                event("budget", "${i.name}: ${e.message}; waiting for the first profile")
+                invalidate(gen)
+                lock.withLock { netChanged.await(30, TimeUnit.SECONDS) }   // woken by a network change
             } catch (e: Exception) {
                 event("retry", "${i.name} attempt ${i.attempts}: ${e.javaClass.simpleName}: ${e.message}")
                 if (gen >= 0) invalidate(gen)
