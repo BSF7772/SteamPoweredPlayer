@@ -41,6 +41,17 @@ public sealed partial class MainWindow : Window
 
         ContentFrame.Navigated += (_, e) => SyncNav(e.SourcePageType);
         Root.Loaded += Root_Loaded;
+        Closed += (_, _) => PlayerHost.Instance?.Shutdown();      // flush resume positions, dispose renderer then mpv
+    }
+
+    /// <summary>
+    /// Lets the page cover the 52 px title bar row (the Player page does it in fullscreen so the video gets the whole window). The title
+    /// bar itself stays laid out: collapsing the element registered with <c>SetTitleBar</c> made WinUI fail fast when it came back.
+    /// </summary>
+    public void SetChromeVisible(bool visible)
+    {
+        Grid.SetRow(ContentFrame, visible ? 1 : 0);
+        Grid.SetRowSpan(ContentFrame, visible ? 1 : 2);
     }
 
     // =====================================================================================

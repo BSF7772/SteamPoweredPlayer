@@ -1,7 +1,11 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 using SteamPoweredPlayer.Core.Library;
+using SteamPoweredPlayer.Core.Steam;
 
 namespace SteamPoweredPlayer.Services;
+
+/// <summary>The playable media of one recording changed (a live session grew, Steam trimmed it). <see cref="Media"/> is null when it is gone.</summary>
+public sealed record MediaChangedArgs(string RelativeFolder, SessionMedia? Media);
 
 /// <summary>Scanner progress as the shell shows it (BusyLine + status). <see cref="Fraction"/> is null when indeterminate.</summary>
 public sealed record ScanProgressInfo(bool Active, string Message, double? Fraction = null);
@@ -35,4 +39,21 @@ public interface ILibrarySource
 
     /// <summary>Why <see cref="Current"/> is null or stale, for the empty state; null when everything is fine.</summary>
     string? Problem { get; }
+
+    // ---- Player page ------------------------------------------------------------------------------------------------
+
+    /// <summary>The playable chunks of a recording (<c>RecordingEntry.RelativeFolder</c>), or null when it is unknown or has none.</summary>
+    SessionMedia? GetMedia(string relativeFolder);
+
+    /// <summary>Raised when <see cref="GetMedia"/> would return something else for a recording (any thread).</summary>
+    event EventHandler<MediaChangedArgs>? MediaChanged;
+
+    /// <summary>The recording's timeline entries on its media (tfdt) axis, sorted by start (empty when unknown).</summary>
+    IReadOnlyList<Marker> FullMarkersFor(string relativeFolder);
+
+    /// <summary>Trickplay thumbnails of a recording, or null when none were generated yet.</summary>
+    TrickplayIndex? TrickplayFor(string relativeFolder);
+
+    /// <summary>Pause / resume handle for the background trickplay work.</summary>
+    TrickplayQueue Trickplay { get; }
 }

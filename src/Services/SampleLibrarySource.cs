@@ -77,9 +77,57 @@ public sealed class SampleLibrarySource : ILibrarySource
     public event EventHandler? IndexChanged { add { } remove { } }
     public event EventHandler<ScanProgressInfo>? ScanProgress { add { } remove { } }
 
-    public Task StartAsync(CancellationToken ct = default) => Task.CompletedTask;
+    public async Task StartAsync(CancellationToken ct = default)
+    {
+        if (_session is not null) return;
+        _session = await SampleSession.CreateAsync(ct).ConfigureAwait(false);
+        if (_session is null) return;
+        // The live sample plays the same synthetic content: Steam "writes" a chunk every 3 s, then trims its head (a timer stands in
+        // for the folder watcher; the Player page sees the same MediaChanged events a real library raises).
+        _liveRel = _index.Recordings.FirstOrDefault(r => r.Live)?.RelativeFolder;
+        if (_liveRel is not null) _liveTimer = new Timer(_ => LiveTick(), null, TimeSpan.FromSeconds(3), TimeSpan.FromSeconds(3));
+    }
 
     public string? ResolveArt(string? relativePath) => null;
+
+    // ---- Player page: every sample recording plays the synthetic session; the live one grows and is trimmed ----
+
+    private SampleSession? _session;
+    private string? _liveRel;
+    private Timer? _liveTimer;
+    private int _liveFirst = 1, _liveLast = 20;
+    private readonly object _liveGate = new();
+
+    public TrickplayQueue Trickplay { get; } = new();
+
+    public event EventHandler<MediaChangedArgs>? MediaChanged;
+
+    public SessionMedia? GetMedia(string relativeFolder)
+    {
+        if (_session is not { } s || _index.Recordings.All(r => r.RelativeFolder != relativeFolder)) return null;
+        if (relativeFolder != _liveRel) return s.Media;
+        lock (_liveGate)
+            return new SessionMedia(s.Folder, [new SegmentRun(_liveFirst, _liveLast)], s.Media.SegmentSeconds, Live: true, Temporary: true);
+    }
+
+    public IReadOnlyList<Marker> FullMarkersFor(string relativeFolder) =>
+        _session is { } s && _index.Recordings.Any(r => r.RelativeFolder == relativeFolder) ? s.Markers : [];
+
+    public TrickplayIndex? TrickplayFor(string relativeFolder) => _session?.Trickplay;
+
+    private void LiveTick()
+    {
+        string rel;
+        lock (_liveGate)
+        {
+            if (_liveRel is null) return;
+            rel = _liveRel;
+            if (_liveLast < SampleSession.Chunks) _liveLast++;
+            else if (_liveLast - _liveFirst + 1 > 15) _liveFirst += 2;
+            else { _liveTimer?.Dispose(); _liveTimer = null; }
+        }
+        MediaChanged?.Invoke(this, new MediaChangedArgs(rel, GetMedia(rel)));
+    }
 
     public IReadOnlyList<MarkerSpot> MarkersFor(RecordingEntry r)
     {

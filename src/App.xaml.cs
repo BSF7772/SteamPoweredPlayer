@@ -14,6 +14,7 @@ public partial class App : Application
     {
         // WinExe, unpackaged: arguments come from the process command line.
         AppServices.Init(AppOptions.Parse(Environment.GetCommandLineArgs().Skip(1).ToArray()));
+        PlayerHost.Start();        // mpv + renderer on a worker thread, so the first open is warm
         _window = new MainWindow();
         _window.Activate();
     }

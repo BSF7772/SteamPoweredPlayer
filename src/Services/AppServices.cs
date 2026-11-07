@@ -98,7 +98,11 @@ public static class AppServices
                 Library = new IndexFileLibrarySource(DataFolder);
             }
         }
-        if (Library is not null) await Library.StartAsync().ConfigureAwait(true);
+        if (Library is not null)
+        {
+            await Library.StartAsync().ConfigureAwait(true);
+            if (PlayerHost.Instance is { } player) _ = player.PreWarmAsync(Library);
+        }
     }
 
     public static void Toast(string title, string? message = null, InfoBarSeverity severity = InfoBarSeverity.Informational, int seconds = 6) =>
