@@ -1,0 +1,14 @@
+<!-- SPDX-License-Identifier: GPL-3.0-or-later -->
+<Project>
+  <PropertyGroup>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <LangVersion>14</LangVersion>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <InvariantGlobalization>true</InvariantGlobalization>
+    <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
+    <!-- Packages stay inside the workspace (AGENTS.md: nothing system-wide). NUGET_PACKAGES (tools\env.ps1) wins when set. -->
+    <RestorePackagesPath Condition="'$(NUGET_PACKAGES)' != ''">$(NUGET_PACKAGES)</RestorePackagesPath>
+    <RestorePackagesPath Condition="'$(NUGET_PACKAGES)' == ''">$(MSBuildThisFileDirectory).tools\nuget</RestorePackagesPath>
+  </PropertyGroup>
+</Project>

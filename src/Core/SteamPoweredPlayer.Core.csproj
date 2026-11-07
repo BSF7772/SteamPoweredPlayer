@@ -1,0 +1,31 @@
+<!-- SPDX-License-Identifier: GPL-3.0-or-later -->
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <RootNamespace>SteamPoweredPlayer.Core</RootNamespace>
+    <AssemblyName>SteamPoweredPlayer.Core</AssemblyName>
+    <!-- The submodule (plan D5). Override for joint development: -p:FastEncoderDir=<path to a FastEncoder checkout> -->
+    <FastEncoderDir Condition="'$(FastEncoderDir)' == ''">$(MSBuildThisFileDirectory)..\..\external\FastEncoder\</FastEncoderDir>
+    <FastEncoderDir>$([MSBuild]::EnsureTrailingSlash('$(FastEncoderDir)'))</FastEncoderDir>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="SteamPoweredPlayer.Tests" />
+  </ItemGroup>
+
+  <!-- Linked, never copied or edited here (change FastEncoder upstream, then bump the submodule). -->
+  <ItemGroup Label="FastEncoder (linked, read-only)">
+    <Compile Include="$(FastEncoderDir)src\Core\Ff.cs" Link="FastEncoder\Ff.cs" />
+    <Compile Include="$(FastEncoderDir)src\Core\Encoders.cs" Link="FastEncoder\Encoders.cs" />
+    <Compile Include="$(FastEncoderDir)src\Core\Presets.cs" Link="FastEncoder\Presets.cs" />
+    <Compile Include="$(FastEncoderDir)src\Core\Pipeline.cs" Link="FastEncoder\Pipeline.cs" />
+    <Compile Include="$(FastEncoderDir)src\Core\AudioSync.cs" Link="FastEncoder\AudioSync.cs" />
+  </ItemGroup>
+  <ItemGroup>
+    <PackageReference Include="Google.Protobuf" Version="3.36.2" />
+    <PackageReference Include="ValveKeyValue" Version="0.80.0.542" />
+  </ItemGroup>
+
+  <Target Name="CheckFastEncoder" BeforeTargets="BeforeBuild" Condition="!Exists('$(FastEncoderDir)src\Core\Ff.cs')">
+    <Error Text="FastEncoder not found at $(FastEncoderDir). Run: git submodule update --init" />
+  </Target>
+</Project>

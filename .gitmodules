@@ -1,0 +1,3 @@
+[submodule "external/FastEncoder"]
+	path = external/FastEncoder
+	url = ../FastEncoder.git
