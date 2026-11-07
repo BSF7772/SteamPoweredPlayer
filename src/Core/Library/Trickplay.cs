@@ -8,15 +8,6 @@ using SteamPoweredPlayer.Core.Steam;
 
 namespace SteamPoweredPlayer.Core.Library;
 
-/// <summary>How the keyframes are decoded.</summary>
-public enum DecodeMode
-{
-    /// <summary>D3D11VA hardware decode; if ffmpeg fails with it, the run is repeated in <see cref="Cpu"/> mode automatically.</summary>
-    Gpu,
-    /// <summary>Software decode (always available).</summary>
-    Cpu,
-}
-
 /// <param name="TileWidth">Thumbnail width in pixels (height follows the video's aspect ratio, 160 × 90 for 16:9).</param>
 /// <param name="JpegQuality">ffmpeg <c>-q:v</c> scale (2 best … 31 worst); spike S4: 10 at 160 px = 3.5 KB per thumbnail.</param>
 /// <param name="FfmpegPath">Override; default is FastEncoder's <c>Ff</c> lookup (next to the exe, PATH, winget).</param>

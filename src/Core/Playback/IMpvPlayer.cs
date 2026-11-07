@@ -1,9 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 namespace SteamPoweredPlayer.Core.Playback;
 
-/// <summary>Which decoder mpv uses: <c>hwdec=d3d11va</c> (GPU, zero-copy into the renderer's device) or <c>hwdec=no</c> (CPU).</summary>
-public enum DecodeMode { Gpu, Cpu }
-
 /// <summary>What the mpv instance draws on.</summary>
 public enum MpvOutput
 {

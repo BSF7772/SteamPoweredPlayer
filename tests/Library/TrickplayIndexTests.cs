@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
+using SteamPoweredPlayer.Core;
 using SteamPoweredPlayer.Core.Library;
 
 namespace SteamPoweredPlayer.Tests.Library;
