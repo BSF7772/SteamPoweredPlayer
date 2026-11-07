@@ -17,5 +17,12 @@ if errorlevel 1 (echo Build failed. & pause & exit /b 1)
 if "%~1"=="--rebuild" shift
 
 :run
+rem The diagnostics commands (--selftest, --bench, --realcheck, --uicheck) wait and return the exit code (0 = pass).
+for %%A in (--selftest --bench --realcheck --uicheck) do if /i "%~1"=="%%A" goto diag
 start "" "%EXE%" %*
 endlocal
+exit /b 0
+
+:diag
+start "" /wait "%EXE%" %*
+exit /b %errorlevel%
