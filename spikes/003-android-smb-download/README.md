@@ -32,11 +32,27 @@ and the server shows an encrypted 3.1.1 session.
 
 AES-128-GCM was negotiated, not AES-256-GCM: Windows chose it; jcifs offers both.
 
-**Bugs found on the device (fixed in code, re-run pending):**
+Re-runs with the fixes below (same 100 chunks, Wi-Fi off, no mobile data, so no route at all during the drop):
+
+| drop | result |
+|---|---|
+| 75 s | 202 files, 0 failed, **0 bytes re-fetched**, 2 `.part` resumes, SHA-256 202/202 == server |
+| 20 s, with fix 3 | 202 files, 0 failed, **0 bytes re-fetched**, 2 resumes, SHA-256 202/202; reconnected **35 ms** after Wi-Fi validated |
+
+**Bugs found on the device:**
 1. The fallback byte cap was checked only when connecting, so once on the VPN the whole rest of the range (494 MB) came over the
    VPN, part of it over mobile data. Now enforced on every read; when used up, workers wait for a network change.
+   **Fixed in code, not yet exercised on a device:** the re-runs had no route to the VPN during the drop.
 2. No fail-back: after Wi-Fi returned the download stayed on the VPN. Now a network callback probes the LAN profile and drops the
    fallback session when LAN is reachable; in-flight files resume their `.part` on LAN.
+   **Fixed in code, not yet exercised on a device,** for the same reason.
+3. The network callback never fired under a VPN. With a VPN up, the default network *is* the VPN and it survives Wi-Fi coming and
+   going: only its capabilities change (`wifi+vpn` → `vpn` → `wifi+vpn`), with no `onLost`/`onAvailable`. So fix 2 could not trigger
+   and retries were never woken early. Fixed and verified: a second callback on a non-VPN request reports the real networks, plus
+   `VALIDATED` as a trigger because the LAN route may not be usable yet at `onAvailable`. **The product must do the same** (plan §4.3).
+
+Known limit, left for the product: a file gives up after 30 attempts (about 4 min at the 8 s backoff ceiling), so a longer outage
+fails files instead of waiting. The product should pause on "no route" and resume on a network event, without counting attempts.
 
 ## Device runbook
 ```bash
@@ -45,13 +61,16 @@ adb shell am start -S -n spp.spike.s3/.MainActivity --es mode config --es lan <L
 # owner: open "SPP S3 SMB" on the phone, type the password, press Save
 adb shell am start -S -n spp.spike.s3/.MainActivity --es mode probe
 # baseline, then with drops (Wi-Fi off 20 s twice during the run), then VPN only
-adb shell am start -S -n spp.spike.s3/.MainActivity --es mode run --es session video/<bg_folder> --ei first 1 --ei count 100 --es tag lan --ez fresh true
-adb shell am start -S -n spp.spike.s3/.MainActivity --es mode run --es session video/<bg_folder> --ei first 1 --ei count 100 --es tag drops --ez fresh true
+# --es session is relative to the share root: use the path from the share down to the bg_ folder
+adb shell am start -S -n spp.spike.s3/.MainActivity --es mode run --es session <path>/video/<bg_folder> --ei first 1 --ei count 100 --es tag lan --ez fresh true
+adb shell am start -S -n spp.spike.s3/.MainActivity --es mode run --es session <path>/video/<bg_folder> --ei first 1 --ei count 100 --es tag drops --ez fresh true
 #   while it runs: adb shell svc wifi disable; sleep 20; adb shell svc wifi enable
-adb shell am start -S -n spp.spike.s3/.MainActivity --es mode run --es session video/<bg_folder> --ei first 1 --ei count 10 --es tag vpn --es only vpn --ez fresh true
+#   to exercise the cap and fail-back, the VPN must stay reachable with Wi-Fi off (mobile data on): keep --ei vpn_max_mb small
+adb shell am start -S -n spp.spike.s3/.MainActivity --es mode run --es session <path>/video/<bg_folder> --ei first 1 --ei count 10 --es tag vpn --es only vpn --ez fresh true
 adb pull /sdcard/Android/data/spp.spike.s3/files/results .
 ```
 Server side (Windows, elevated): `Get-SmbSession | Select ClientComputerName, Dialect, …` and `Get-SmbConnection`/event
 1046 to see the session's dialect and encryption. Corruption check: compare the recorded SHA-256 values with the server files.
 
-Verdict: **PASS on integrity, resume and encryption**; failover policy bugs fixed, needs one re-run of the drop test.
+Verdict: PARTIAL. **PASS on integrity, resume and encryption**; the fallback cap and LAN fail-back are fixed in code but still need
+one device run with a working route to the VPN while Wi-Fi is off.

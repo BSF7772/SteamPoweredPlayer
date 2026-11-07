@@ -12,6 +12,7 @@ import android.content.Context
 import android.net.ConnectivityManager
 import android.net.Network
 import android.net.NetworkCapabilities
+import android.net.NetworkRequest
 import android.os.Build
 import android.os.Bundle
 import android.security.keystore.KeyGenParameterSpec
@@ -140,13 +141,26 @@ class MainActivity : Activity() {
                 dl.event("caps", "$network ${t.joinToString("+")}")
             }
         }
+        // With a VPN up the default network IS the VPN and survives Wi-Fi coming and going (only its caps change), so the default
+        // callback never reports the change. A request without TRANSPORT_VPN (the builder's default NOT_VPN) sees the real networks.
+        // VALIDATED is a second trigger: at onAvailable the route to the LAN may not be usable yet.
+        val validated = java.util.concurrent.ConcurrentHashMap<Network, Boolean>()
+        val real = object : ConnectivityManager.NetworkCallback() {
+            override fun onAvailable(network: Network) = dl.onNetworkChange("real available $network")
+            override fun onLost(network: Network) { validated.remove(network); dl.onNetworkChange("real lost $network") }
+            override fun onCapabilitiesChanged(network: Network, nc: NetworkCapabilities) {
+                val v = nc.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED)
+                if (validated.put(network, v) != v && v) dl.onNetworkChange("real validated $network")
+            }
+        }
         cm.registerDefaultNetworkCallback(cb)
+        cm.registerNetworkCallback(NetworkRequest.Builder().addCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET).build(), real)
         try {
             val items = dl.plan(first, count)
             val r = dl.run(items)
             write(tag, r.put("mode", "run").put("session_name_hash", session.hashCode()).put("first", first).put("count", count)
                 .put("profiles", JSONArray(ps.map { it.name })))
-        } finally { cm.unregisterNetworkCallback(cb) }
+        } finally { cm.unregisterNetworkCallback(cb); cm.unregisterNetworkCallback(real) }
     }
 
     private fun guard(what: String, f: () -> Unit) = try { f() } catch (t: Throwable) {
