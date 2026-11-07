@@ -7,7 +7,7 @@
 //   am start -n spp.spike.s7/.MainActivity --es mode remux --es video <f> [--es audio <f>] --es out <f>
 //        [--ei shift_ms 300] [--ez color_full true] [--ef start <s>] [--ef len <s>]
 //   am start -n spp.spike.s7/.MainActivity --es mode transcode --es in <f> --es out <f> [--ef speed 2] [--es vmime video/hevc]
-//        [--ei bitrate 0 (= encoder default)]
+//        [--ei bitrate 0 (= encoder default)] [--es dec auto|hw|sw|<codec name>] [--es enc <codec name>]   (dec auto = software decoder for full-range input)
 //   am start -n spp.spike.s7/.MainActivity --es mode codecs        (MediaCodecList dump: AV1 encoder/decoder check)
 // Paths are relative to the app's external files dir.
 package spp.spike.s7
@@ -49,6 +49,10 @@ import java.nio.ByteBuffer
 class MainActivity : Activity() {
     private lateinit var log: TextView
     private lateinit var files: File
+    private var reqColor = "n/a"
+    private var cfgMediaFormat = "n/a"
+    private var decInColor = "n/a"
+    private var decName = "n/a"
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -172,11 +176,52 @@ class MainActivity : Activity() {
         val item = b.build()
         var enc = DefaultEncoderFactory.Builder(this).setEnableFallback(true)
         if (bitrate > 0) enc = enc.setRequestedVideoEncoderSettings(VideoEncoderSettings.Builder().setBitrate(bitrate).build())
+        val encName = intent.getStringExtra("enc")      // diagnostics: pin a specific encoder by MediaCodec name
+        if (encName != null) enc = enc.setVideoEncoderSelector { mime ->
+            com.google.common.collect.ImmutableList.copyOf(androidx.media3.transformer.EncoderSelector.DEFAULT.selectEncoderInfos(mime).filter { it.name == encName })
+        }
+        val inner = enc.build()
+        // diagnostics: what colour the Transformer asks the encoder for, and what MediaFormat the encoder is configured with
+        val encFactory = object : androidx.media3.transformer.Codec.EncoderFactory by inner {
+            override fun createForVideoEncoding(format: androidx.media3.common.Format, logSessionId: android.media.metrics.LogSessionId?): androidx.media3.transformer.Codec {
+                reqColor = format.colorInfo?.toString() ?: "null"
+                val c = inner.createForVideoEncoding(format, logSessionId)
+                cfgMediaFormat = try { c.javaClass.getDeclaredField("configurationMediaFormat").apply { isAccessible = true }.get(c).toString() } catch (t: Throwable) { "n/a: $t" }
+                return c
+            }
+        }
         val t0 = System.nanoTime()
-        val tr = Transformer.Builder(this)
+        // Decoder choice. Root cause of the colour bug (S7, test phone): the Qualcomm HW HEVC decoder -> Surface path treats the
+        // full-range Steam video as limited range (the MediaFormat/VUI range is ignored), so luma/chroma get stretched and clipped
+        // before Transformer's GL pipeline and encoder ever see them. Software decoders (c2.android.hevc.decoder) honour the range.
+        // "auto" (default) = use a software-only decoder when the input is full range, the HW decoder otherwise.
+        // --es dec auto|hw|sw|<MediaCodec name>
+        val decMode = intent.getStringExtra("dec") ?: "auto"
+        fun decoderFactory(sel: (androidx.media3.exoplayer.mediacodec.MediaCodecInfo) -> Boolean) =
+            androidx.media3.transformer.DefaultDecoderFactory.Builder(this).setMediaCodecSelector { mime, secure, tunneling ->
+                val all = androidx.media3.exoplayer.mediacodec.MediaCodecSelector.DEFAULT.getDecoderInfos(mime, secure, tunneling)
+                val pick = all.filter(sel)
+                if (pick.isNotEmpty()) pick else all
+            }.build()
+        val hwDec = decoderFactory { true }
+        val swDec = decoderFactory { it.softwareOnly }
+        val namedDec = if (decMode !in setOf("auto", "hw", "sw")) decoderFactory { it.name == decMode } else null
+        val decFactory = object : androidx.media3.transformer.Codec.DecoderFactory by hwDec {
+            override fun createForVideoDecoding(format: androidx.media3.common.Format, outputSurface: android.view.Surface, requestSdrToneMapping: Boolean, logSessionId: android.media.metrics.LogSessionId?): androidx.media3.transformer.Codec {
+                decInColor = format.colorInfo?.toString() ?: "null"
+                val full = format.colorInfo?.colorRange == C.COLOR_RANGE_FULL
+                val f = namedDec ?: when (decMode) { "sw" -> swDec; "hw" -> hwDec; else -> if (full) swDec else hwDec }
+                val c = f.createForVideoDecoding(format, outputSurface, requestSdrToneMapping, logSessionId)
+                decName = c.name
+                return c
+            }
+        }
+        val tb = Transformer.Builder(this)
+        tb.setAssetLoaderFactory(androidx.media3.transformer.DefaultAssetLoaderFactory(this, decFactory, androidx.media3.common.util.Clock.DEFAULT, null))
+        val tr = tb
             .setVideoMimeType(vmime)
             .setAudioMimeType(MimeTypes.AUDIO_AAC)
-            .setEncoderFactory(enc.build())
+            .setEncoderFactory(encFactory)
             .addListener(object : Transformer.Listener {
                 override fun onCompleted(composition: Composition, r: ExportResult) {
                     val ms = (System.nanoTime() - t0) / 1_000_000
@@ -185,7 +230,9 @@ class MainActivity : Activity() {
                         .put("realtime_factor_vs_input", if (ms > 0) r.durationMs * speed / ms else 0)
                         .put("video_encoder", r.videoEncoderName).put("video_mime", r.videoMimeType).put("audio_encoder", r.audioEncoderName)
                         .put("avg_video_bitrate", r.averageVideoBitrate).put("frames", r.videoFrameCount).put("size", "${r.width}x${r.height}")
-                        .put("color_info", r.colorInfo?.toString() ?: "null").put("file_size", r.fileSizeBytes), outPath)
+                        .put("color_info", r.colorInfo?.toString() ?: "null")
+                        .put("requested_encoder_color", reqColor).put("encoder_config_mediaformat", cfgMediaFormat)
+                        .put("decoder_input_color", decInColor).put("video_decoder", decName).put("file_size", r.fileSizeBytes), outPath)
                 }
                 override fun onError(composition: Composition, r: ExportResult, e: ExportException) {
                     say("ERROR transcode: ${e.errorCodeName} $e"); Log.e(TAG, "transcode", e)

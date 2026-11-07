@@ -27,7 +27,9 @@ re-encodes at 2×, then both are in sync and full-range colour survives.
 | sync (FastEncoder AudioSync, 14 s synthetic clip) | source +276.6 ms → export +576.6 ms = **+300.0 ms**, High 12/12 |
 | full range | export: `color_range=pc`, BT.709 primaries/matrix/transfer. Media3 on this phone already reads full range from the source, so `color_full` was not needed here (keep it as a guard) |
 | Transformer 2× | HW `OMX.qcom.video.encoder.hevc` at 2560x1440, 1801 frames → 15.0 s, 10.9 s wall = **2.8× realtime**; AAC `c2.android.aac.encoder` |
-| **2× colour bug** | the re-encode is tagged **BT.601 matrix / BT.470BG primaries** (range stays full). The pixels are encoder output of a BT.709 source, so players would show slightly wrong colours. Needs a fix before a product export: force BT.709 `ColorInfo` on the encoder input (or a video effect that sets it) and re-check |
+| **2× colour: root cause** | Not Media3: the Transformer already asks the encoder for BT.709 full (`color-standard=1`, `color-range=1`). Two device issues: (a) the Qualcomm HW HEVC decoder → Surface path treats the full-range input as limited range whatever range it is given, and stretches and clips luma/chroma before the GL pipeline. Software `c2.android.hevc.decoder` honours the range. (b) The Qualcomm HW encoders (HEVC and AVC) ignore the requested colour standard and always write BT.601 full; the 601 tag matches the pixels they write. The software encoders refuse 1440p |
+| **2× colour: fix** | `--es dec auto` (default) uses the software decoder for full-range input. Pixels checked on the PC against the source: RGB PSNR **28.8–30.3 dB before, 37.8–39.1 dB after**, mean RGB within 0.5. Output is still tagged BT.601 full range, which is correct for its pixels. Cost: **1.83× realtime** (software decode) instead of 2.8× |
+| 2× sync | 14 s synthetic clip, FastEncoder detector, High 12/12: source +276.6 ms → remux +576.6 ms (+300.0) → 2× +291.7 ms (expected 288.3, error 3.4 ms) |
 | Transformer 1× | no edit → Transformer passes the file through (same size, no encoder): fine for us, it means "lossless" exports should not go through Transformer anyway |
 | AV1 | **no AV1 encoder** on this phone (`findEncoderForFormat` = null); decoder `c2.android.av1-dav1d.decoder` (software). AV1 export presets must be gated at runtime |
 
@@ -56,4 +58,9 @@ packet-level compare of source vs lossless video (`ffprobe -show_packets` sizes 
 is recorded too (`realtime_factor_vs_input`), since the research found HEVC HW encode at about 1.5× realtime for 1080p60 and
 about 1.1× for 1440p60.
 
-Verdict: **PASS** for the lossless path (bit-exact, +300 ms exact, full range kept); 2× re-encode works but **colour tags are wrong** (BT.601) - open bug.
+For the product: detect the decoder range bug at runtime (decode one known frame) rather than by codec name, and expect BT.601-tagged
+re-encodes on phones whose encoders ignore the colour request. Only one phone tested.
+
+Verdict: **PASS** for the lossless path (re-run with the new build: bit-exact, +300 ms exact, full range kept). **PARTIAL** for the 2×
+re-encode: colours and sync are correct, but the output is BT.601-tagged (encoder limit), and a full-range source needs the software
+decoder (1.83× instead of 2.8× realtime).
