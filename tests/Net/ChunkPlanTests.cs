@@ -105,6 +105,14 @@ public sealed class ChunkPlanTests
     }
 
     [Fact]
+    public void Around_markers_on_a_clip_uses_the_clip_axis_shift()
+    {
+        // A saved clip: chunks 1..10 whose chunk 1 sits at tfdt 585 s (shift 585). A marker at 600 s ± 3 s -> [597, 603] -> chunks 5..7.
+        var clip = new SessionMedia("X", [new SegmentRun(1, 10)], 3.0, false, false, AxisShiftSeconds: 585);
+        Assert.Equal([5, 6, 7], ChunkPlan.AroundMarkers(clip, [600.0], 3.0));
+    }
+
+    [Fact]
     public void Around_markers_with_no_markers_selects_nothing() =>
         Assert.Empty(ChunkPlan.AroundMarkers(Media(new SegmentRun(1, 10)), [], 30.0));
 

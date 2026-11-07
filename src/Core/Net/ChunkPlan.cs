@@ -46,8 +46,9 @@ public static class ChunkPlan
         var wanted = new SortedSet<int>();
         foreach (var t in markerSeconds)
         {
-            var from = ChunkAt(t - marginSeconds, media.SegmentSeconds);
-            var to = ChunkAt(t + marginSeconds, media.SegmentSeconds);
+            // media.ChunkAt honours the axis shift (saved clips sit at their real tfdt, not at (N−1)·len).
+            var from = media.ChunkAt(t - marginSeconds);
+            var to = media.ChunkAt(t + marginSeconds);
             foreach (var c in media.Chunks().Where(c => c >= from && c <= to)) wanted.Add(c);
         }
         return [.. wanted];
