@@ -4,7 +4,7 @@ Native Windows 11 app (C# · WinUI 3 · Mica · libmpv) that plays and edits you
 or without Steam running. An Android companion (Kotlin · Compose · libmpv) reads the same library over encrypted SMB 3.1.1.
 Sister project of [FastEncoder](#fastencoder): same look, same presets, same audio-sync detector.
 
-> **Status: plan phase. Nothing is built yet.** Everything below is the target. The plan, with the evidence behind it, is in
+> **Status: plan phase. Nothing is built yet; the Phase 0 spikes are done (results in the plan, §9).** Everything below is the target. The plan, with the evidence behind it, is in
 > [`.hermes/plans/`](.hermes/plans/), and the reverse-engineered recording format is in
 > [`docs/steam-recording-format.md`](docs/steam-recording-format.md).
 

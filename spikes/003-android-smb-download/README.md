@@ -15,7 +15,8 @@ and the server shows an encrypted 3.1.1 session.
   for a corruption check against the server copy. A retry **resumes the `.part` at its length**, so a drop costs at most the
   bytes in flight. Priority = init segments, then chunks from the playhead forward; 2 workers by default. Retries back off
   0.5 … 8 s with jitter and are woken early by `ConnectivityManager` callbacks (no polling).
-- Profiles: LAN first, then VPN, each gated by a 1.5 s TCP probe of :445. A byte budget (`vpn_max_mb`, default 50) caps what may
+- Profiles: LAN first, then VPN, each gated by a 1.5 s TCP probe of :445. A spike-only byte budget (`vpn_max_mb`, default 50; the
+  product shows a one-time toast on metered networks instead, plan §4.3) caps what may
   be fetched through the fallback profile, because with Wi-Fi off the VPN rides on mobile data.
 - Opens are read-only with share READ|WRITE|DELETE, so Steam keeps writing and trimming.
 - Credentials: host, share and user can be set over adb; **the password is typed on the phone** and stored with a

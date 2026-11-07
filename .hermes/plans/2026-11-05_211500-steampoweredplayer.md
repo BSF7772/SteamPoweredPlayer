@@ -169,21 +169,20 @@ Applies to the Android app and to the desktop app when the library is on another
   classified by the route of their underlying interface (S9). `NetworkChange.NetworkAddressChanged` re-evaluates.
 - The user can override per server profile: **Auto / Always stream / Always download**.
 
-**Mobile data (maintainer 2026-11-07: warn only, never block or cap by default):**
-- "Costs money" = the physical network lacks `NET_CAPABILITY_NOT_METERED` (API 21; Android's own advice is to check this, not the
-  transport, so a metered Wi-Fi hotspot counts and a free cell plan doesn't). `TEMPORARILY_NOT_METERED` (API 30) counts as free while set.
-- Through a VPN, judge the **underlying** non-VPN network, not the VPN: VPN apps targeting Android 10+ are metered by default unless they
-  call `VpnService.Builder.setMetered(false)`, so a VPN may read "metered" even on home Wi-Fi. To check on the test phone: Tailscale's
-  `NOT_METERED` on Wi-Fi.
-- Warning: when a transfer starts or continues on a metered network, show a non-blocking banner "Using mobile data · 23 MB so far"
-  (bytes counted by the downloader per network) with **Pause until Wi-Fi**. One toast when the switch happens mid-download, then
-  the banner only. No prompt, no cap. An optional per-profile cap stays as a setting, off by default.
-- Data Saver: read `getRestrictBackgroundStatus()` (API 24) and listen to `ACTION_RESTRICT_BACKGROUND_CHANGED` (runtime receiver
-  only). When it's on and the app isn't exempt, background downloads are restricted by the OS: say so in the banner and offer
-  `Settings.ACTION_IGNORE_BACKGROUND_DATA_RESTRICTIONS_SETTINGS` (the user decides; an app can't exempt itself).
-- WorkManager: the download job uses `NetworkType.CONNECTED` (the warning replaces the old "unmetered only" default). "Wi-Fi only"
-  remains an opt-in user setting (`NetworkType.UNMETERED`).
-- Test: `adb shell cmd netpolicy set metered-network <ssid> true` simulates a metered Wi-Fi without spending mobile data.
+**Mobile data, metered networks, Data Saver (maintainer 2026-11-07: a toast, nothing else):**
+- When a transfer starts on a metered network, or Data Saver is on, show **one toast-style notice with "Don't show again"**. Then the
+  app stops caring: no cap, no prompt, no pause button, no Wi-Fi-only mode, no time budget for slow links. Android's own Data Saver
+  and data limits stay the user's tools.
+- The app shows only **the data downloaded so far from the source** (MB, per download and in total), next to the progress it already shows.
+- Detection: the default network lacks `NET_CAPABILITY_NOT_METERED` (API 21; Android advises this over checking the transport, so a
+  metered Wi-Fi counts and a free cell plan doesn't), or `getRestrictBackgroundStatus()` (API 24) reports Data Saver on. Re-checked
+  on `onCapabilitiesChanged` and on `ACTION_RESTRICT_BACKGROUND_CHANGED` (runtime receiver only).
+- Through a VPN this works as is. Measured on the test phone: Tailscale's VPN takes its metered flag from the network underneath
+  (Wi-Fi: `WIFI|VPN`, not metered; mobile data: `CELLULAR|VPN`, metered). Other VPN apps targeting Android 10+ are metered by default
+  unless they call `VpnService.Builder.setMetered(false)`. Worst case is a toast that isn't needed, once.
+- WorkManager job: `NetworkType.CONNECTED`.
+- Test without spending mobile data: `adb shell cmd netpolicy set metered-network <ssid> true`.
+- The spike's fallback byte cap (S3) was test scaffolding and is not carried into the product.
 
 **Wired (stream):** the loopback range server (phone) or direct UNC reads (desktop), with a read-ahead of N chunks. Seek budgets are in §5.
 
@@ -194,7 +193,7 @@ Applies to the Android app and to the desktop app when the library is on another
   parallel reads per session, fewer when retries rise.
 - **Resilience:** per-chunk retries with exponential backoff and jitter; reconnect on `NetworkCallback.onAvailable`; failover
   between server profiles mid-download (LAN ↔ VPN). Android runs it as a WorkManager job (foreground notification) that
-  survives the app closing and resumes after a reboot. Optional user constraints: Wi-Fi only, charging only (mobile data: see above).
+  survives the app closing and resumes after a reboot. Mobile data: see above (a toast only).
 - **The player only reads local files** (an EDL over cache paths), so network loss never reaches the decoder. If the playhead
   catches up with the download edge, playback pauses on a "Downloading 63 % · 4.1 MB/s" overlay and resumes on its own. Scrubbing
   inside the downloaded part is instant.
@@ -277,7 +276,7 @@ with the window EDL and periodic reload (431 MB after 16 media-minutes of whole-
 ### Phase 0: Spikes (`spikes/NNN-name/`, throwaway, each ends with `Verdict: VALIDATED | PARTIAL | INVALIDATED`)
 | # | Spike | Given / When / Then | Risk | Status / result |
 |---|---|---|---|---|
-| S2 | `edl-mp4dash-cli` | Given portable mpv ≥ 0.42 and an EDL over a 2 h session with a stale manifest, when played, then start < 250 ms, seek to 1:00:00 < 150 ms, A/V in sync, `audio-delay` live, speed 0.25/2/4, frame-step, gaps handled, time-pos origin recorded. Cache, **on copies only**: a chunk mpv has open can still be deleted; deleting head chunks under playback is survivable; EOF → re-EDL continues | High | **PARTIAL.** The EDL as first sketched fails (seeks land up to 3 s early, audio is lost after a seek, gaps freeze for 30 s). The **lead EDL** plus seek-by-reload (`loadfile <edl> start=<t>`), a pre-warmed mpv and a ~60-chunk window meets the budgets with hardware decode (open 95 ms pre-warmed, seek 95 ms median, 0/30 reload failures vs 12/12 failed revisit seeks). The delete-while-open and head-trim checks were not run (they need approval) |
+| S2 | `edl-mp4dash-cli` | Given portable mpv ≥ 0.42 and an EDL over a 2 h session with a stale manifest, when played, then start < 250 ms, seek to 1:00:00 < 150 ms, A/V in sync, `audio-delay` live, speed 0.25/2/4, frame-step, gaps handled, time-pos origin recorded. Cache, **on copies only**: a chunk mpv has open can still be deleted; deleting head chunks under playback is survivable; EOF → re-EDL continues | High | **PARTIAL.** The EDL as first sketched fails (seeks land up to 3 s early, audio is lost after a seek, gaps freeze for 30 s). The **lead EDL** plus seek-by-reload (`loadfile <edl> start=<t>`), a pre-warmed mpv and a ~60-chunk window meets the budgets with hardware decode (open 95 ms pre-warmed, seek 95 ms median, 0/30 reload failures vs 12/12 failed revisit seeks). Delete-while-open and head-trim, run later on copies (s2d, indicative timings): a held chunk deletes immediately (not delete-pending) and playback survives; 20 head chunks trimmed every 3 s under playback gave 0 ms stall, 6 ms axis drift and an 88 ms reload |
 | S1 | `winui-mpv-d3d11` | Given WinUI 3 + the libmpv D3D11 render API in a `SwapChainPanel`, when playing the S2 EDL, then no tearing, low CPU (relative definition, see the budgets), XAML draws over the video, resize/fullscreen work. Fallback `wid` | High | **VALIDATED (maintainer accepted RAM/CPU).** Correctness 26/26 (D3D11 render API, no `wid` needed). Perf on an idle machine (5-minute soak): CPU 1.96 % of all cores (< 3 PASS) but ≈ 5.6× the mpv CLI reference; 59.9 presents/s, 0 black frames; seek-by-reload median 96.5 ms (5 of 30 seeks > 150 ms); RAM 295 MB (over the 250 budget, accepted), growing ≈ 19 MB/min in the soak = mpv's bounded demuxer cache (≤ 200 MiB, released on reload: −67 MB). Maintainer: RAM/CPU overhead acceptable for now, only a real leak must be fixed; Phase 2 sets an explicit cache ceiling. The soak's "stall" was the harness: `keep-open` pauses at EOF and `pause` survives `loadfile`, so every reload that should play must set `pause=no` |
 | S3 | `android-smb-download` | Given an Android 13 phone + JCIFS 3 (read-only, encryption required) and two profiles (LAN, VPN), when downloading a 5 min range over Wi-Fi with injected drops (Wi-Fi toggled, AP roaming), then 0 corrupt chunks, ≤ 1 chunk re-fetched per drop, automatic resume and profile failover, and playback from local chunks never stalls inside the downloaded part. The server shows an encrypted 3.1.1 session | High | **Device PASS; AP roaming and playback during download not covered.** SMB 3.1.1 AES-128-GCM + signing on LAN and VPN; 5 min = 514 MB in 49 s (10.4 MB/s); Wi-Fi drops up to 90 s: 0 failed, 0 re-fetched, 0 SHA mismatches; failover to VPN over cellular in 9 s; 20 MB cap held (20.14 MB); fail-back 37 ms after Wi-Fi validated. Device runs found and fixed 3 failover bugs, including network callbacks silent under a VPN, because the default network is the VPN: the product must also watch non-VPN networks. See spike README |
 | S3b | `smb-stream-wired` | Given a wired client, when streaming the EDL over SMB (loopback range server on Android, direct reads on Windows), then the wired budgets hold. A throwaway Python `smbprotocol` client on any wired machine serves as the reference | Medium | planned |
@@ -408,7 +407,7 @@ achievement names/icons, a highlight reel on the phone. (Linux/macOS clients are
 |---|---|---|
 | libmpv D3D11 render API is new | Embedding bugs | S1 first; `wid` fallback |
 | EDL `mp4_dash` "may change" | A future mpv breaks playback | Pin libmpv; `stream_cb` fallback; selftest on upgrade |
-| Holding a cache chunk open blocks Steam's cleanup | The cache can't trim | Share-delete opens. S2 measured mpv's own share mode as READ\|WRITE\|DELETE, but "Steam deletes a chunk while mpv holds it" and "Steam trims the head while playing" were **not run** (open item); feed bytes ourselves if needed |
+| Holding a cache chunk open blocks Steam's cleanup | The cache can't trim | Share-delete opens. S2 measured mpv's own share mode as READ\|WRITE\|DELETE; on copies a held chunk deletes immediately and head trims during playback cause no stall (s2d). Disk space returns only after mpv closes the file, so the window reload matters |
 | Steam trims while you watch/export/download | Errors mid-operation | CacheFollower; downloads/exports report "Steam already removed X s" |
 | Wireless packet loss | Stutter, corrupt files | Download-first, per-chunk `.part` + size check, the player reads local files only |
 | Steam format/config changes | Missing recordings | Golden tests, "unknown layout" diagnostics, never write Steam's folder |
@@ -419,7 +418,18 @@ achievement names/icons, a highlight reel on the phone. (Linux/macOS clients are
 | Licence obligations when binaries ship | GPL requires source + licence texts for bundled libmpv/FFmpeg | GPL-3.0-or-later chosen (D19); release packaging adds `docs/third-party.md`, licence texts and the exact libmpv/FFmpeg versions/sources |
 | Personal data leaking into the repo | Privacy | Placeholders and synthetic fixtures only; maintainers keep local pre-commit checks |
 
-## 9. Open questions
-None blocking. Next step: maintainer approval to start Phase 0 (spikes).
+## 9. Status and open questions
+**Phase 0 closed for now (2026-11-07).** Validated: S1, S3, S5, S6, S8. Partial, with the result applied to the plan: S2 (lead
+EDL + seek-by-reload), S4 (adaptive first-fragment read), S7 (lossless export passes; 2× re-encode needs a software decoder for
+full-range input on the test phone and is tagged BT.601 by its encoder). Not started, deferred: S3b (wired streaming), S9 (link
+detection), S10 (Steam clip delete, needs approval). Before Phase 2 / 5 they are run or their features scoped down.
+
+Decisions taken in Phase 0 (2026-11-07): the S8 reference is the C# detector's result (+277 ms); RAM/CPU overhead in S1 is accepted
+unless it is a real leak; mobile data gets a toast only (§4.3), with no VPN time budget and no data cap.
+
+Open, none blocking: AP roaming and playback-during-download (S3 criterion parts not covered); whether to accept BT.601-tagged 2×
+exports on phones whose encoder ignores the colour request (current default: accept, the pixels are correct); `tools/bootstrap.ps1`.
+
+Next step: maintainer approval to start Phase 1.
 
 Resolved in rev 3.1: FastEncoder is published and used as a submodule (D5); Linux is out of scope; licence GPL-3.0-or-later (D19).
