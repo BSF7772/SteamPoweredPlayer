@@ -83,6 +83,9 @@ public sealed class LibraryService : IAsyncDisposable
     private readonly TimeProvider _clock;
     private readonly string? _root;
     private readonly LibraryBuilder? _builder;
+    private readonly LibraryBuilder? _markerBuilder;                           // own pb cache: marker loads never race the scan's LoadContextAsync
+    private readonly SemaphoreSlim _markerLock = new(1);
+    private (RecordingContext Ctx, long Tick)? _markerCtx;
     private readonly CancellationTokenSource _cts = new();
     private readonly Channel<(WorkKind Kind, string? Folder)> _queue = Channel.CreateUnbounded<(WorkKind, string?)>(new() { SingleReader = true });
 
@@ -123,7 +126,10 @@ public sealed class LibraryService : IAsyncDisposable
         _index = LibraryIndex.Create(_libraryId, _clock.GetUtcNow(), [], []);
         _status = new(LibraryState.NotStarted, _data is not null, false);
         if (_root is not null)
+        {
             _builder = new LibraryBuilder(_root, options.Names, _data is null ? null : new ArtworkStore(_data), _clock, options.Scan);
+            _markerBuilder = new LibraryBuilder(_root, null, null, _clock, options.Scan);
+        }
     }
 
     // ------------------------------------------------------------------------------------------------ public surface
@@ -193,6 +199,24 @@ public sealed class LibraryService : IAsyncDisposable
     {
         RequestFullRescan();
         return WhenIdleAsync(ct);
+    }
+
+    /// <summary>
+    /// All markers of one recording on its media-time axis (exact offset when Steam recorded one, folder-name fallback otherwise).
+    /// Reads only; safe to call from any thread while a scan runs. Empty when the folder is unknown or has no timeline.
+    /// </summary>
+    public async Task<MarkerSet> LoadMarkersAsync(string relativeFolder, CancellationToken ct = default)
+    {
+        if (_markerBuilder?.FolderFor(relativeFolder) is not { } folder) return new([], MarkerAlignment.None, []);
+        await _markerLock.WaitAsync(ct).ConfigureAwait(false);
+        try
+        {
+            var now = _clock.GetTimestamp();
+            if (_markerCtx is not { } c || _clock.GetElapsedTime(c.Tick, now) > TimeSpan.FromSeconds(10))
+                _markerCtx = c = (await _markerBuilder.LoadContextAsync(ct).ConfigureAwait(false), now);
+            return await _markerBuilder.LoadMarkersAsync(folder, c.Ctx, ct).ConfigureAwait(false);
+        }
+        finally { _markerLock.Release(); }
     }
 
     /// <summary>Rescans one folder now (no debounce), e.g. when the player opens a live session.</summary>

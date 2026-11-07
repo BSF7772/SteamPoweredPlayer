@@ -179,10 +179,9 @@ public sealed class LibraryBuilder
         }
     }
 
-    private async Task<RecordingEntry> CacheEntryAsync(RecordingFolder f, CachedScan scan, SessionMedia media, RecordingContext ctx, CancellationToken ct)
+    private static string? FindCacheTimeline(RecordingFolder f, RecordingContext ctx)
     {
         var name = Path.GetFileName(f.FullPath);
-        var offset = ctx.Pb?.OffsetMsForFolder(name);
         string? timeline = null;
         var tid = ctx.Pb?.Timelines.FirstOrDefault(t => t.Recordings.Any(r => string.Equals(r.BgFolder, name, StringComparison.Ordinal)))?.TimelineId;
         if (tid is not null) ctx.ById.TryGetValue(tid, out timeline);
@@ -193,6 +192,23 @@ public sealed class LibraryBuilder
             foreach (var (path, tn) in ctx.Timelines)
                 if (tn.GameId == gid && tn.StartUtc <= f.Name.StartUtc && (timeline is null || tn.StartUtc > best)) { timeline = path; best = tn.StartUtc; }
         }
+        return timeline;
+    }
+
+    private static string? FindClipTimeline(RecordingFolder f)
+    {
+        try
+        {
+            return Directory.EnumerateFiles(Path.Combine(f.FullPath, "timelines"), "*.json").Order(StringComparer.Ordinal).FirstOrDefault();
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException) { return null; /* no timeline */ }
+    }
+
+    private async Task<RecordingEntry> CacheEntryAsync(RecordingFolder f, CachedScan scan, SessionMedia media, RecordingContext ctx, CancellationToken ct)
+    {
+        var name = Path.GetFileName(f.FullPath);
+        var offset = ctx.Pb?.OffsetMsForFolder(name);
+        var timeline = FindCacheTimeline(f, ctx);
         var markers = await CountMarkersAsync(timeline, offset, f.Name.StartUtc, media, ct).ConfigureAwait(false);
         return NewEntry(f, media, scan.SizeBytes, null, markers, offset);
     }
@@ -202,16 +218,47 @@ public sealed class LibraryBuilder
         var mediaName = Path.GetFileName(scan.MediaFolder ?? media.Folder);
         var pb = scan.Clip;
         var offset = pb?.OffsetMsForFolder(mediaName) ?? pb?.OffsetMs;
-        string? timeline = null;
-        try
-        {
-            timeline = Directory.EnumerateFiles(Path.Combine(f.FullPath, "timelines"), "*.json").Order(StringComparer.Ordinal).FirstOrDefault();
-        }
-        catch (Exception e) when (e is IOException or UnauthorizedAccessException) { /* no timeline */ }
+        var timeline = FindClipTimeline(f);
         var bgStart = FolderNames.ParseMediaFolder(mediaName)?.StartUtc ?? f.Name.StartUtc;
         var markers = await CountMarkersAsync(timeline, offset, bgStart, media, ct).ConfigureAwait(false);
         var title = string.IsNullOrWhiteSpace(pb?.Title) ? null : pb!.Title;
         return NewEntry(f, media, scan.SizeBytes, title, markers, offset);
+    }
+
+    /// <summary>
+    /// All markers of one recording on its media-time axis (not trimmed to the chunks on disk): exact offset from <c>gamerecording.pb</c> /
+    /// <c>clip.pb</c> (field 1.5.10), the folder-name rule as fallback. Empty when the recording has no timeline. Reads only.
+    /// </summary>
+    public async Task<MarkerSet> LoadMarkersAsync(RecordingFolder f, RecordingContext ctx, CancellationToken ct = default)
+    {
+        try
+        {
+            string? timeline;
+            long? offset;
+            DateTimeOffset bgStart;
+            if (f.Kind == RecordingKind.CacheSession)
+            {
+                timeline = FindCacheTimeline(f, ctx);
+                offset = ctx.Pb?.OffsetMsForFolder(Path.GetFileName(f.FullPath));
+                bgStart = f.Name.StartUtc;
+            }
+            else
+            {
+                var pb = await RecordingPb.ReadClipAsync(Path.Combine(f.FullPath, "clip.pb"), ct).ConfigureAwait(false);
+                var mediaName = Path.GetFileName(Scanner.FindClipMediaFolder(f.FullPath, pb.MediaFolders.FirstOrDefault()) ?? "");
+                offset = pb.OffsetMsForFolder(mediaName) ?? pb.OffsetMs;
+                timeline = FindClipTimeline(f);
+                bgStart = FolderNames.ParseMediaFolder(mediaName)?.StartUtc ?? f.Name.StartUtc;
+            }
+            if (timeline is null) return new([], MarkerAlignment.None, []);
+            var file = await Timeline.ReadAsync(timeline, ct).ConfigureAwait(false);
+            var start = FolderNames.ParseTimeline(Path.GetFileName(timeline))?.StartUtc;
+            return Markers.Map(file, offset, bgStart, start);
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+        {
+            return new([], MarkerAlignment.None, [e.Message]);
+        }
     }
 
     private static async Task<int> CountMarkersAsync(string? timelinePath, long? offset, DateTimeOffset bgStart, SessionMedia media, CancellationToken ct)

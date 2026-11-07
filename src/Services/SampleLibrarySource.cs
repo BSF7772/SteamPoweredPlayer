@@ -74,12 +74,40 @@ public sealed class SampleLibrarySource : ILibrarySource
 
     public LibraryIndex? Current => _index;
     public string? Problem => null;
-    public event EventHandler? IndexChanged { add { } remove { } }
+    public event EventHandler<IndexChangedArgs>? IndexChanged { add { } remove { } }
+    public event EventHandler<MediaChangedArgs>? MediaChanged { add { } remove { } }
+    public event EventHandler<string>? DerivedChanged { add { } remove { } }
     public event EventHandler<ScanProgressInfo>? ScanProgress { add { } remove { } }
 
     public Task StartAsync(CancellationToken ct = default) => Task.CompletedTask;
 
     public string? ResolveArt(string? relativePath) => null;
+
+    public SessionMedia? GetMedia(string relativeFolder) =>
+        _index.Recordings.FirstOrDefault(r => r.RelativeFolder == relativeFolder) is { } r
+            ? new SessionMedia(r.RelativeFolder, r.Runs, r.SegmentSeconds, r.Live, r.Temporary)
+            : null;
+
+    public IReadOnlyList<Marker> FullMarkersFor(string relativeFolder)
+    {
+        var r = _index.Recordings.FirstOrDefault(x => x.RelativeFolder == relativeFolder);
+        if (r is null) return [];
+        var seed = r.RelativeFolder.Sum(c => c);
+        var dur = Fmt0(r);
+        var list = new List<Marker>();
+        for (var k = 0; k < r.MarkerCount; k++)
+        {
+            var g = (seed + k * 3) % Glyphs.Length;
+            var at = dur * (0.08 + 0.84 * ((k + 0.2 + 0.6 * (((seed + k * 7) % 10) / 10.0)) / r.MarkerCount));
+            var entry = new TimelineEntry(null, (long)(at * 1000), TimelineEntryType.Event, "event", Labels[g], null, null, null, 0, false, null, [], null, null);
+            list.Add(new Marker(entry, at, null, MarkerAlignment.Exact));
+        }
+        return list;
+    }
+
+    private static double Fmt0(RecordingEntry r) => r.DurationSeconds > 0 ? r.DurationSeconds : r.Runs.Sum(x => x.Count) * r.SegmentSeconds;
+
+    public TrickplayIndex? TrickplayFor(string relativeFolder) => null;
 
     public IReadOnlyList<MarkerSpot> MarkersFor(RecordingEntry r)
     {

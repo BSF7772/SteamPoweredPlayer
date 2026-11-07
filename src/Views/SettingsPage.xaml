@@ -14,11 +14,11 @@
                 <StackPanel Spacing="8">
                     <TextBlock Text="Decoding" Style="{StaticResource SectionTitle}" />
                     <RadioButtons x:Name="DecodeButtons" SelectionChanged="Decode_Changed">
-                        <RadioButton Content="GPU (auto)" Tag="gpu" />
+                        <RadioButton x:Name="GpuOption" Content="GPU (auto)" Tag="gpu" />
                         <RadioButton Content="CPU" Tag="cpu" />
                     </RadioButtons>
                     <TextBlock Style="{StaticResource Caption}" TextWrapping="Wrap"
-                               Text="GPU decoding is the default and falls back to the CPU by itself. Choose CPU if video looks wrong on this PC." />
+                               Text="GPU decoding is the default and falls back to the CPU by itself. Choose CPU if video looks wrong on this PC. The choice applies the next time a recording opens or thumbnails are made." />
                 </StackPanel>
             </Border>
 
@@ -27,6 +27,21 @@
                     <TextBlock Text="Library folder" Style="{StaticResource SectionTitle}" />
                     <TextBlock x:Name="DataFolderText" FontFamily="Cascadia Mono, Consolas" FontSize="13" IsTextSelectionEnabled="True" TextWrapping="Wrap" />
                     <TextBlock Text="Index, artwork and thumbnails. Never inside Steam's recording folder." Style="{StaticResource Caption}" />
+                    <InfoBar x:Name="DataProblem" IsOpen="False" IsClosable="False" Severity="Warning" Title="Can't use this folder" />
+                    <StackPanel Orientation="Horizontal" Spacing="8" Margin="0,4,0,0">
+                        <Button x:Name="ChangeDataButton" Click="ChangeData_Click">
+                            <StackPanel Orientation="Horizontal" Spacing="8">
+                                <FontIcon Glyph="&#xE8B7;" FontSize="14" />
+                                <TextBlock Text="Change…" />
+                            </StackPanel>
+                        </Button>
+                        <Button x:Name="OpenDataButton" Click="OpenData_Click">
+                            <StackPanel Orientation="Horizontal" Spacing="8">
+                                <FontIcon Glyph="&#xE838;" FontSize="14" />
+                                <TextBlock Text="Open in Explorer" />
+                            </StackPanel>
+                        </Button>
+                    </StackPanel>
                 </StackPanel>
             </Border>
 
@@ -35,6 +50,13 @@
                     <TextBlock Text="Recordings folder (from Steam)" Style="{StaticResource SectionTitle}" />
                     <TextBlock x:Name="RecordingsText" FontFamily="Cascadia Mono, Consolas" FontSize="13" IsTextSelectionEnabled="True" TextWrapping="Wrap" />
                     <TextBlock x:Name="KeepText" Style="{StaticResource Caption}" />
+                    <TextBlock Text="Read from Steam's own settings. SteamPoweredPlayer only reads here and never writes." Style="{StaticResource Caption}" />
+                    <Button x:Name="OpenRecordingsButton" Click="OpenRecordings_Click" Margin="0,4,0,0" HorizontalAlignment="Left">
+                        <StackPanel Orientation="Horizontal" Spacing="8">
+                            <FontIcon Glyph="&#xE838;" FontSize="14" />
+                            <TextBlock Text="Open in Explorer" />
+                        </StackPanel>
+                    </Button>
                 </StackPanel>
             </Border>
         </StackPanel>
