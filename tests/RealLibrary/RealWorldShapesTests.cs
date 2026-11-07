@@ -65,6 +65,81 @@ public sealed class RealWorldShapesTests : IDisposable
         Assert.False(r.Media!.Temporary);
     }
 
+    private static async Task WriteMediaAsync(string media)
+    {
+        Directory.CreateDirectory(media);
+        byte[] box = [0, 0, 0, 0x18, (byte)'s', (byte)'t', (byte)'y', (byte)'p', 1, 2, 3, 4];
+        foreach (var f in new[] { "init-stream0.m4s", "init-stream1.m4s", "chunk-stream0-00001.m4s", "chunk-stream1-00001.m4s" })
+            await File.WriteAllBytesAsync(Path.Combine(media, f), box);
+    }
+
+    /// <summary>clip.pb: 1 timelines {1 id, 5 recordings {1 recording_id, 10 zero offset}}; Steam's CGameRecordingClipFile.</summary>
+    private static byte[] ClipPbNaming(params (string Folder, long Offset)[] recordings)
+    {
+        using var tl = new MemoryStream();
+        var tw = new Google.Protobuf.CodedOutputStream(tl);
+        tw.WriteTag(1, Google.Protobuf.WireFormat.WireType.LengthDelimited); tw.WriteString("1001");
+        foreach (var (folder, offset) in recordings)
+        {
+            using var rs = new MemoryStream();
+            var rw = new Google.Protobuf.CodedOutputStream(rs);
+            rw.WriteTag(1, Google.Protobuf.WireFormat.WireType.LengthDelimited); rw.WriteString(folder);
+            rw.WriteTag(10, Google.Protobuf.WireFormat.WireType.Varint); rw.WriteInt64(offset);
+            rw.Flush();
+            tw.WriteTag(5, Google.Protobuf.WireFormat.WireType.LengthDelimited); tw.WriteBytes(Google.Protobuf.ByteString.CopyFrom(rs.ToArray()));
+        }
+        tw.Flush();
+        using var outer = new MemoryStream();
+        var ow = new Google.Protobuf.CodedOutputStream(outer);
+        ow.WriteTag(1, Google.Protobuf.WireFormat.WireType.LengthDelimited); ow.WriteBytes(Google.Protobuf.ByteString.CopyFrom(tl.ToArray()));
+        ow.Flush();
+        return outer.ToArray();
+    }
+
+    [Fact]
+    public void Every_recording_of_a_timeline_is_read()
+    {
+        var c = RecordingPb.ParseClip(ClipPbNaming(("bg_730_20250101_120000_0", 1000), ("bg_730_20250101_120000_1", 61000)));
+        Assert.Empty(c.Diagnostics);
+        Assert.Equal(["bg_730_20250101_120000_0", "bg_730_20250101_120000_1"], c.MediaFolders);
+        Assert.Equal(61000L, c.OffsetMsForFolder("bg_730_20250101_120000_1"));
+        Assert.Equal(1000L, c.OffsetMs);                                       // first recording
+        var bytes = ClipPbNaming(("a", 1), ("b", 2));
+        Assert.Equal(bytes, RecordingPb.ParseClip(bytes).Raw.Serialize());     // still byte-exact
+    }
+
+    [Fact]
+    public async Task Clip_pb_names_the_media_folder_even_when_the_name_is_unknown()
+    {
+        var clip = Path.Combine(_dir, "clip_730_20250101_120500");
+        await WriteMediaAsync(Path.Combine(clip, "video", "bg_730_20250101_120000"));     // a decoy with a known name
+        await WriteMediaAsync(Path.Combine(clip, "video", "zz_future_layout"));
+        await File.WriteAllBytesAsync(Path.Combine(clip, "clip.pb"), ClipPbNaming(("zz_future_layout", 0)));
+        var r = await Scanner.ScanClipAsync(clip);
+        Assert.Equal(ScanStatus.Playable, r.Status);
+        Assert.EndsWith("zz_future_layout", r.Media!.Folder);
+    }
+
+    [Fact]
+    public async Task Without_clip_pb_an_unknown_folder_with_init_segments_still_plays()
+    {
+        var clip = Path.Combine(_dir, "clip_730_20250101_120500");
+        await WriteMediaAsync(Path.Combine(clip, "video", "zz_future_layout"));
+        Directory.CreateDirectory(Path.Combine(clip, "video", "not_media"));
+        var r = await Scanner.ScanClipAsync(clip);
+        Assert.Equal(ScanStatus.Playable, r.Status);
+        Assert.EndsWith("zz_future_layout", r.Media!.Folder);
+    }
+
+    [Fact]
+    public void A_recording_id_cannot_escape_the_video_folder()
+    {
+        var clip = Path.Combine(_dir, "clip_730_20250101_120500");
+        Directory.CreateDirectory(Path.Combine(clip, "video"));
+        Assert.Null(Scanner.FindClipMediaFolder(clip, ".."));
+        Assert.Null(Scanner.FindClipMediaFolder(clip, "../../x"));
+    }
+
     [Fact]
     public async Task Clip_without_media_folder_is_not_playable_rather_than_gone()
     {

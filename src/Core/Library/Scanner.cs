@@ -69,34 +69,44 @@ public static class Scanner
     /// <c>bg_*</c> name says). A vanished clip folder is <see cref="ScanStatus.Gone"/>; one without a media folder is
     /// <see cref="ScanStatus.NotPlayable"/> with <see cref="ScanIssueKind.MissingMediaFolder"/>.
     /// </summary>
-    public static Task<ScanResult> ScanClipAsync(string clipFolder, ScanOptions? options = null, CancellationToken ct = default)
+    public static async Task<ScanResult> ScanClipAsync(string clipFolder, ScanOptions? options = null, CancellationToken ct = default)
     {
-        var media = FindClipMediaFolder(clipFolder);
+        // clip.pb names the media folder exactly (recording_id); 196 of 196 real clips matched. Without it, fall back to the name rules.
+        var pb = await RecordingPb.ReadClipAsync(Path.Combine(clipFolder, "clip.pb"), ct).ConfigureAwait(false);
+        var media = FindClipMediaFolder(clipFolder, pb.MediaFolders.FirstOrDefault());
         if (media is null)
-            return Task.FromResult(Directory.Exists(clipFolder)
+            return Directory.Exists(clipFolder)
                 ? ScanResult.Gone with { Status = ScanStatus.NotPlayable, Issues = [new(ScanIssueKind.MissingMediaFolder)] }
-                : ScanResult.Gone);
-        return ScanAsync(media, (options ?? new()) with { Temporary = false }, ct);
+                : ScanResult.Gone;
+        return await ScanAsync(media, (options ?? new()) with { Temporary = false }, ct).ConfigureAwait(false);
     }
 
     /// <summary>
-    /// The folder with the chunks of a clip: <c>&lt;clip&gt;/video/&lt;media folder&gt;</c>, named <c>bg_&lt;gameid&gt;_&lt;date&gt;_&lt;time&gt;</c>,
-    /// <c>bg_…_&lt;n&gt;</c> or <c>fg_…</c> (see <see cref="FolderNames.ParseMediaFolder"/>). If there are several the newest by name wins.
-    /// Null when there is none or the clip folder is gone.
+    /// The folder with the chunks of a clip, <c>&lt;clip&gt;/video/&lt;media folder&gt;</c>, in this order: the folder named
+    /// <paramref name="recordingId"/> (from <c>clip.pb</c>) if it exists; else a known name (<c>bg_*</c>, <c>bg_*_&lt;n&gt;</c>, <c>fg_*</c>, see
+    /// <see cref="FolderNames.ParseMediaFolder"/>), the newest by name; else any subfolder holding <c>init-stream0.m4s</c> (a future
+    /// layout still plays). Null when there is none or the clip folder is gone.
     /// </summary>
-    public static string? FindClipMediaFolder(string clipFolder)
+    public static string? FindClipMediaFolder(string clipFolder, string? recordingId = null)
     {
         try
         {
             var video = Path.Combine(Path.GetFullPath(clipFolder), "video");
-            string? best = null;
+            if (recordingId is { Length: > 0 } id && id.IndexOfAny(Path.GetInvalidFileNameChars()) < 0 && id is not ("." or "..")
+                && Directory.Exists(Path.Combine(video, id)))
+                return Path.Combine(video, id);
+            string? best = null, any = null;
             foreach (var dir in Directory.EnumerateDirectories(video))
             {
                 var name = Path.GetFileName(dir);
-                if (FolderNames.ParseMediaFolder(name) is null) continue;
+                if (FolderNames.ParseMediaFolder(name) is null)
+                {
+                    if (any is null && File.Exists(Path.Combine(dir, FolderNames.InitFile(0)))) any = dir;
+                    continue;
+                }
                 if (best is null || string.CompareOrdinal(name, Path.GetFileName(best)) > 0) best = dir;
             }
-            return best;
+            return best ?? any;
         }
         catch (DirectoryNotFoundException) { return null; }
         catch (IOException) { return null; }

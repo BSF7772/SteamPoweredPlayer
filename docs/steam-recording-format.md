@@ -126,13 +126,24 @@ fallback from the folder names, `(bgStartUtc − timelineStartUtc) × 1000`, is 
 to about 113 s before its bg folder. Composite events (`cs2_double_kill`, `cs2_multi_kill`) have `duration` ≈ 8 s and are ranges
 (the first kill is about 2 s after `time`); single `cs2_death`, `cs2_gun_kill`, `cs2_knife_kill`, `cs2_taser_kill` have `duration 0`.
 
-## Protobuf files (reverse-engineered, partial)
+## Protobuf files
+**Steam's own schema is published** in the client protobufs that SteamDatabase mirrors (`webui/common.proto`):
+`gamerecording.pb` is a `CGameRecordingFile`, `clip.pb` a `CGameRecordingClipFile`, and the timeline entries in both are
+`CGameRecordingTimelineMetadata`. Field 1.5 is `recordings` (**repeated**, one per media folder) of type
+`CGameRecordingTimelineMetadata_Recording`; its field 1 is `recording_id` (= the media folder name), and field 10 is
+`recording_zero_timeline_offset_ms`, the exact offset found by reverse engineering first. In `clip.pb`, fields 12/13 are the
+**thumbnail** size, not the video's. `recording_type` (1.5.4) has no published values; seen: 3 = background cache session,
+4 = clip recording (`bg`, `bg_…_0` and `fg` alike). In one real library every clip's media folder equalled its `recording_id`,
+so the scanner takes the folder name from `clip.pb` first. The annotated subset the app uses is in
+`src/Core/Steam/Proto/steamrecording.proto`. Notes from the reverse engineering, still valid:
 - `gamerecording.pb`: field 1 repeated `{1 timeline_id, 2 gameid, 3 date_recorded, 4 duration_ms}`. Field 4 repeated is a per-app
   tag index: `{1 appid, 2 tag{1 name, 2 group, 3 icon, 4 priority}, 3[] {2 timeline_id, 3 offset_ms}}`. Field 2 is unknown.
   **Field 1.5.10 is the exact offset (ms) of the bg-session start inside the timeline** (e.g. `57332` where the folder names say 57 s).
   Field 1.5 exists only for sessions whose cache folder is still present. Field 1.5.2 is *not* the offset for a trimmed session
   (there it is field 10 + the trimmed time), and 1.5.3 is the retained duration in ms: use field 10.
-- `clip.pb` (the offset is field 1 → 5 → **10**, same meaning and unit): `{1 {1 timeline_id, 2 gameid, 3 date, 4 duration_ms, 5 {1 bg_folder, 2 start_ms, 3 duration_ms, …}}, 3 created, 4 gameid,
-  7 title, 12 width, 13 height, …}`.
-- Related message names: SteamTracking/Protobufs `webui/service_gamerecordingclip.proto` (`CMsgVideoGameRecordingDef`).
+- `clip.pb` (the offset is field 1 → 5 → **10**, same meaning and unit): `{1 {1 timeline_id, 2 gameid, 3 date, 4 duration_ms, 5 {1 recording_id, 2 start_ms, 3 duration_ms, …}}, 2 first_timeline_start_offset_ms,
+  3 date_recorded, 4 gameid, 7 name, 8 temporary, 12 thumbnail_width, 13 thumbnail_height, …}`.
+- The upload/share messages are elsewhere (`webui/service_gamerecordingclip.proto`, `CMsgVideoGameRecordingDef`; not used).
   Validate any schema against many real files, never one.
+- What `fg_` means is not published (no online source explains the prefix either); it is probably a manually started
+  ("Record Manually") recording. The app doesn't depend on it: `clip.pb` names the folder.

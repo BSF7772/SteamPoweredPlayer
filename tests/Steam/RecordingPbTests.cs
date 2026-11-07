@@ -151,11 +151,11 @@ public sealed class RecordingPbTests
         Assert.Equal(57332L, c.OffsetMs);
         Assert.Equal("bg_730_20250101_120057", c.Timeline.Session!.BgFolder);
         Assert.Equal(30000L, c.Timeline.Session.DurationMs);
-        Assert.Equal(1735733000L, c.CreatedUnix);
+        Assert.Equal(1735733000L, c.DateRecordedUnix);
         Assert.Equal(730UL, c.GameId);
         Assert.Equal("Made up clip \U0001F3AE", c.Title);
-        Assert.Equal(2560, c.Width);
-        Assert.Equal(1440, c.Height);
+        Assert.Equal(2560, c.ThumbnailWidth);
+        Assert.Equal(1440, c.ThumbnailHeight);
         Assert.Equal(PbSamples.Clip(), c.Raw.Serialize());
         Assert.NotNull(c.Raw.First(20));
     }
@@ -170,9 +170,9 @@ public sealed class RecordingPbTests
         var c = RecordingPb.ParseClip(bytes);
         Assert.Null(c.Timeline);
         Assert.Single(c.Diagnostics);
-        Assert.Equal(1735733000L, c.CreatedUnix);
+        Assert.Equal(1735733000L, c.DateRecordedUnix);
         Assert.Equal("99", c.Title);
-        Assert.Equal(1920, c.Width);
+        Assert.Equal(1920, c.ThumbnailWidth);
         Assert.Equal(bytes, c.Raw.Serialize());
     }
 

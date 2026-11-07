@@ -1,49 +1,65 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //
-// Reverse-engineered, PARTIAL schema of Steam's game-recording protobuf files. Documentation only: this file is NOT compiled.
-// The product code (src/Core/Steam/RecordingPb*.cs) reads the wire format by hand and keeps every unknown field byte-for-byte.
-// Types marked "?" were seen as varint in some files and as length-delimited (decimal text) in others; the reader accepts both.
-// Validate any change against many real files (opt-in test: SPP_REAL_LIBRARY), never one. Related upstream names:
-// SteamTracking/Protobufs webui/service_gamerecordingclip.proto (CMsgVideoGameRecordingDef).
+// Schema of Steam's game-recording files. Documentation only: this file is NOT compiled. The product code
+// (src/Core/Steam/RecordingPb*.cs) reads the wire format by hand and keeps every field byte-for-byte.
+//
+// Names and numbers are Steam's own, from the published client protobufs (SteamDatabase/Protobufs, webui/common.proto,
+// checked 2026-11-07); they agree with what was reverse-engineered from real files first. Only the fields the app uses are
+// listed. Types: the reader also accepts a number written as a varint or as decimal text, as some files do.
 syntax = "proto2";
 
-// Field 5 of a timeline entry: the bg session this timeline belongs to (present only while the cache folder still exists).
-message SessionRef {
-  optional string bg_folder   = 1;   // bg_<gameid>_<yyyyMMdd>_<HHmmss>
-  optional uint64 start_ms    = 2;   // NOT the offset (for a trimmed session it is field 10 + the trimmed time)
-  optional uint64 duration_ms = 3;   // retained duration
-  // 4..9 unknown (kept)
-  optional uint64 offset_ms   = 10;  // EXACT offset of the bg session start inside the timeline: media tfdt = entry.time - offset_ms
+// gamerecording.pb
+message CGameRecordingFile {
+  repeated CGameRecordingTimelineMetadata timelines = 1;
+  // 2: repeated CGameRecordingPostGameSummary postgame_events
+  // 3: repeated string temporary_clips
+  repeated CGameRecordingTag tags = 4;               // per-app tag index
 }
 
-message TimelineRef {                // gamerecording.pb field 1 (repeated); clip.pb field 1 (single)
-  optional string      timeline_id   = 1;   // ? string or varint
-  optional uint64      gameid        = 2;   // appid, or (shortcutAppId << 32) | 0x02000000
-  optional uint64      date_recorded = 3;   // unix seconds
-  optional uint64      duration_ms   = 4;
-  optional SessionRef  session       = 5;
+// clip.pb
+message CGameRecordingClipFile {
+  repeated CGameRecordingTimelineMetadata timelines = 1;   // one in every clip seen so far
+  optional uint64 first_timeline_start_offset_ms = 2;
+  optional uint32 date_recorded = 3;                 // unix seconds
+  optional uint64 game_id = 4;
+  // 5 published_file_id, 6 size_in_bytes
+  optional string name = 7;                          // the clip title (local time in the default name)
+  optional bool temporary = 8;
+  // 9 original_device, 10 original_gaming_device_type, 11 date_downloaded
+  optional uint32 thumbnail_width = 12;              // the THUMBNAIL, not the video
+  optional uint32 thumbnail_height = 13;
+  // 14 repeated CGameRecordingTag tags, 15 repeated CGameRecordingPhase phases
 }
 
-message Tag           { optional string name = 1; optional string group = 2; optional string icon = 3; optional uint64 priority = 4; }
-message TagOccurrence { optional string timeline_id = 2; optional uint64 offset_ms = 3; }
-message TagIndexEntry {              // gamerecording.pb field 4 (repeated), per app
-  optional uint64 appid = 1;
-  optional Tag tag = 2;
-  repeated TagOccurrence occurrences = 3;
+message CGameRecordingTimelineMetadata {
+  optional string timeline_id = 1;
+  optional uint64 game_id = 2;                       // appid, or (shortcutAppId << 32) | 0x02000000
+  optional uint32 date_recorded = 3;                 // unix seconds
+  optional uint64 duration_ms = 4;
+  repeated CGameRecordingTimelineMetadata_Recording recordings = 5;   // one per media folder; only while the folder exists
+  // 6 repeated CGameRecordingPhase phases, 7 repeated CGameRecordingTimelineEvent significant_events
 }
 
-message GameRecordingPb {
-  repeated TimelineRef timelines = 1;
-  // 2: unknown (kept)
-  repeated TagIndexEntry tag_index = 4;
+message CGameRecordingTimelineMetadata_Recording {
+  optional string recording_id = 1;                  // the media folder name: bg_<gameid>_<date>_<time>[_<n>] or fg_...
+  optional uint64 start_offset_ms = 2;               // NOT the offset to use (for a trimmed session it is field 10 + the trimmed time)
+  optional uint64 duration_ms = 3;                   // retained duration
+  optional int32 recording_type = 4;                 // enum, values not published; seen: 3 = background cache, 4 = clip recording
+  // 5 delete_on_cleanup, 6 video_manager_clip_id, 7 video_manager_video_id, 8 cdn_manifest_url
+  optional uint64 file_size = 9;
+  optional uint64 recording_zero_timeline_offset_ms = 10;   // EXACT offset: media tfdt = entry.time - this
 }
 
-message ClipPb {
-  optional TimelineRef timeline = 1;
-  optional uint64 created = 3;       // unix seconds
-  optional uint64 gameid  = 4;
-  optional string title   = 7;
-  optional uint32 width   = 12;
-  optional uint32 height  = 13;
-  // everything else: unknown (kept)
+message CGameRecordingTag {
+  optional uint64 game_id = 1;
+  optional CTimelineTag tag = 2;
+  repeated CGameRecordingTag_Timeline references = 3;
 }
+
+message CGameRecordingTag_Timeline {
+  optional string clip_id = 1;
+  optional string timeline_id = 2;
+  optional uint64 offset_ms = 3;
+}
+
+message CTimelineTag { optional string name = 1; optional string group = 2; optional string icon = 3; optional uint32 priority = 4; }

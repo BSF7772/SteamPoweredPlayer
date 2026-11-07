@@ -463,7 +463,9 @@ Phase 6, 1.11 → Phase 2). Notes from the implementation:
 
 **Real-library run (2026-11-07, read-only, `tests/RealLibrary/`, about 200 recordings):** all pass after three fixes.
 - Fixed: current Steam has no `MostRecent` in `loginusers.vdf` (newest `timestamp` now); clip media folders can be `bg_…_0` or `fg_…`
-  (6 clips were unplayable, now 196/196 play); `"entries": {}` is an empty timeline. A clip with no media folder is now
+  (6 clips were unplayable, now 196/196 play; the scanner now takes the folder name from `clip.pb`, which matched 196/196);
+  `"entries": {}` is an empty timeline. Steam's published schema (SteamDatabase/Protobufs `webui/common.proto`) confirms the
+  reverse-engineered fields; field 1.5 (`recordings`) is repeated and is now read in full. A clip with no media folder is now
   NotPlayable, not Gone. Shapes reproduced in `RealWorldShapesTests` (synthetic).
 - Confirmed: every folder name parses; every `.pb` parses with 0 diagnostics and round-trips byte-exactly; every timeline parses;
   `duration` is ms; all 53 games get a real name (8 shortcuts, 39 from manifests, 6 from `appinfo.vdf`), 49 have art; markers map

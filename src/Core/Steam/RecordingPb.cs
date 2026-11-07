@@ -1,11 +1,27 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 namespace SteamPoweredPlayer.Core.Steam;
 
-/// <summary>Field 1.5 of <c>gamerecording.pb</c> / <c>clip.pb</c>: the bg session behind a timeline. <see cref="OffsetMs"/> (field 10) is the exact one.</summary>
-public sealed record SessionRef(string? BgFolder, long? StartMs, long? DurationMs, long? OffsetMs, PbMessage Raw);
+/// <summary>
+/// One recording of a timeline (Steam: <c>CGameRecordingTimelineMetadata_Recording</c>, field 5 of the timeline, repeated).
+/// <see cref="BgFolder"/> = <c>recording_id</c> (1), the media folder name; <see cref="StartMs"/> = <c>start_offset_ms</c> (2);
+/// <see cref="DurationMs"/> = <c>duration_ms</c> (3); <see cref="RecordingType"/> = <c>recording_type</c> (4; seen: 3 = background
+/// cache session, 4 = clip recording); <see cref="OffsetMs"/> = <c>recording_zero_timeline_offset_ms</c> (10), the exact offset.
+/// </summary>
+public sealed record SessionRef(string? BgFolder, long? StartMs, long? DurationMs, long? OffsetMs, PbMessage Raw)
+{
+    public long? RecordingType => Raw.First(4)?.AsInt64();
+    /// <summary><c>file_size</c> (9).</summary>
+    public long? FileSize => Raw.First(9)?.AsInt64();
+}
 
-/// <summary>One timeline entry of <c>gamerecording.pb</c> field 1, or the single one of <c>clip.pb</c>. <see cref="Session"/> is null when field 5 is missing.</summary>
-public sealed record TimelineRef(string? TimelineId, ulong? GameId, long? DateRecordedUnix, long? DurationMs, SessionRef? Session, PbMessage Raw);
+/// <summary>
+/// One timeline (Steam: <c>CGameRecordingTimelineMetadata</c>): <c>timeline_id</c> (1), <c>game_id</c> (2), <c>date_recorded</c> (3),
+/// <c>duration_ms</c> (4), <c>recordings</c> (5, repeated). <see cref="Session"/> is the first recording (null when there is none).
+/// </summary>
+public sealed record TimelineRef(string? TimelineId, ulong? GameId, long? DateRecordedUnix, long? DurationMs, SessionRef? Session, PbMessage Raw)
+{
+    public IReadOnlyList<SessionRef> Recordings { get; init; } = Session is null ? [] : [Session];
+}
 
 public sealed record PbTag(string? Name, string? Group, string? Icon, long? Priority);
 
@@ -18,21 +34,38 @@ public sealed record PbTagIndexEntry(ulong? AppId, PbTag? Tag, IReadOnlyList<PbT
 public sealed record GameRecordingPb(
     IReadOnlyList<TimelineRef> Timelines, IReadOnlyList<PbTagIndexEntry> TagIndex, PbMessage Raw, IReadOnlyList<string> Diagnostics)
 {
-    /// <summary>The exact offset (field 1.5.10, ms) for <paramref name="timelineId"/>, or null when unknown (missing field 5, trimmed away, no entry).</summary>
+    /// <summary>The exact offset (field 1.5.10, ms) of the first recording of <paramref name="timelineId"/>, or null when unknown.</summary>
     public long? OffsetMsFor(string timelineId) =>
         Timelines.FirstOrDefault(t => string.Equals(t.TimelineId, timelineId, StringComparison.Ordinal))?.Session?.OffsetMs;
 
-    /// <summary>The exact offset for the session whose cache folder is <paramref name="bgFolder"/> (e.g. <c>bg_730_20250101_120000</c>).</summary>
-    public long? OffsetMsForFolder(string bgFolder) =>
-        Timelines.FirstOrDefault(t => string.Equals(t.Session?.BgFolder, bgFolder, StringComparison.Ordinal))?.Session?.OffsetMs;
+    /// <summary>The exact offset for the recording whose media folder is <paramref name="bgFolder"/>, searching every recording of every timeline.</summary>
+    public long? OffsetMsForFolder(string bgFolder) => RecordingNamed(Timelines, bgFolder)?.OffsetMs;
+
+    internal static SessionRef? RecordingNamed(IEnumerable<TimelineRef> timelines, string folder) =>
+        timelines.SelectMany(t => t.Recordings).FirstOrDefault(r => string.Equals(r.BgFolder, folder, StringComparison.Ordinal));
 }
 
-/// <summary>Parsed <c>clip.pb</c>.</summary>
+/// <summary>
+/// Parsed <c>clip.pb</c> (Steam: <c>CGameRecordingClipFile</c>): <c>timelines</c> (1, repeated), <c>first_timeline_start_offset_ms</c>
+/// (2), <c>date_recorded</c> (3), <c>game_id</c> (4), <c>name</c> (7), <c>temporary</c> (8), <c>thumbnail_width</c>/<c>height</c> (12/13).
+/// </summary>
 public sealed record ClipPb(
-    TimelineRef? Timeline, long? CreatedUnix, ulong? GameId, string? Title, int? Width, int? Height, PbMessage Raw, IReadOnlyList<string> Diagnostics)
+    TimelineRef? Timeline, long? DateRecordedUnix, ulong? GameId, string? Title, int? ThumbnailWidth, int? ThumbnailHeight, PbMessage Raw,
+    IReadOnlyList<string> Diagnostics)
 {
-    /// <summary>Exact offset (field 1.5.10, ms) of the clip's source bg start inside the timeline, if present.</summary>
+    /// <summary>All timelines of the clip (<see cref="Timeline"/> is the first).</summary>
+    public IReadOnlyList<TimelineRef> Timelines { get; init; } = Timeline is null ? [] : [Timeline];
+
+    public long? FirstTimelineStartOffsetMs => Raw.First(2)?.AsInt64();
+    public bool? Temporary => Raw.First(8)?.AsInt64() is { } v ? v != 0 : null;
+
+    /// <summary>Exact offset (field 1.5.10, ms) of the clip's first recording inside its timeline, if present.</summary>
     public long? OffsetMs => Timeline?.Session?.OffsetMs;
+
+    /// <summary>The media folder names (<c>recording_id</c>) of the clip, in order: the folders under <c>clip_*/video/</c>.</summary>
+    public IEnumerable<string> MediaFolders => Timelines.SelectMany(t => t.Recordings).Select(r => r.BgFolder).OfType<string>();
+
+    public long? OffsetMsForFolder(string folder) => GameRecordingPb.RecordingNamed(Timelines, folder)?.OffsetMs;
 }
 
 /// <summary>
@@ -65,12 +98,14 @@ public static class RecordingPb
         var raw = PbMessage.Parse(data);
         if (raw.Error is not null) d.Add(raw.Error);
 
-        TimelineRef? tl = raw.First(1) is { } f1 && SubMessage(f1, "1", d) is { } m ? ReadTimelineRef(m, "1", d) : null;
-        long? created = Int64(raw, 3, "", d);
+        var tls = new List<TimelineRef>();
+        foreach (var f in raw.All(1))
+            if (SubMessage(f, "1", d) is { } m) tls.Add(ReadTimelineRef(m, "1", d));
+        long? date = Int64(raw, 3, "", d);
         ulong? gameId = UInt64(raw, 4, "", d);
         string? title = Text(raw, 7, "", d);
         long? w = Int64(raw, 12, "", d), h = Int64(raw, 13, "", d);
-        return new(tl, created, gameId, title, ToInt(w), ToInt(h), raw, d);
+        return new(tls.FirstOrDefault(), date, gameId, title, ToInt(w), ToInt(h), raw, d) { Timelines = tls };
     }
 
     public static async Task<GameRecordingPb> ReadGameRecordingAsync(string path, CancellationToken ct = default)
@@ -106,13 +141,13 @@ public static class RecordingPb
 
     private static TimelineRef ReadTimelineRef(PbMessage m, string path, List<string> d)
     {
-        SessionRef? session = null;
-        if (m.First(5) is { } f5 && SubMessage(f5, path + ".5", d) is { } sm)
-        {
-            string p = path + ".5";
-            session = new(Text(sm, 1, p, d), Int64(sm, 2, p, d), Int64(sm, 3, p, d), Int64(sm, 10, p, d), sm);
-        }
-        return new(Text(m, 1, path, d), UInt64(m, 2, path, d), Int64(m, 3, path, d), Int64(m, 4, path, d), session, m);
+        var recordings = new List<SessionRef>();
+        string p = path + ".5";
+        foreach (var f5 in m.All(5))
+            if (SubMessage(f5, p, d) is { } sm)
+                recordings.Add(new(Text(sm, 1, p, d), Int64(sm, 2, p, d), Int64(sm, 3, p, d), Int64(sm, 10, p, d), sm));
+        return new(Text(m, 1, path, d), UInt64(m, 2, path, d), Int64(m, 3, path, d), Int64(m, 4, path, d), recordings.FirstOrDefault(), m)
+        { Recordings = recordings };
     }
 
     private static PbTagIndexEntry ReadTagIndexEntry(PbMessage m, List<string> d)
