@@ -692,8 +692,14 @@ public sealed class LibraryService : IAsyncDisposable
     internal static bool SameEntry(RecordingEntry a, RecordingEntry b) =>
         RunsEqual(a.Runs, b.Runs) && a with { Runs = b.Runs } == b;
 
+    /// <summary>
+    /// Same playable media: folder, chunk runs, flags and time axis (<see cref="SessionMedia.AxisShiftSeconds"/>: a clip whose real tfdt was
+    /// just read moves on the axis). <see cref="SessionMedia.BitsPerSecond"/> is ignored on purpose: it only sizes mpv's cache at open,
+    /// and it drifts with every byte a live session writes.
+    /// </summary>
     internal static bool SameMedia(SessionMedia a, SessionMedia b) =>
-        a.Folder == b.Folder && a.SegmentSeconds == b.SegmentSeconds && a.Live == b.Live && a.Temporary == b.Temporary && RunsEqual(a.Runs, b.Runs);
+        a.Folder == b.Folder && a.SegmentSeconds == b.SegmentSeconds && a.Live == b.Live && a.Temporary == b.Temporary
+        && a.AxisShiftSeconds == b.AxisShiftSeconds && RunsEqual(a.Runs, b.Runs);
 
     private static bool RunsEqual(IReadOnlyList<SegmentRun> a, IReadOnlyList<SegmentRun> b)
     {

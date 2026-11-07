@@ -92,7 +92,9 @@ public static partial class Trickplay
 
     /// <summary>
     /// Attributes ffmpeg's output frames (in order, with their pts in seconds) to the chunks that were fed. Same count: order wins.
-    /// Different count (a decode error dropped frames): the pts decides (chunk N has pts ≈ (N − 1) · segment); an unattributable frame
+    /// Different count (a decode error dropped frames): the pts decides. ffmpeg (no <c>-copyts</c>) rebases pts to the first fed
+    /// fragment's tfdt (measured: a saved clip starting at tfdt ≈ 17 949 s gives pts 0, 3.0, 6.0), so pts p is chunk
+    /// <c>fed[0] + round(p / segment)</c> whatever the recording's axis (a trimmed cache session, a saved clip). An unattributable frame
     /// becomes 0 (it still occupies its tile).
     /// </summary>
     public static int[] MapFrames(IReadOnlyList<int> fed, IReadOnlyList<double> framePts, double segmentSeconds)
@@ -103,13 +105,14 @@ public static partial class Trickplay
             for (var i = 0; i < result.Length; i++) result[i] = fed[i];
             return result;
         }
+        if (fed.Count == 0) return result;
         var feedSet = new HashSet<int>(fed);
         var used = new HashSet<int>();
         for (var i = 0; i < result.Length; i++)
         {
             var p = framePts[i];
             if (double.IsNaN(p) || double.IsInfinity(p)) continue;
-            var c = (int)Math.Round(p / segmentSeconds) + 1;
+            var c = fed[0] + (int)Math.Round(p / segmentSeconds);
             if (feedSet.Contains(c) && used.Add(c)) result[i] = c;
         }
         return result;

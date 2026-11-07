@@ -125,3 +125,13 @@ Key = `recordings[].relativeFolder` (for a clip the clip folder; the chunks are 
 (never `.tmp`). An entry is trusted only while the file's name, length and last write time (UTC ticks) match the listing;
 anything else is head-read again. Other head results (too short, not a box, unreadable) are never stored.
 
+Since Phase 2.1 a folder entry may also carry an optional `"tfdt": [chunk, length, lastWriteUtcTicks, seconds]`: the real `tfdt`
+(seconds, invariant number) of the folder's first video chunk on disk when it was read, with that file's length and last write time.
+It places a saved clip on its real time axis (clips restart chunk numbers at 1 but keep the session's tfdt). It is trusted only
+while `chunk` is still the first chunk and the file's length and last write time match; otherwise that one fragment is read again.
+The key is optional and the file stays version 1: readers that predate it ignore it, and an entry without it is read once.
+
+```json
+"clips/clip_730_20250101_120500": { "chunks": [ … ], "tfdt": [1, 456789, 638700000000000000, 585.0] }
+```
+
