@@ -40,15 +40,15 @@
             </Grid>
 
             <SelectorBar x:Name="Nav" Grid.Column="2" VerticalAlignment="Center" SelectionChanged="Nav_SelectionChanged">
-                <SelectorBarItem x:Name="NavLibrary" Text="Library" Tag="library">
+                <SelectorBarItem x:Name="NavLibrary" AutomationProperties.AutomationId="NavLibrary" Text="Library" Tag="library">
                     <SelectorBarItem.Icon><FontIcon Glyph="&#xE8F1;" /></SelectorBarItem.Icon>
                 </SelectorBarItem>
-                <SelectorBarItem x:Name="NavSettings" Text="Settings" Tag="settings">
+                <SelectorBarItem x:Name="NavSettings" AutomationProperties.AutomationId="NavSettings" Text="Settings" Tag="settings">
                     <SelectorBarItem.Icon><FontIcon Glyph="&#xE713;" /></SelectorBarItem.Icon>
                 </SelectorBarItem>
             </SelectorBar>
 
-            <StackPanel x:Name="TitleChips" Grid.Column="3" Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
+            <StackPanel x:Name="TitleChips" AutomationProperties.AutomationId="TitleChips" Grid.Column="3" Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
                 <StackPanel.ChildrenTransitions>
                     <TransitionCollection><EntranceThemeTransition FromHorizontalOffset="24" IsStaggeringEnabled="True" /></TransitionCollection>
                 </StackPanel.ChildrenTransitions>

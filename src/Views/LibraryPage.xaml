@@ -35,7 +35,7 @@
                     <AutoSuggestBox x:Name="SearchBox" Grid.Row="1" Margin="12,0,12,8" PlaceholderText="Search games"
                                     QueryIcon="Find" TextChanged="SearchBox_TextChanged" />
 
-                    <ListView x:Name="GameList" Grid.Row="2" SelectionMode="Single" Padding="4,0,4,8"
+                    <ListView x:Name="GameList" AutomationProperties.AutomationId="LibraryGameList" Grid.Row="2" SelectionMode="Single" Padding="4,0,4,8"
                               SelectionChanged="GameList_SelectionChanged">
                         <ListView.ItemContainerTransitions>
                             <TransitionCollection>
@@ -186,7 +186,7 @@
                                 </ItemsRepeater.Layout>
                                 <ItemsRepeater.ItemTemplate>
                                     <DataTemplate x:DataType="local:ClipTile">
-                                        <Button Tag="{x:Bind}" Click="Clip_Click" Padding="0" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch"
+                                        <Button Tag="{x:Bind}" AutomationProperties.AutomationId="LibraryClipTile" Click="Clip_Click" Padding="0" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch"
                                                 Background="Transparent" BorderThickness="0" CornerRadius="8"
                                                 PointerEntered="Tile_PointerEntered" PointerExited="Tile_PointerExited">
                                             <StackPanel Spacing="6">
