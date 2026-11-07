@@ -1,0 +1,16 @@
+{
+  "daterecorded": "1735732800",
+  "starttime": 0,
+  "endtime": 900000,
+  "entries": [
+    { "id": "p1", "time": 0, "type": "phase", "title": "Map", "description": "de_made_up", "icon": "steam_phase", "priority": 0, "duration": 0,
+      "tags": [ { "name": "de_made_up", "group": "Map", "icon": "map", "priority": 1 }, { "name": "Casual", "group": "Mode", "priority": "2" } ] },
+    { "id": "e0", "time": 20000, "type": "gamemode", "title": "Warmup", "mode": "warmup", "duration": 15000 },
+    { "id": "e1", "time": 70000, "type": "event", "title": "You died 💀", "description": "Eliminated by élève", "icon": "cs2_death", "priority": 2, "duration": 0, "possible_clip": true },
+    { "id": "e2", "time": 90000, "type": "event", "title": "Gun kill", "icon": "cs2_gun_kill", "priority": 1, "duration": 0 },
+    { "id": "e3", "time": 100000, "type": "event", "title": "Double kill", "icon": "cs2_double_kill", "priority": 3, "duration": 8000, "possible_clip": true },
+    { "id": "e4", "time": 130000, "type": "screenshot", "title": "Screenshot", "icon": "steam_screenshot", "handle": "1234567890" },
+    { "id": "e5", "time": 150000, "type": "achievement", "title": "Made up", "achievement_name": "MADE_UP_ACH" },
+    { "id": "e6", "time": 200000, "type": "weird_new_type", "title": "Future", "duration": 0 }
+  ]
+}
