@@ -1,0 +1,68 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- SPDX-License-Identifier: GPL-3.0-or-later -->
+<!--
+  Bundled binaries for the app project:   <Import Project="..\tools\Dependencies.targets" />
+
+  - Resolves LibMpvDir (default .tools\libmpv\<version>\, version read from tools\deps.json; override with -p:LibMpvDir=...).
+  - Fails the build when libmpv-2.dll is missing (run tools\bootstrap.ps1) or its SHA-256 differs from the pinned one.
+  - Copies libmpv-2.dll, ffmpeg.exe and ffprobe.exe (when bootstrapped) and licenses\ to the output (and so to publish).
+  - SppSkipDependencies=true switches the whole file off (design-time or tools that never run the app).
+  - Properties you can set before the import: LibMpvDir, LibMpvSha256, FfmpegDir.
+-->
+<Project>
+
+  <PropertyGroup>
+    <SppRepoRoot>$([System.IO.Path]::GetFullPath('$(MSBuildThisFileDirectory)..\'))</SppRepoRoot>
+    <SppDepsJson>$(SppRepoRoot)tools\deps.json</SppDepsJson>
+    <_SppDepsText Condition="Exists('$(SppDepsJson)')">$([System.IO.File]::ReadAllText('$(SppDepsJson)'))</_SppDepsText>
+
+    <!-- deps.json keeps 'id' directly followed by 'version', and 'from','to','sha256' of an extract item together. -->
+    <LibMpvVersion Condition="'$(LibMpvVersion)' == ''">$([System.Text.RegularExpressions.Regex]::Match(`$(_SppDepsText)`, `&quot;id&quot;\s*:\s*&quot;libmpv&quot;\s*,\s*&quot;version&quot;\s*:\s*&quot;([^&quot;]+)&quot;`).Groups[1].Value)</LibMpvVersion>
+    <LibMpvSha256 Condition="'$(LibMpvSha256)' == ''">$([System.Text.RegularExpressions.Regex]::Match(`$(_SppDepsText)`, `&quot;to&quot;\s*:\s*&quot;libmpv-2\.dll&quot;\s*,\s*&quot;sha256&quot;\s*:\s*&quot;([0-9a-fA-F]+)&quot;`).Groups[1].Value)</LibMpvSha256>
+    <FfmpegVersion Condition="'$(FfmpegVersion)' == ''">$([System.Text.RegularExpressions.Regex]::Match(`$(_SppDepsText)`, `&quot;id&quot;\s*:\s*&quot;ffmpeg&quot;\s*,\s*&quot;version&quot;\s*:\s*&quot;([^&quot;]+)&quot;`).Groups[1].Value)</FfmpegVersion>
+
+    <LibMpvDir Condition="'$(LibMpvDir)' == ''">$(SppRepoRoot).tools\libmpv\$(LibMpvVersion)\</LibMpvDir>
+    <FfmpegDir Condition="'$(FfmpegDir)' == ''">$(SppRepoRoot).tools\ffmpeg\$(FfmpegVersion)\</FfmpegDir>
+    <!-- global properties (-p:) cannot be reassigned, so normalise into new properties -->
+    <SppLibMpvDll>$([MSBuild]::EnsureTrailingSlash('$(LibMpvDir)'))libmpv-2.dll</SppLibMpvDll>
+    <SppFfmpegDir>$([MSBuild]::EnsureTrailingSlash('$(FfmpegDir)'))</SppFfmpegDir>
+  </PropertyGroup>
+
+  <Target Name="SppVerifyDependencies" BeforeTargets="AssignTargetPaths" Condition="'$(SppSkipDependencies)' != 'true'">
+
+    <Error Code="SPP0001" Condition="'$(LibMpvSha256)' == ''"
+           Text="Could not read the pinned libmpv SHA-256 from $(SppDepsJson). Pass -p:LibMpvSha256=... or fix the manifest." />
+    <Error Code="SPP0002" Condition="!Exists('$(SppLibMpvDll)')"
+           Text="libmpv-2.dll was not found at $(SppLibMpvDll). Run tools\bootstrap.ps1 from the repository root (or set -p:LibMpvDir=...)." />
+
+    <GetFileHash Files="$(SppLibMpvDll)" Algorithm="SHA256">
+      <Output TaskParameter="Items" ItemName="_SppMpvHashItem" />
+    </GetFileHash>
+    <PropertyGroup>
+      <_SppMpvActual>@(_SppMpvHashItem->'%(FileHash)')</_SppMpvActual>
+    </PropertyGroup>
+    <Error Code="SPP0003" Condition="'$(_SppMpvActual.ToLowerInvariant())' != '$(LibMpvSha256.ToLowerInvariant())'"
+           Text="libmpv-2.dll at $(SppLibMpvDll) has SHA-256 $(_SppMpvActual) but tools\deps.json pins $(LibMpvSha256). Run tools\bootstrap.ps1 -Force to reinstall the pinned build, or update the pin deliberately." />
+
+    <ItemGroup>
+      <None Include="$(SppLibMpvDll)" Link="libmpv-2.dll" Visible="false" CopyToOutputDirectory="PreserveNewest" />
+
+      <None Include="$(SppFfmpegDir)ffmpeg.exe" Link="ffmpeg.exe" Visible="false" CopyToOutputDirectory="PreserveNewest"
+            Condition="Exists('$(SppFfmpegDir)ffmpeg.exe')" />
+      <None Include="$(SppFfmpegDir)ffprobe.exe" Link="ffprobe.exe" Visible="false" CopyToOutputDirectory="PreserveNewest"
+            Condition="Exists('$(SppFfmpegDir)ffprobe.exe')" />
+      <None Include="$(SppFfmpegDir)LICENSE.txt" Link="licenses\FFmpeg-LICENSE.txt" Visible="false" CopyToOutputDirectory="PreserveNewest"
+            Condition="Exists('$(SppFfmpegDir)LICENSE.txt')" />
+
+      <_SppLicenseFile Include="$(SppRepoRoot)licenses\**\*" />
+      <!-- Include="@(item)" makes %(RecursiveDir) etc. refer to each license file (batching inside a target). -->
+      <None Include="@(_SppLicenseFile)" Link="licenses\%(RecursiveDir)%(Filename)%(Extension)" Visible="false"
+            CopyToOutputDirectory="PreserveNewest" />
+      <None Include="$(SppRepoRoot)LICENSE" Link="licenses\GPL-3.0.txt" Visible="false" CopyToOutputDirectory="PreserveNewest"
+            Condition="Exists('$(SppRepoRoot)LICENSE')" />
+      <None Include="$(SppRepoRoot)docs\third-party.md" Link="licenses\third-party.md" Visible="false" CopyToOutputDirectory="PreserveNewest"
+            Condition="Exists('$(SppRepoRoot)docs\third-party.md')" />
+    </ItemGroup>
+  </Target>
+
+</Project>
