@@ -332,7 +332,11 @@ public sealed class MpvPlayer : IMpvPlayer
             var start = "start=" + startSeconds.ToString("R", CultureInfo.InvariantCulture);
             var rc = await CommandAsync("loadfile", EdlSource(edl), "replace", "-1", start).ConfigureAwait(false);
             if (rc < 0) throw new MpvException($"loadfile: {MpvNative.ErrorString(rc)}", rc);
-            return await wait.Tcs.Task.WaitAsync(timeout, cancellationToken).ConfigureAwait(false);
+            var restarted = await wait.Tcs.Task.WaitAsync(timeout, cancellationToken).ConfigureAwait(false);
+            // After an EOF, keep-open's own pause can land after the new file started (found by --selftest on a live session that
+            // grew: the reload came up paused at its start). The caller's intent wins.
+            if (restarted && GetFlag("pause") != !play) SetFlag("pause", !play);
+            return restarted;
         }
         catch (TimeoutException)
         {

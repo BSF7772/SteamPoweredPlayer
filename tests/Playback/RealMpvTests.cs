@@ -172,6 +172,26 @@ public sealed class RealMpvTests
     }
 
     [RealMpvFact]
+    public async Task A_reload_after_eof_plays_instead_of_coming_up_paused()
+    {
+        // found by --selftest on a growing live session: keep-open's pause at EOF must not outlive the reload that continues playback
+        var media = RealMpv.Media(RealMpv.SessionFolder);
+        await using var p = NewPlayer();
+        await using var s = new PlaybackSession(p);
+        var eof = new TaskCompletionSource<double>(TaskCreationOptions.RunContinuationsAsynchronously);
+        s.ReachedEnd += pos => eof.TrySetResult(pos);
+        await s.OpenAsync(media, media.DurationSeconds - 1.5, play: true);
+        s.SetSpeed(4);
+        await eof.Task.WaitAsync(TimeSpan.FromSeconds(15));
+        await Task.Delay(1500);                    // long enough for keep-open's pause to be in place
+        await s.ReloadAsync(5, ReloadCause.EndOfWindow);
+        Assert.False(p.GetFlag("pause"));
+        var before = p.GetDouble("time-pos");
+        await Task.Delay(600);
+        Assert.True(p.GetDouble("time-pos") > before + 0.3);
+    }
+
+    [RealMpvFact]
     public async Task Eof_is_observed_with_keep_open()
     {
         var media = RealMpv.Media(RealMpv.SessionFolder);

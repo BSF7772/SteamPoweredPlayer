@@ -141,6 +141,19 @@ public sealed class PlaybackSessionTests
     }
 
     [Fact]
+    public void Snap_keeps_the_last_fraction_of_a_second_before_a_gap_out_of_reach()
+    {
+        // found by --selftest: an hr-seek into the tail of the part that is stretched over a gap lands in the next run
+        var m = Media(false, (11, 20), (31, 40));           // the gap starts at 60 s
+        var margin = PlaybackSession.GapTailMarginSeconds;
+        Assert.Equal(60 - margin, PlaybackSession.Snap(m, 59.99), 9);
+        Assert.Equal(60 - margin, PlaybackSession.Snap(m, 60 - margin), 9);
+        Assert.Equal(59.0, PlaybackSession.Snap(m, 59.0));
+        Assert.Equal(119.0, PlaybackSession.Snap(m, 119.0));              // no gap after the last run: its tail is fine
+        Assert.Equal(119.99, PlaybackSession.Snap(m, 119.99), 9);
+    }
+
+    [Fact]
     public async Task Ui_time_is_zero_based_and_duration_comes_from_the_index()
     {
         var (s, _) = Create();

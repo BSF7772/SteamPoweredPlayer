@@ -42,6 +42,9 @@ public sealed class PlaybackSession : IAsyncDisposable
     /// <summary>A seek past the end lands this far before it (so the last frame shows instead of an instant EOF).</summary>
     public const double EndMarginSeconds = 0.05;
 
+    /// <summary>A seek into the last this-many seconds of a run that is followed by a gap lands this far before the gap (see <see cref="Snap"/>).</summary>
+    public const double GapTailMarginSeconds = 0.3;
+
     private readonly IMpvPlayer _player;
     private readonly Func<string, string> _url;
     private readonly int _windowCount;
@@ -175,7 +178,7 @@ public sealed class PlaybackSession : IAsyncDisposable
         Enqueue(new PendingReload(mediaSeconds, cause, forceRebuild, null), cancellationToken);
 
     /// <summary>
-    /// Snaps a target to something playable: before the head → the head, a gap → the start of the next run, past the end → just before the
+    /// Snaps a target to something playable (the last <see cref="GapTailMarginSeconds"/> before a gap move back that far): before the head → the head, a gap → the start of the next run, past the end → just before the
     /// end. NaN counts as the head.
     /// </summary>
     public static double Snap(SessionMedia media, double seconds)
@@ -191,6 +194,9 @@ public sealed class PlaybackSession : IAsyncDisposable
         {
             var gapStart = media.Runs[i - 1].Last * s;
             var gapEnd = media.ChunkStartSeconds(media.Runs[i].First);
+            // The last frames before a gap are not seekable: the part is stretched over the hole, and an hr-seek into the tail of
+            // its content (found by --selftest: from 0.2 s before the content ends) lands in the next run, ~18 s late.
+            if (seconds >= gapStart - GapTailMarginSeconds && seconds < gapStart) return gapStart - GapTailMarginSeconds;
             if (seconds >= gapStart && seconds < gapEnd) return gapEnd;
         }
         return seconds;
