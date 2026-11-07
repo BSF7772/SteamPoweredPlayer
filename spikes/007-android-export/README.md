@@ -17,8 +17,19 @@ re-encodes at 2×, then both are in sync and full-range colour survives.
 - `mode codecs`: runtime `MediaCodecList` inventory, including whether an **AV1 encoder** exists (the ROM has a software AV1
   decoder, so presets must gate on the encoder).
 
-## Status
-The APK builds (AGP 9.5.1, Media3 1.11.1, compileSdk 36, minSdk 29). Nothing has run on the phone yet.
+## Results (test phone, Android 13; 30 s range of a real 1440p60 HEVC session, chunks 1-10)
+| check | result |
+|---|---|
+| lossless remux, 30 s | 1.6 s on the phone; 1801 video + 1404 audio samples |
+| bit-exactness | video elementary stream MD5 of the export == source (`ffmpeg -c copy -f hash`) |
+| B-frames / order | `has_b_frames=2` kept; 1191 PTS decreases written in decode order |
+| audio shift | audio `start_time` 0.300 s (edit list), video 0.000 |
+| sync (FastEncoder AudioSync, 14 s synthetic clip) | source +276.6 ms → export +576.6 ms = **+300.0 ms**, High 12/12 |
+| full range | export: `color_range=pc`, BT.709 primaries/matrix/transfer. Media3 on this phone already reads full range from the source, so `color_full` was not needed here (keep it as a guard) |
+| Transformer 2× | HW `OMX.qcom.video.encoder.hevc` at 2560x1440, 1801 frames → 15.0 s, 10.9 s wall = **2.8× realtime**; AAC `c2.android.aac.encoder` |
+| **2× colour bug** | the re-encode is tagged **BT.601 matrix / BT.470BG primaries** (range stays full). The pixels are encoder output of a BT.709 source, so players would show slightly wrong colours. Needs a fix before a product export: force BT.709 `ColorInfo` on the encoder input (or a video effect that sets it) and re-check |
+| Transformer 1× | no edit → Transformer passes the file through (same size, no encoder): fine for us, it means "lossless" exports should not go through Transformer anyway |
+| AV1 | **no AV1 encoder** on this phone (`findEncoderForFormat` = null); decoder `c2.android.av1-dav1d.decoder` (software). AV1 export presets must be gated at runtime |
 
 ## Device runbook (phone on USB)
 ```bash
@@ -45,4 +56,4 @@ packet-level compare of source vs lossless video (`ffprobe -show_packets` sizes 
 is recorded too (`realtime_factor_vs_input`), since the research found HEVC HW encode at about 1.5× realtime for 1080p60 and
 about 1.1× for 1440p60.
 
-Verdict: PENDING (built, device run not done)
+Verdict: **PASS** for the lossless path (bit-exact, +300 ms exact, full range kept); 2× re-encode works but **colour tags are wrong** (BT.601) - open bug.
