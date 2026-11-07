@@ -29,7 +29,7 @@
                         <ColumnDefinition Width="Auto" />
                         <ColumnDefinition Width="*" />
                     </Grid.ColumnDefinitions>
-                    <Button Style="{StaticResource IconButton}" Click="Back_Click" ToolTipService.ToolTip="Back to the library" IsTabStop="False">
+                    <Button Style="{StaticResource IconButton}" AutomationProperties.AutomationId="PlayerBack" Click="Back_Click" ToolTipService.ToolTip="Back to the library" IsTabStop="False">
                         <FontIcon Glyph="&#xE72B;" FontSize="14" />
                     </Button>
                     <StackPanel Grid.Column="1" VerticalAlignment="Center">
@@ -134,32 +134,32 @@
                             <ColumnDefinition Width="Auto" />
                         </Grid.ColumnDefinitions>
 
-                        <Button x:Name="PlayButton" Style="{StaticResource AccentButtonStyle}" Width="44" Height="36" Padding="0" CornerRadius="18"
+                        <Button x:Name="PlayButton" AutomationProperties.AutomationId="PlayerPlayPause" Style="{StaticResource AccentButtonStyle}" Width="44" Height="36" Padding="0" CornerRadius="18"
                                 Click="PlayPause_Click" ToolTipService.ToolTip="Play / pause (Space)" IsTabStop="False">
                             <FontIcon x:Name="PlayGlyph" Glyph="&#xE768;" FontSize="14" />
                         </Button>
 
                         <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="2" Margin="6,0,0,0">
-                            <Button Style="{StaticResource IconButton}" Click="Back5_Click" ToolTipService.ToolTip="Back 5 s (J, Left)" IsTabStop="False">
+                            <Button Style="{StaticResource IconButton}" AutomationProperties.AutomationId="PlayerBack5" Click="Back5_Click" ToolTipService.ToolTip="Back 5 s (J, Left)" IsTabStop="False">
                                 <TextBlock Text="&#x2212;5" Style="{StaticResource Timecode}" FontSize="13" />
                             </Button>
-                            <Button Style="{StaticResource IconButton}" Click="FrameBack_Click" ToolTipService.ToolTip="Previous frame (,)" IsTabStop="False">
+                            <Button Style="{StaticResource IconButton}" AutomationProperties.AutomationId="PlayerFrameBack" Click="FrameBack_Click" ToolTipService.ToolTip="Previous frame (,)" IsTabStop="False">
                                 <FontIcon Glyph="&#xE76B;" FontSize="12" />
                             </Button>
-                            <Button Style="{StaticResource IconButton}" Click="FrameFwd_Click" ToolTipService.ToolTip="Next frame (.)" IsTabStop="False">
+                            <Button Style="{StaticResource IconButton}" AutomationProperties.AutomationId="PlayerFrameForward" Click="FrameFwd_Click" ToolTipService.ToolTip="Next frame (.)" IsTabStop="False">
                                 <FontIcon Glyph="&#xE76C;" FontSize="12" />
                             </Button>
-                            <Button Style="{StaticResource IconButton}" Click="Fwd5_Click" ToolTipService.ToolTip="Forward 5 s (L, Right)" IsTabStop="False">
+                            <Button Style="{StaticResource IconButton}" AutomationProperties.AutomationId="PlayerForward5" Click="Fwd5_Click" ToolTipService.ToolTip="Forward 5 s (L, Right)" IsTabStop="False">
                                 <TextBlock Text="+5" Style="{StaticResource Timecode}" FontSize="13" />
                             </Button>
                             <StackPanel VerticalAlignment="Center" Margin="10,0,0,0">
-                                <TextBlock x:Name="TimeText" Text="0:00.0 / 0:00" Style="{StaticResource Timecode}" FontSize="13" />
+                                <TextBlock x:Name="TimeText" AutomationProperties.AutomationId="PlayerTimecode" Text="0:00.0 / 0:00" Style="{StaticResource Timecode}" FontSize="13" />
                                 <TextBlock x:Name="LoopText" Text="" Style="{StaticResource Caption}" FontSize="11" />
                             </StackPanel>
                         </StackPanel>
 
                         <StackPanel x:Name="TransportRight" Grid.Column="3" Orientation="Horizontal" Spacing="4">
-                            <ToggleButton x:Name="LoopButton" Padding="8,6" Click="Loop_Click" ToolTipService.ToolTip="A–B loop: A, B, clear (A / B keys)" IsTabStop="False">
+                            <ToggleButton x:Name="LoopButton" AutomationProperties.AutomationId="PlayerAbLoop" Padding="8,6" Click="Loop_Click" ToolTipService.ToolTip="A–B loop: A, B, clear (A / B keys)" IsTabStop="False">
                                 <StackPanel Orientation="Horizontal" Spacing="6">
                                     <FontIcon Glyph="&#xE8EE;" FontSize="13" />
                                     <TextBlock Text="A–B" FontSize="12" />

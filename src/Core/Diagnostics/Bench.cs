@@ -229,7 +229,7 @@ public static class Bench
             var rescan = await Scanner.ScanAsync(media.Folder, new ScanOptions { Temporary = media.Temporary }, ct).ConfigureAwait(false);
             _media = rescan.Media ?? media;
             _start = _media.ChunkStartSeconds(_media.FirstChunk!.Value);
-            _end = _media.LastChunk!.Value * _media.SegmentSeconds;
+            _end = _media.ChunkEndSeconds(_media.LastChunk!.Value);   // the tfdt axis (clips are shifted)
             report.AddHeader(string.Create(CultureInfo.InvariantCulture,
                 $"Session measured: the longest finished one, {_media.ChunkCount} chunks ({F(_media.DurationSeconds / 60, "0.0")} min), {_media.Runs.Count} run(s), {best.Kind}"));
             return true;
@@ -468,8 +468,9 @@ public static class Bench
             foreach (var a in output.Concat(
             [
                 "--no-config", "--ao=null", "--no-terminal", "--really-quiet", "--hwdec=" + hwdec, "--pause=no", "--keep-open=no",
-                "--hr-seek=yes", "--demuxer-max-bytes=" + MpvPlayerOptions.DefaultDemuxerMaxBytes.ToString(CultureInfo.InvariantCulture),
-                "--demuxer-max-back-bytes=" + MpvPlayerOptions.DefaultDemuxerMaxBackBytes.ToString(CultureInfo.InvariantCulture),
+                "--hr-seek=yes", "--demuxer-max-bytes=" + DemuxerCache.For(_media).MaxBytes.ToString(CultureInfo.InvariantCulture),
+                "--demuxer-max-back-bytes=" + DemuxerCache.For(_media).MaxBackBytes.ToString(CultureInfo.InvariantCulture),
+                "--demuxer-readahead-secs=" + DemuxerCache.For(_media).ReadaheadSeconds.ToString(CultureInfo.InvariantCulture),
                 "--start=" + start.ToString("0.###", CultureInfo.InvariantCulture), edlFile,
             ])) psi.ArgumentList.Add(a);
             using var p = Process.Start(psi) ?? throw new InvalidOperationException("the mpv CLI did not start");
@@ -502,15 +503,32 @@ public static class Bench
             GC.WaitForPendingFinalizers();
             using var proc = Process.GetCurrentProcess();
             double Rss() { proc.Refresh(); return proc.WorkingSet64 / 1048576.0; }
-            var baseline = Rss();
+            var beforePlayback = Rss();
 
             await using var rig = PlaybackRig.Create(_primary, renderHidden: _renderHidden);
             await rig.PreWarmAsync(_media, ct).ConfigureAwait(false);
-            await rig.Session.OpenAsync(_media, Mid(0.1), play: true, ct).ConfigureAwait(false);
+            var from = Mid(0.1);
+            await rig.Session.OpenAsync(_media, from, play: true, ct).ConfigureAwait(false);
+
+            // D-RAM base: this process with mpv, the decoder and the renderer playing, but a minimal (1 MiB) demuxer cache.
+            rig.Player.SetDemuxerCache(new DemuxerCachePlan(0.5, 1L << 20, 0));
+            await rig.Session.ReloadAsync(from, ReloadCause.Policy, true, ct).ConfigureAwait(false);
+            var baseSamples = new List<double>();
+            for (var i = 0; i < 8; i++)
+            {
+                await Task.Delay(500, ct).ConfigureAwait(false);
+                if (i >= 3) baseSamples.Add(Rss());
+            }
+            var baseline = baseSamples.Max();
+
+            // the soak: the session's own cache plan (bitrate x seconds), periodic forced reloads
+            var plan = DemuxerCache.For(_media);
+            rig.Player.SetDemuxerCache(plan);
+            await rig.Session.ReloadAsync(rig.Session.Position, ReloadCause.Policy, true, ct).ConfigureAwait(false);
 
             var duration = SoakDuration;
             var reloadEvery = options.Quick ? TimeSpan.FromSeconds(20) : TimeSpan.FromSeconds(60);
-            var sampleEvery = TimeSpan.FromSeconds(5);
+            var sampleEvery = TimeSpan.FromSeconds(options.Quick ? 2 : 5);
             var warmup = options.Quick ? 20.0 : 90.0;           // seconds of playback before the slope is measured
             var xs = new List<double>();
             var ys = new List<double>();
@@ -547,11 +565,14 @@ public static class Bench
             peak = Math.Max(peak, final);
             var slope = BudgetRules.Slope(xs, ys);
 
-            var ram = BudgetRules.Ram("bench.ram", $"RAM after {F(sw.Elapsed.TotalMinutes, "0.0")} min of playback with periodic reload", peak);
+            var expectedMb = DemuxerCache.ExpectedCacheBytes(_media.BitsPerSecond) / 1048576.0;
+            var bitrate = _media.BitsPerSecond is { } bps ? F(bps / 1e6, "0.0") + " Mbit/s" : "bitrate unknown, fallback " + F(DemuxerCache.FallbackBitsPerSecond / 1e6) + " Mbit/s";
+            var ram = BudgetRules.RamGate("bench.ram", $"RAM after {F(sw.Elapsed.TotalMinutes, "0.0")} min of playback with periodic reload (D-RAM)", peak, baseline, expectedMb);
             Add(ram with
             {
-                Value = $"{F(peak)} MB peak ({F(peak - baseline)} MB over the {F(baseline)} MB before playback), {F(final)} MB at the end (whole process, working set); played {F(played, "0")} media s, {reloads} forced reloads",
-                Note = peak < Budgets.RamMb ? null : "S1: the maintainer accepted RAM/CPU overhead unless it is a leak; the slope below is the leak signal",
+                Note = $"{F(final)} MB at the end, {F(beforePlayback)} MB before playback (whole process, working set); base = playing with a 1 MiB demuxer cache; "
+                       + $"cache plan {F(plan.TotalBytes / 1048576.0, "0")} MiB for {bitrate}; played {F(played, "0")} media s, {reloads} forced reloads; "
+                       + $"the fixed {F(Budgets.RamMb)} MB budget is superseded by D-RAM ({(peak < Budgets.RamMb ? "below" : "above")} it)",
             });
             Add(BudgetRules.Leak("bench.ram.slope", $"RAM slope after {F(warmup, "0")} s warm-up (leak signal)", slope));
             if (played < 0.8 * sw.Elapsed.TotalSeconds)

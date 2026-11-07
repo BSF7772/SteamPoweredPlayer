@@ -52,6 +52,38 @@ public sealed class DiagnosticsCliTests
     }
 
     [Fact]
+    public void Realcheck_takes_a_path_and_a_library()
+    {
+        var r = DiagnosticsCli.TryParse(["--realcheck", "r.txt", "--library", @"D:\rec"])!;
+        Assert.Equal(DiagnosticsCommand.RealCheck, r.Command);
+        Assert.Equal("r.txt", r.ReportPath);
+        Assert.Equal(@"D:\rec", r.Library);
+        Assert.Equal(Path.Combine(Path.GetTempPath(), "SteamPoweredPlayer-realcheck.txt"), DiagnosticsCli.TryParse(["--realcheck"])!.ReportPath);
+    }
+
+    [Fact]
+    public void Uicheck_takes_a_path_and_a_captures_folder_that_defaults_to_temp()
+    {
+        var r = DiagnosticsCli.TryParse(["--uicheck", "u.txt", "--captures", @"C:\caps"])!;
+        Assert.Equal(DiagnosticsCommand.UiCheck, r.Command);
+        Assert.Equal("u.txt", r.ReportPath);
+        Assert.Equal(@"C:\caps", r.Captures);
+        Assert.False(r.Child);
+        var d = DiagnosticsCli.TryParse(["--uicheck"])!;
+        Assert.Equal(Path.Combine(Path.GetTempPath(), "SteamPoweredPlayer-uicheck.txt"), d.ReportPath);
+        Assert.Equal(Path.Combine(Path.GetTempPath(), "SteamPoweredPlayer-uicheck"), d.Captures);
+    }
+
+    [Fact]
+    public void The_uicheck_child_is_the_window_side_of_the_check()
+    {
+        var r = DiagnosticsCli.TryParse(["--uicheck-child", "u.txt", "--captures", "caps"])!;
+        Assert.Equal(DiagnosticsCommand.UiCheck, r.Command);
+        Assert.True(r.Child);
+        Assert.Equal(["--uicheck-child", "u.txt", "--captures", "caps"], DiagnosticsCli.ChildArguments(r));
+    }
+
+    [Fact]
     public void The_first_command_on_the_line_wins()
     {
         Assert.Equal(DiagnosticsCommand.SelfTest, DiagnosticsCli.TryParse(["--selftest", "a.txt", "--bench", "b.txt"])!.Command);
