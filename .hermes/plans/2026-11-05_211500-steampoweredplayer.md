@@ -23,6 +23,7 @@ needed. Remote clients pick by link type: **wired → stream; wireless → downl
 | 2 | Background recording modelled as Steam's rolling cache; UTC names; SMB encryption guidance; program-managed data folder; workspace-only tooling; server profiles; read-only phone access; export on the phone |
 | 3.1 | Licence decided: **GPL-3.0-or-later** (§2 D19). FastEncoder will be published (MIT) and consumed as a **git submodule** (D5). Linux clients are **out of scope** (the CLI idea was dropped). Repository recreated with a clean history |
 | 3 | **Repo is treated as public:** all machine/user specifics removed (they live in the maintainer's local notes); AGENTS.md rewritten to the agents.md conventions; format notes moved to `docs/`. **Download-first** on wireless links, streaming only on wired (§4.3). **Export folder chosen by the user** (no default). **Delete feature with safety rails** (§4.5). SMB "access denied" root cause and options (`docs/smb-security.md`). Android `minSdk 29`. A cross-platform CLI for Linux clients (question in §9) |
+| 5 | **Phase 1 approved (2026-11-07).** S3b and S9 deferred ("later", after Phase 4); S10 and every delete/clean-up feature moved to the **last phase** (Phase 6). FastEncoder submodule tracks its latest `main` (no separate pin confirmation). `tools/bootstrap.ps1` merged with task 1.11 and moved to Phase 2. Network resilience rule: reconnect on its own after drops and Wi-Fi → Wi-Fi changes, give up after **30 s** without reaching the server (§4.3). 2× phone export: accurate colours by default, verified against the source, a hidden toggle for the fast path (§4.4). Core is its own project (`src/Core/SteamPoweredPlayer.Core.csproj`) so tests never reference the WinUI app |
 | 4 | **End of Phase 0 (S2, S4, S5, S6 measured; S1, S3, S3b, S7, S8, S9, S10 still planned).** Playback uses the **lead EDL** (first part `N0·3 s`, the part before each gap stretched) so mpv `time-pos` equals the tfdt media time, **every seek that crosses chunks is a reload** (`loadfile <edl> start=<t>`, because revisiting an opened chunk breaks decode), mpv is **pre-warmed** at app start, and a **~60-chunk window EDL** with a reload policy bounds RAM and handles; the scanner **checks chunk heads** (zero-filled chunks exist); mpv's share mode is READ\|WRITE\|DELETE. Trickplay reads the chunk's **first fragment** (256 KiB first read plus an exact second read), not a fixed 512 KB prefix; default sheet 160 px JPEG q10 every 3 s (about 4 MB/h). Markers use **Steam's exact millisecond offset** (`gamerecording.pb` / `clip.pb` field 1.5.10), the folder-name time (±1 s) is a fallback; marker position equals media tfdt. FastEncoder is the submodule `external/FastEncoder` (relative URL `../FastEncoder.git`, pin ≥ `b4ccf39`, not added yet); default export preset TBD; AudioSync is Low confidence on real gameplay, so export has a "not applied" path. New Phase 1 task 1.11 (ffmpeg + libmpv shipped beside the exe from a pinned manifest, `docs/third-party.md`). The fixed "< 3 % CPU" budget is replaced by a relative, reproducible CPU-efficiency definition. SMB client requirement added to §4.6. Phase 0 rows carry a status |
 
 ---
@@ -191,6 +192,11 @@ Applies to the Android app and to the desktop app when the library is on another
   checked by size, written as `.part` and renamed when complete. A dropped connection loses at most the chunk in flight.
 - **Priority queue:** the chunks at the playhead, then forward, then the rest of the selection. A seek reprioritises. 2–3
   parallel reads per session, fewer when retries rise.
+- **Disconnects and network changes (maintainer 2026-11-07):** a dropped connection, a reconnect, and a change from one Wi-Fi to
+  another (roaming or a different SSID) are handled on their own: the transfer pauses, reconnects when a network is back, and
+  resumes from the chunk in flight. If the server can't be reached for **30 s** (for example after switching to mobile data, where
+  the LAN address is unreachable), the attempt times out: the next server profile is tried if there is one (LAN → VPN), otherwise
+  the download shows "Can't reach <profile>" with Retry and resumes when a network change event arrives.
 - **Resilience:** per-chunk retries with exponential backoff and jitter; reconnect on `NetworkCallback.onAvailable`; failover
   between server profiles mid-download (LAN ↔ VPN). Android runs it as a WorkManager job (foreground notification) that
   survives the app closing and resumes after a reboot. Mobile data: see above (a toast only).
@@ -218,6 +224,11 @@ Applies to the Android app and to the desktop app when the library is on another
 - **Player:** gestures (drag-seek with a trickplay bubble, double tap ±10 s), markers lane, next/prev event, speed chips, live sync,
   A-B loop, cache follow (wired) or the download overlay (wireless).
 - **Editing:** the same as the desktop, plus the Kotlin port of `AudioSync` (checked against the C# version on shared fixtures).
+- **2× re-encode colour (maintainer 2026-11-07):** the default is the **accurate** path: a software decoder for full-range input
+  (S7: the hardware decoder clips it), even though it costs time and power (1.83× instead of 2.8× realtime). The BT.601 tag the
+  hardware encoder writes is accepted only after an instrumented test compares the output with the original (SSIM/PSNR and mean
+  colour per channel against the source, same frames) and shows it is accurate. A **hidden toggle** (developer options, e.g. tap
+  the version 7×) switches to the fast hardware-decode path for users who prefer speed over exact colours.
 - **Presets:** ✂️ Trim only (lossless), ⚖️ Balanced HEVC, 📱 Compact 720p HEVC, 🌐 Universal H.264, 🎯 Fit to size; AV1 where available.
 
 ### 4.5 Delete, with safety rails
@@ -279,17 +290,18 @@ with the window EDL and periodic reload (431 MB after 16 media-minutes of whole-
 | S2 | `edl-mp4dash-cli` | Given portable mpv ≥ 0.42 and an EDL over a 2 h session with a stale manifest, when played, then start < 250 ms, seek to 1:00:00 < 150 ms, A/V in sync, `audio-delay` live, speed 0.25/2/4, frame-step, gaps handled, time-pos origin recorded. Cache, **on copies only**: a chunk mpv has open can still be deleted; deleting head chunks under playback is survivable; EOF → re-EDL continues | High | **PARTIAL.** The EDL as first sketched fails (seeks land up to 3 s early, audio is lost after a seek, gaps freeze for 30 s). The **lead EDL** plus seek-by-reload (`loadfile <edl> start=<t>`), a pre-warmed mpv and a ~60-chunk window meets the budgets with hardware decode (open 95 ms pre-warmed, seek 95 ms median, 0/30 reload failures vs 12/12 failed revisit seeks). Delete-while-open and head-trim, run later on copies (s2d, indicative timings): a held chunk deletes immediately (not delete-pending) and playback survives; 20 head chunks trimmed every 3 s under playback gave 0 ms stall, 6 ms axis drift and an 88 ms reload |
 | S1 | `winui-mpv-d3d11` | Given WinUI 3 + the libmpv D3D11 render API in a `SwapChainPanel`, when playing the S2 EDL, then no tearing, low CPU (relative definition, see the budgets), XAML draws over the video, resize/fullscreen work. Fallback `wid` | High | **VALIDATED (maintainer accepted RAM/CPU).** Correctness 26/26 (D3D11 render API, no `wid` needed). Perf on an idle machine (5-minute soak): CPU 1.96 % of all cores (< 3 PASS) but ≈ 5.6× the mpv CLI reference; 59.9 presents/s, 0 black frames; seek-by-reload median 96.5 ms (5 of 30 seeks > 150 ms); RAM 295 MB (over the 250 budget, accepted), growing ≈ 19 MB/min in the soak = mpv's bounded demuxer cache (≤ 200 MiB, released on reload: −67 MB). Maintainer: RAM/CPU overhead acceptable for now, only a real leak must be fixed; Phase 2 sets an explicit cache ceiling. The soak's "stall" was the harness: `keep-open` pauses at EOF and `pause` survives `loadfile`, so every reload that should play must set `pause=no` |
 | S3 | `android-smb-download` | Given an Android 13 phone + JCIFS 3 (read-only, encryption required) and two profiles (LAN, VPN), when downloading a 5 min range over Wi-Fi with injected drops (Wi-Fi toggled, AP roaming), then 0 corrupt chunks, ≤ 1 chunk re-fetched per drop, automatic resume and profile failover, and playback from local chunks never stalls inside the downloaded part. The server shows an encrypted 3.1.1 session | High | **Device PASS; AP roaming and playback during download not covered.** SMB 3.1.1 AES-128-GCM + signing on LAN and VPN; 5 min = 514 MB in 49 s (10.4 MB/s); Wi-Fi drops up to 90 s: 0 failed, 0 re-fetched, 0 SHA mismatches; failover to VPN over cellular in 9 s; 20 MB cap held (20.14 MB); fail-back 37 ms after Wi-Fi validated. Device runs found and fixed 3 failover bugs, including network callbacks silent under a VPN, because the default network is the VPN: the product must also watch non-VPN networks. See spike README |
-| S3b | `smb-stream-wired` | Given a wired client, when streaming the EDL over SMB (loopback range server on Android, direct reads on Windows), then the wired budgets hold. A throwaway Python `smbprotocol` client on any wired machine serves as the reference | Medium | planned |
-| S9 | `link-detection` | Given Wi-Fi, Ethernet (USB adapter) and VPN-over-each, when the default network changes, then Android and Windows classify each correctly and switch modes without polling | Medium | planned |
+| S3b | `smb-stream-wired` | Given a wired client, when streaming the EDL over SMB (loopback range server on Android, direct reads on Windows), then the wired budgets hold. A throwaway Python `smbprotocol` client on any wired machine serves as the reference | Medium | **Later** (maintainer 2026-11-07: deferred until after Phase 4; until then every remote client is download-first) |
+| S9 | `link-detection` | Given Wi-Fi, Ethernet (USB adapter) and VPN-over-each, when the default network changes, then Android and Windows classify each correctly and switch modes without polling | Medium | **Later** (deferred with S3b) |
 | S7 | `android-export` | Given a 30 s downloaded range, when the Media3 Muxer builds the lossless file with a +300 ms audio shift and Transformer re-encodes at 2×, then both are in sync and full-range colour survives | Medium | **Lossless PASS, re-encode PARTIAL.** Remux bit-exact (ES MD5 = source), +300.0 ms measured, full range kept, 30 s in 1.6 s. 2× re-encode: the Qualcomm HW decoder clips full-range input, so a software decoder is needed (colours now match the source, PSNR 38–39 dB; 1.83× realtime instead of 2.8×). The HW encoder always tags BT.601, which matches its pixels. Sync after 2× within 3.4 ms. The product must detect the decoder range bug at runtime. No AV1 encoder on the test phone |
 | S5 | `timeline-alignment` | Given sessions with deaths/kills (only two cache sessions with events were available; repeat as the library grows), when markers are mapped with Steam's exact millisecond offset (field 1.5.10 of `gamerecording.pb` / `clip.pb`), then they land on the visible event. The folder-name UTC rule is the fallback, accurate to ±1 s | Medium | **VALIDATED.** The exact offset from Steam's index aligns markers to the media `tfdt`; the folder-name rule is within ±1 s |
 | S8 | `android-detect` | Given FastEncoder's synthetic "sound 300 ms late" clip, when the Kotlin `AudioSync` port runs on the phone, then it reports what the C# detector reports (+277 ms on this clip; maintainer decision, the C# result is the reference), with High confidence, and analyses 75 s in < 30 s | Medium | **VALIDATED.** Phone: raw inputs +277.413 ms (= C#), MediaCodec path +276.61 ms, High 12/12, ≤ 11 s per 75 s |
-| S10 | `steam-clip-delete` | **Needs maintainer approval (writes in Steam's folder).** Given a throwaway clip, when its folder is moved to the Recycle Bin with Steam running and then with Steam closed, then record what Steam shows and whether it repairs `gamerecording.pb` | Medium | planned |
+| S10 | `steam-clip-delete` | **Needs maintainer approval (writes in Steam's folder).** Given a throwaway clip, when its folder is moved to the Recycle Bin with Steam running and then with Steam closed, then record what Steam shows and whether it repairs `gamerecording.pb` | Medium | **Last step of the project** (Phase 6, with every delete/clean-up feature) |
 | S4 | `trickplay-cost` | Given init + the first fragment (moof + IDR) of each chunk (256 KiB first read, plus an exact second read when the IDR is larger), when decoded keyframe-only on the GPU in one long-lived ffmpeg, then ≤ 15 ms and ≤ 0.6 MB per chunk (mean) | Low | **PARTIAL.** A 2 h session takes 5.3–5.6 s on the GPU; the adaptive read averages 0.27 MB per chunk (0.88 MB max). A fixed 512 KiB prefix truncates 14.9 % of IDRs and a fixed 1 MiB prefix reads 1.0 MB, so no fixed prefix is used. Sprite sheets are 3.9 MB/h at 160 px |
 | S6 | `fastencoder-link` | Given a console harness linking FastEncoder Core, when `Pipeline.EncodeAsync` runs GPU Turbo on a range file with `AudioDelay=0.3`, then it builds with no FastEncoder change and comes out in sync | Low | **VALIDATED.** The delay is applied exactly (waveform correlation, ±0 ms at 1 ms resolution). `AudioSync` gives `Low` confidence on real gameplay, so the app needs a "not applied" path. A lossless 30 s range takes 390 ms warm |
 
 Setup: `tools/bootstrap.ps1` (not written yet) will fetch pinned mpv/libmpv, JDK 21, Android cmdline-tools/SDK/build-tools and
-Gradle into `.tools/`. Android platform-tools (adb) are already in `.tools/platform-tools/`. Phone: Developer options → USB
+Gradle into `.tools/` (maintainer 2026-11-07: merged with task 1.11 into one script + one pinned manifest, written when Phase 2
+first needs libmpv; Phase 1 needs only the .NET SDK, and ffmpeg is not needed by the unit tests). Android platform-tools (adb) are already in `.tools/platform-tools/`. Phone: Developer options → USB
 debugging (works over cable) or Wireless debugging → `adb pair`; the RSA key must be accepted once (`adb devices` shows `device`).
 
 ### Phase 1: Core library (TDD, no UI)
@@ -314,7 +326,9 @@ csproj (FastEncoder linked; packages restored into `.tools/nuget`):
 </ItemGroup>
 ```
 FastEncoder is the git submodule `external/FastEncoder` (relative URL `../FastEncoder.git`, pinned to a commit ≥ `b4ccf39`). The
-submodule is **not added yet**: it is added in Phase 1, and the pin is confirmed by the maintainer when it is added. Call order matters:
+submodule is added in Phase 1 at FastEncoder's latest `main` (maintainer 2026-11-07: there is only one version; bump it to the
+latest whenever FastEncoder changes). Core lives in `src/Core/SteamPoweredPlayer.Core.csproj` (the links above go there); the
+tests reference Core only. Call order matters:
 `Ff.Locate()` → `await Encoders.DetectAsync()` → `Presets.Get(...)` (S6: `Build()` before detection silently returns the CPU settings).
 
 | Task | Content | Key tests |
@@ -327,9 +341,9 @@ submodule is **not added yet**: it is added in Phase 1, and the pin is confirmed
 | 1.6 Edl | Lead EDL builder over a window of about 60 complete chunks (sketch below): first part N0·3 s, the part before each gap stretched, so mpv `time-pos` equals the `tfdt` media time. Seeking is `loadfile <edl> start=<t>` (seek-by-reload), never `seek`. Window and reload policy (RAM grows with media length) | Golden EDL (first part, gap, window edges); 2 400 segments < 5 ms; escaping of paths with commas/unicode |
 | 1.7 RangeSource | Seekable stream over `[init, chunk_a … chunk_b]`, `FileShare.ReadWrite \| Delete` | Bytes equal `cat`; opening with read + write + delete sharing succeeds next to a second reader. "Deleting a chunk of a fixture copy while open succeeds" is **not proven yet** (S2 did not run it): test it here on fixture copies |
 | 1.8 DataFolder + Index | First-run proposal + confirmation, `library-id`, `library.json` v1 (atomic replace), never inside `BackgroundRecordPath` | Round-trip; 200-recording index < 1 MB, parse < 50 ms |
-| 1.9 DeletePolicy | Pure path guard of §4.5 | `..`, junctions, UNC, 8.3 names, case variants, non-clip folders, cache sessions → all refused |
-| 1.10 ChunkPlan + LocalChunkCache | Priority order from the playhead/selection, `.part` → rename, size check, LRU cap, pins | Interrupted writes never appear complete; eviction never removes pinned or playing chunks |
-| 1.11 Dependencies | The release ships ffmpeg + libmpv beside the exe. The repo holds a pinned manifest (URL + SHA-256 per binary) and a build step that fetches and verifies them. Binaries are never committed. The GPL source offer is in `docs/third-party.md` | A wrong hash fails the build; a clean checkout builds with the manifest only; `licenses/` is in the release folder |
+| ~~1.9 DeletePolicy~~ | Moved to Phase 6 (delete and clean-up come last) | — |
+| 1.10 ChunkPlan + LocalChunkCache + ReconnectPolicy | Priority order from the playhead/selection, `.part` → rename, size check, LRU cap, pins. `ReconnectPolicy`: backoff + jitter, pause on disconnect, resume on a network event, **time out after 30 s** without reaching the server → next profile or "Can't reach" (§4.3) | Interrupted writes never appear complete; eviction never removes pinned or playing chunks; a 29 s outage resumes, 30 s times out, a network change restarts the clock |
+| 1.11 Dependencies (Phase 2, merged with `tools/bootstrap.ps1`) | The release ships ffmpeg + libmpv beside the exe. The repo holds a pinned manifest (URL + SHA-256 per binary) and a build step that fetches and verifies them. Binaries are never committed. The GPL source offer is in `docs/third-party.md` | A wrong hash fails the build; a clean checkout builds with the manifest only; `licenses/` is in the release folder |
 
 ```csharp
 // Lead EDL over a window of complete chunks (S2). `chunks` = the sorted, head-validated chunk numbers of the window (about 60).
@@ -371,8 +385,8 @@ generator (S4: first fragment of each chunk, 160 px JPEG q10 every 3 s, zero-fil
 Cuts, speed/volume/mute, live sync + nudges, **Detect** (FastEncoder `AudioSync`; S6: `Low` confidence on real gameplay, so the UI
 shows "Low confidence: not applied" instead of a number, and a fix is `AudioDelay = −AudioLate` through one tested helper), apply to
 game, fix timing drift, preset grid (default export preset: TBD, FastEncoder preset ladder under review) + size estimate, export queue with taskbar progress, **Save clip** (markers as chapters), "Open in FastEncoder", highlight reel,
-screenshots, colour-range check per encoder, **export folder picker on first export**, **DeleteService** (§4.5, after S10),
-**network libraries** (LinkDetector, ChunkDownloader, Downloads view, optional viewing proxies).
+screenshots, colour-range check per encoder, **export folder picker on first export**,
+**network libraries** (LinkDetector, ChunkDownloader, Downloads view, optional viewing proxies; download-first everywhere until S3b/S9).
 
 ### Phase 4: Android
 1. Toolchain + Compose skeleton + brand theme. 2. Server profiles, Keystore, endpoint chooser, encryption switch, connection
@@ -383,7 +397,12 @@ Transformer, presets, MediaStore, progress notification). 8. Downloads screen (q
 
 ### Phase 5: Beyond Steam (each opt-in)
 Storage view + batch "compress old clips", cross-library event search, smart cut (re-encode only the GOPs at the cut edges),
-achievement names/icons, a highlight reel on the phone. (Linux/macOS clients are out of scope.)
+achievement names/icons, a highlight reel on the phone. (Linux/macOS clients are out of scope.) Later: S3b + S9 (wired streaming,
+link detection), then stream on wired links.
+
+### Phase 6 (last): Delete and clean-up
+S10 (needs maintainer approval: writes in Steam's folder) → DeletePolicy (the pure path guard of §4.5: `..`, junctions, UNC, 8.3
+names, case variants, non-clip folders and cache sessions are all refused) → DeleteService (§4.5) → "compress old clips" clean-up.
 
 ---
 
@@ -427,9 +446,10 @@ detection), S10 (Steam clip delete, needs approval). Before Phase 2 / 5 they are
 Decisions taken in Phase 0 (2026-11-07): the S8 reference is the C# detector's result (+277 ms); RAM/CPU overhead in S1 is accepted
 unless it is a real leak; mobile data gets a toast only (§4.3), with no VPN time budget and no data cap.
 
-Open, none blocking: AP roaming and playback-during-download (S3 criterion parts not covered); whether to accept BT.601-tagged 2×
-exports on phones whose encoder ignores the colour request (current default: accept, the pixels are correct); `tools/bootstrap.ps1`.
+Decided 2026-11-07 (start of Phase 1): S3b and S9 later; S10 and delete/clean-up last (Phase 6); FastEncoder submodule = its latest
+`main`; bootstrap merged into 1.11 (Phase 2); disconnects and Wi-Fi changes recover on their own with a 30 s timeout (§4.3), which
+also covers the AP-roaming question (tested in Phase 4 on the device); 2× export accurate by default with a hidden fast toggle (§4.4).
 
-Next step: maintainer approval to start Phase 1.
+**Phase 1 in progress.**
 
 Resolved in rev 3.1: FastEncoder is published and used as a submodule (D5); Linux is out of scope; licence GPL-3.0-or-later (D19).

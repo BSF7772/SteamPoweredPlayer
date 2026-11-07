@@ -18,7 +18,7 @@ Requirements every change must serve:
 7. Cuts, auto sync and speed-up, exactly like FastEncoder.
 8. Android companion: secure SMB (3.1.1, encryption), read-only access to the library, editing and exporting on the device.
 
-**Status: plan phase.** No app code yet. The approved plan lives in `.hermes/plans/`; don't start a phase the maintainer hasn't
+**Status: Phase 1 (Core library, no UI).** The approved plan lives in `.hermes/plans/`; don't start a phase the maintainer hasn't
 approved. Spikes (`spikes/NNN-name/`) are throwaway and must end with a `Verdict:` line.
 
 ## Commands
@@ -46,16 +46,16 @@ Opt-in tests against a real library are read-only and need `SPP_REAL_LIBRARY=<pa
 
 ## Project structure
 ```
+src/Core/            SteamPoweredPlayer.Core.csproj (all of Core + the linked FastEncoder sources; tests reference only this)
 src/Core/Steam/      Steam config, folder names, game ids, VDF, protobuf (.pb), timelines: pure parsing, no I/O side effects
 src/Core/Library/    scanner (event-driven), index, data folder, artwork, trickplay
 src/Core/Playback/   libmpv binding, D3D11 renderer, EDL builder, cache follower
 src/Core/Export/     lossless range source, export queue, delete service (the only code allowed to delete)
 src/Core/Net/        remote-library access, link-type detection, chunk downloader
-src/FastEncoder/     linked FastEncoder sources (read-only here)
 external/FastEncoder/ git submodule (never edit it from this repo; change FastEncoder upstream, then bump the pin)
 src/                 MainWindow.xaml(.cs) and the views
 android/             phone app (Gradle), mirrors Core: smb/ data/ play/ edit/ export/ ui/
-tests/               xUnit tests, tests/fixtures (synthetic), tests/fixtures/golden (shared with Android tests)
+tests/               SteamPoweredPlayer.Tests.csproj, xUnit tests mirroring src/Core folders, tests/fixtures (synthetic), tests/fixtures/golden (shared with Android tests)
 docs/                format notes (steam-recording-format.md), SMB security, bench results
 spikes/              throwaway experiments (Phase 0)
 .hermes/plans/       the plan
