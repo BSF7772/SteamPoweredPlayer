@@ -450,6 +450,19 @@ Decided 2026-11-07 (start of Phase 1): S3b and S9 later; S10 and delete/clean-up
 `main`; bootstrap merged into 1.11 (Phase 2); disconnects and Wi-Fi changes recover on their own with a 30 s timeout (§4.3), which
 also covers the AP-roaming question (tested in Phase 4 on the device); 2× export accurate by default with a hidden fast toggle (§4.4).
 
-**Phase 1 in progress.**
+**Phase 1 code complete (2026-11-07), 359 tests green; not yet checked against a real library.** Done: 1.1–1.8 and 1.10 (1.9 →
+Phase 6, 1.11 → Phase 2). Notes from the implementation:
+- Core has no NuGet dependencies: own tolerant VDF text/binary readers (incl. `appinfo.vdf` v27–29) and a schema-less protobuf
+  wire reader that round-trips byte-exactly. Google.Protobuf is only used by the tests to build fixtures; ValveKeyValue was dropped.
+- EDL: the first part of a window is `(next − 1)·3 s` long (= `N0·3` plus the gap stretch when a gap follows it); the sketch above
+  stops at `N0·3` in that case, which breaks the tiling. Golden EDLs were cross-checked against an independent Python implementation.
+- Delete-while-open (1.7, on copies, Windows 11 NTFS): deleting an open chunk succeeds and the open handle keeps reading;
+  chunks not yet opened report `ChunkGoneException`.
+- Data folder at a drive/share root: no proposal (the sibling would be inside Steam's tree); the user must pick a folder elsewhere.
+- `library.json` readers retry briefly (≈ 60 ms) because a reader can see "not found" during the atomic swap; Android must do the same.
+
+Still to verify with `SPP_REAL_LIBRARY` (read-only): `appinfo.vdf` layouts, `.pb` fields that might repeat, timeline `duration`
+unit (ms assumed), the real `BackgroundMaxKeep` forms above 2 h. Open: the scanner re-reads every chunk head per scan (Phase 2's
+CacheFollower should pass already-validated chunks); one writer per chunk key in the download queue (Phase 3).
 
 Resolved in rev 3.1: FastEncoder is published and used as a submodule (D5); Linux is out of scope; licence GPL-3.0-or-later (D19).
