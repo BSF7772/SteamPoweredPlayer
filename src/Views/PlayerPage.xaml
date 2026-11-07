@@ -1,5 +1,5 @@
 <!-- SPDX-License-Identifier: GPL-3.0-or-later -->
-<!-- Player page: FastEncoder's three columns 310 | * | 392 (MIT design), video on a SwapChainPanel bound to the libmpv D3D11 renderer. -->
+<!-- Player page (playlist | video, timeline, transport | events, export): FastEncoder's three columns 310 | * | 392 (MIT design), video on a SwapChainPanel bound to the libmpv D3D11 renderer. -->
 <Page
     x:Class="SteamPoweredPlayer.Views.PlayerPage"
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
@@ -17,7 +17,7 @@
             <TransitionCollection><EntranceThemeTransition FromVerticalOffset="40" IsStaggeringEnabled="True" /></TransitionCollection>
         </Grid.ChildrenTransitions>
 
-        <!-- ============================================ up next -->
+        <!-- ============================================ playlist (F5): the game's recordings, the current one highlighted -->
         <Border x:Name="LeftCard" Style="{StaticResource Card}" Padding="0">
             <Grid>
                 <Grid.RowDefinitions>
@@ -33,31 +33,34 @@
                         <FontIcon Glyph="&#xE72B;" FontSize="14" />
                     </Button>
                     <StackPanel Grid.Column="1" VerticalAlignment="Center">
-                        <TextBlock Text="Up next" Style="{StaticResource BodyStrongTextBlockStyle}" />
+                        <TextBlock Text="Playlist" Style="{StaticResource BodyStrongTextBlockStyle}" />
                         <TextBlock x:Name="GameText" Style="{StaticResource Caption}" TextTrimming="CharacterEllipsis" />
                     </StackPanel>
                 </Grid>
 
-                <ListView x:Name="UpNextList" Grid.Row="1" SelectionMode="None" IsItemClickEnabled="True" Padding="4,0,4,8"
-                          ItemClick="UpNext_ItemClick" IsTabStop="False">
+                <ListView x:Name="PlaylistList" Grid.Row="1" SelectionMode="Single" IsItemClickEnabled="True" Padding="4,0,4,8"
+                          AutomationProperties.AutomationId="PlayerPlaylist" ItemClick="Playlist_ItemClick" IsTabStop="False">
                     <ListView.ItemContainerTransitions>
                         <TransitionCollection>
                             <EntranceThemeTransition IsStaggeringEnabled="True" />
-                            <AddDeleteThemeTransition />
                         </TransitionCollection>
                     </ListView.ItemContainerTransitions>
                     <ListView.ItemTemplate>
-                        <DataTemplate x:DataType="p:UpNextRow">
-                            <Grid Padding="0,6" ColumnSpacing="12">
+                        <DataTemplate x:DataType="p:PlaylistRow">
+                            <Grid Padding="0,6" ColumnSpacing="10" AutomationProperties.AutomationId="PlayerPlaylistItem"
+                                  AutomationProperties.Name="{x:Bind Title}">
                                 <Grid.ColumnDefinitions>
-                                    <ColumnDefinition Width="44" />
+                                    <ColumnDefinition Width="78" />
                                     <ColumnDefinition Width="*" />
                                 </Grid.ColumnDefinitions>
-                                <Border Width="44" Height="44" CornerRadius="8" Style="{StaticResource ArtPlaceholder}" />
-                                <TextBlock Text="{x:Bind Glyph}" FontSize="20" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                                <Grid Width="78" Height="44" CornerRadius="6">
+                                    <Border Style="{StaticResource ArtPlaceholder}" />
+                                    <TextBlock Text="{x:Bind Glyph}" FontSize="18" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                                    <Image Source="{x:Bind Thumb, Mode=OneWay}" Stretch="UniformToFill" />
+                                </Grid>
                                 <StackPanel Grid.Column="1" VerticalAlignment="Center" Spacing="1">
                                     <StackPanel Orientation="Horizontal" Spacing="6">
-                                        <TextBlock Text="{x:Bind Title}" TextTrimming="CharacterEllipsis" MaxWidth="170" Style="{StaticResource BodyTextBlockStyle}" />
+                                        <TextBlock Text="{x:Bind Title}" TextTrimming="CharacterEllipsis" TextWrapping="NoWrap" MaxWidth="150" Style="{StaticResource BodyTextBlockStyle}" />
                                         <Border Style="{StaticResource Pill}" Background="{StaticResource LiveBrush}" Visibility="{x:Bind Live}" VerticalAlignment="Center">
                                             <TextBlock Text="LIVE" Foreground="White" FontSize="10" FontWeight="SemiBold" />
                                         </Border>
@@ -69,7 +72,7 @@
                     </ListView.ItemTemplate>
                 </ListView>
 
-                <TextBlock x:Name="UpNextEmpty" Grid.Row="1" Text="No other recordings of this game." Style="{StaticResource Caption}"
+                <TextBlock x:Name="PlaylistEmpty" Grid.Row="1" Text="No recordings of this game." Style="{StaticResource Caption}"
                            HorizontalAlignment="Center" VerticalAlignment="Top" Margin="0,24,0,0" Visibility="Collapsed" />
             </Grid>
         </Border>
@@ -153,7 +156,7 @@
                                 <TextBlock Text="+5" Style="{StaticResource Timecode}" FontSize="13" />
                             </Button>
                             <StackPanel VerticalAlignment="Center" Margin="10,0,0,0">
-                                <TextBlock x:Name="TimeText" AutomationProperties.AutomationId="PlayerTimecode" Text="0:00.0 / 0:00" Style="{StaticResource Timecode}" FontSize="13" />
+                                <TextBlock x:Name="TimeText" AutomationProperties.AutomationId="PlayerTimecode" Text="00:00:00.01 / 00:00:00.00" Style="{StaticResource Timecode}" FontSize="13" />
                                 <TextBlock x:Name="LoopText" Text="" Style="{StaticResource Caption}" FontSize="11" />
                             </StackPanel>
                         </StackPanel>

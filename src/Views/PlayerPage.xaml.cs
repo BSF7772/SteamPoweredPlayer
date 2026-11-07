@@ -23,7 +23,7 @@ using VirtualKey = Windows.System.VirtualKey;
 namespace SteamPoweredPlayer.Views;
 
 /// <summary>
-/// The Player page (plan §4.2): Up next | video, timeline, transport | Events and Export. Navigation parameter: <see cref="PlayerRequest"/>
+/// The Player page (plan §4.2): Playlist | video, timeline, transport | Events and Export. Navigation parameter: <see cref="PlayerRequest"/>
 /// (<c>RecordingKey</c> = <c>RecordingEntry.RelativeFolder</c>; <c>StartSeconds</c> = UI time, 0 at the head).
 /// </summary>
 /// <remarks>
@@ -36,10 +36,12 @@ public sealed partial class PlayerPage : Page
     private static readonly double[] Speeds = [0.25, 0.5, 0.75, 1, 1.25, 1.5, 2, 3, 4];
     private const double LiveEdgeSeconds = 8;          // within this of the live end counts as "live"
     private const double LiveStartBehindSeconds = 30;  // opening a live session starts this far behind its end
+    private const double LoopFallbackSeconds = 0.4;    // past B by this much and mpv did not loop: the page jumps back to A
 
     private readonly DispatcherQueue _ui = DispatcherQueue.GetForCurrentThread();
     private readonly ObservableCollection<EventRow> _eventRows = [];
-    private readonly ObservableCollection<UpNextRow> _upNext = [];
+    private readonly ObservableCollection<PlaylistRow> _playlist = [];
+    private readonly TileCache _thumbTiles = new();
     private readonly ObservableCollection<UIElement> _chips = [];
     private readonly HashSet<MarkerKind> _visibleKinds = [];
     private readonly AbLoop _ab = new();
@@ -62,6 +64,9 @@ public sealed partial class PlayerPage : Page
     private string _eventSignature = "";
     private int _gen, _posQueued, _speedIndex = 3;
     private double _latestTimePos = double.NaN;
+    private double _fps = FrameTimecode.FallbackFps;
+    private string? _playlistGame;
+    private int _playlistVersion;
     private bool _started, _attached, _cleaned, _subscribed, _fullscreen, _trickPaused, _overLower, _loopJumping, _syncingVolume, _debug;
 
     public PlayerRequest? Request { get; private set; }
@@ -72,7 +77,7 @@ public sealed partial class PlayerPage : Page
         IsTabStop = true;
         UseSystemFocusVisuals = false;
         EventsList.ItemsSource = _eventRows;
-        UpNextList.ItemsSource = _upNext;
+        PlaylistList.ItemsSource = _playlist;
         FilterChips.ItemsSource = _chips;
         BuildSpeedMenu();
         Lower.PointerEntered += (_, _) => _overLower = true;
@@ -165,6 +170,8 @@ public sealed partial class PlayerPage : Page
         if (_window is not null) { _window.Activated -= Window_Activated; _window = null; }
         if (_fullscreen) SetFullscreenNow(false);
         if (_trickPaused) { AppServices.Trickplay?.Resume(); _trickPaused = false; }
+        _ab.Clear();
+        ApplyAbLoop();                       // mpv keeps ab-loop-a/b across loads: never leave a loop for the next recording
         if (_attached && _host is not null) { _host.DetachPanel(VideoPanel); _attached = false; }
         if (_host is not null) _ = _host.StopAsync();
     }
@@ -185,7 +192,11 @@ public sealed partial class PlayerPage : Page
         _host.Follower!.Trimmed += OnTrimmed;
         _host.Metrics.Measured += OnMeasured;
         _host.DeviceLost += OnDeviceLost;
-        if (AppServices.Library is { } lib) lib.MediaChanged += OnLibraryMediaChanged;
+        if (AppServices.Library is { } lib)
+        {
+            lib.MediaChanged += OnLibraryMediaChanged;
+            lib.DerivedChanged += OnLibraryDerivedChanged;
+        }
     }
 
     private void Unsubscribe()
@@ -204,7 +215,11 @@ public sealed partial class PlayerPage : Page
         _host.Follower!.Trimmed -= OnTrimmed;
         _host.Metrics.Measured -= OnMeasured;
         _host.DeviceLost -= OnDeviceLost;
-        if (AppServices.Library is { } lib) lib.MediaChanged -= OnLibraryMediaChanged;
+        if (AppServices.Library is { } lib)
+        {
+            lib.MediaChanged -= OnLibraryMediaChanged;
+            lib.DerivedChanged -= OnLibraryDerivedChanged;
+        }
     }
 
     // =====================================================================================
@@ -223,9 +238,11 @@ public sealed partial class PlayerPage : Page
         _key = key;
         _media = null;
         _ab.Clear();
+        ApplyAbLoop();
         UpdateLoopUi();
         _entry = lib?.Current?.Recordings.FirstOrDefault(r => r.RelativeFolder == key);
-        BuildUpNext();
+        BuildPlaylist();
+        Timeline.ResetZoom();
         ClearEvents();
         ShowStatus("Opening…", null, busy: true);
 
@@ -234,12 +251,12 @@ public sealed partial class PlayerPage : Page
         {
             ShowStatus("This recording isn't available", "Steam may have removed it, or its files are not readable.", icon: true);
             Timeline.Configure(0, 0, [], null, []);
-            TimeText.Text = "0:00.0 / 0:00";
+            TimeText.Text = FrameTimecode.PositionOfLength(0, 0, _fps);
             return;
         }
 
         var first = media.ChunkStartSeconds(media.FirstChunk!.Value);
-        var last = media.LastChunk!.Value * media.SegmentSeconds;
+        var last = media.ChunkEndSeconds(media.LastChunk!.Value);          // clips: on the tfdt axis (AxisShiftSeconds)
         double? startMedia = null;
         var resumed = false;
         if (startUi is { } s) startMedia = first + s;
@@ -274,9 +291,10 @@ public sealed partial class PlayerPage : Page
         ResumeTrickplay();
         if (gen != _gen) return;
         ClearStatus();
+        ReadFps();
         UpdatePlayGlyph();
         ApplyPosition();
-        if (resumed) AppServices.Toast("Resumed", $"Continuing at {MarkerIcons.Timecode(session.UiPosition, false)}.", InfoBarSeverity.Informational, 3);
+        if (resumed) AppServices.Toast("Resumed", $"Continuing at {FrameTimecode.Position(session.UiPosition, _fps)}.", InfoBarSeverity.Informational, 3);
     }
 
     private void ResumeTrickplay()
@@ -394,7 +412,7 @@ public sealed partial class PlayerPage : Page
         if (_session?.Media is not { } media) return;
         var gaps = new List<(double, double)>();
         for (var i = 1; i < media.Runs.Count; i++)
-            gaps.Add((_session.MediaToUi(media.Runs[i - 1].Last * media.SegmentSeconds), _session.MediaToUi(media.ChunkStartSeconds(media.Runs[i].First))));
+            gaps.Add((_session.MediaToUi(media.ChunkEndSeconds(media.Runs[i - 1].Last)), _session.MediaToUi(media.ChunkStartSeconds(media.Runs[i].First))));
         Timeline.Configure(_session.UiDuration, _session.MediaStartSeconds, gaps, _trick, _lane);
         UpdateLoopUi();
     }
@@ -429,6 +447,19 @@ public sealed partial class PlayerPage : Page
         catch (Exception ex) when (ex is MpvException or TimeoutException or InvalidOperationException or OperationCanceledException) { /* ReloadFailed reports it */ }
     });
 
+    /// <summary>
+    /// Markers or trickplay of a recording finished loading (on the UI thread). <see cref="ILibrarySource.FullMarkersFor"/> is lazy: the first
+    /// call returns nothing and loads in the background, so without this a cache session never showed its markers.
+    /// </summary>
+    private void OnLibraryDerivedChanged(object? sender, string relativeFolder)
+    {
+        if (_cleaned || _media is null || relativeFolder != _key || AppServices.Library is not { } lib) return;
+        _trick = lib.TrickplayFor(relativeFolder);
+        _trickQueriedAt = Stopwatch.GetTimestamp();
+        RefreshMarkers(resetFilter: false);
+        ConfigureTimeline();
+    }
+
     private void OnTrimmed(CacheTrim t) => _ui.TryEnqueue(() =>
     {
         if (_cleaned) return;
@@ -438,41 +469,87 @@ public sealed partial class PlayerPage : Page
     });
 
     // =====================================================================================
-    //  up next
+    //  playlist (F5, F7)
     // =====================================================================================
 
-    private void BuildUpNext()
+    private static string RowTitle(RecordingEntry r) => r.Title ?? (r.Kind == RecordingKind.CacheSession ? "Cache session" : "Clip");
+
+    /// <summary>All recordings of the current game, newest first, the current one selected (highlighted) and scrolled into view.</summary>
+    private void BuildPlaylist()
     {
-        _upNext.Clear();
         var index = AppServices.Library?.Current;
         var current = _entry;
         if (index is null || current is null)
         {
+            _playlist.Clear();
+            _playlistGame = null;
             GameText.Text = _key ?? "";
-            UpNextEmpty.Visibility = Visibility.Visible;
+            PlaylistEmpty.Visibility = Visibility.Visible;
             return;
         }
         var game = current.GameId is null ? "Downloaded clips" : index.Games.FirstOrDefault(g => g.GameId == current.GameId)?.Name ?? "Unknown game";
-        var title = current.Title ?? (current.Kind == RecordingKind.CacheSession ? "Cache session" : "Clip");
-        GameText.Text = $"{game}  ·  {title}";
-        foreach (var r in index.Recordings.Where(r => r.GameId == current.GameId && r.RelativeFolder != current.RelativeFolder)
-                     .OrderByDescending(r => r.StartUtc).Take(80))
+        GameText.Text = $"{game}  ·  {RowTitle(current)}";
+
+        // Same game and the row is there: only move the highlight (no rebuild, no re-animation).
+        if (_playlistGame != (current.GameId ?? "") || _playlist.All(r => r.Key != current.RelativeFolder))
         {
-            _upNext.Add(new UpNextRow
+            _playlistGame = current.GameId ?? "";
+            _playlist.Clear();
+            var rows = index.Recordings.Where(r => r.GameId == current.GameId).OrderByDescending(r => r.StartUtc).Take(120).ToList();
+            if (!rows.Contains(current)) rows.Insert(0, current);
+            foreach (var r in rows)
             {
-                Key = r.RelativeFolder,
-                Title = r.Title ?? (r.Kind == RecordingKind.CacheSession ? "Cache session" : "Clip"),
-                Meta = $"{Fmt.DateTime(r.StartUtc)}  ·  {Fmt.Timecode(Fmt.Duration(r))}" + (r.MarkerCount > 0 ? $"  ·  {Fmt.Plural(r.MarkerCount, "event")}" : ""),
-                Glyph = r.Kind switch { RecordingKind.CacheSession => "\U0001F4FC", RecordingKind.DownloadedClip => "\U0001F4E5", _ => "\U0001F3AC" },
-                Live = r.Live,
-            });
+                _playlist.Add(new PlaylistRow
+                {
+                    Key = r.RelativeFolder,
+                    Title = RowTitle(r),
+                    Meta = $"{Fmt.DateTime(r.StartUtc)}  ·  {Fmt.Timecode(Fmt.Duration(r))}" + (r.MarkerCount > 0 ? $"  ·  {Fmt.Plural(r.MarkerCount, "event")}" : ""),
+                    Glyph = r.Kind switch { RecordingKind.CacheSession => "\U0001F4FC", RecordingKind.DownloadedClip => "\U0001F4E5", _ => "\U0001F3AC" },
+                    Live = r.Live,
+                });
+            }
+            _ = LoadPlaylistThumbsAsync([.. _playlist], ++_playlistVersion);
         }
-        UpNextEmpty.Visibility = _upNext.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
+        PlaylistEmpty.Visibility = _playlist.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
+        var selected = _playlist.FirstOrDefault(r => r.Key == current.RelativeFolder);
+        PlaylistList.SelectedItem = selected;
+        if (selected is not null) PlaylistList.ScrollIntoView(selected, ScrollIntoViewAlignment.Leading);
     }
 
-    private void UpNext_ItemClick(object sender, ItemClickEventArgs e)
+    /// <summary>F7: Steam's own <c>thumbnail.jpg</c> of a clip, else the first trickplay tile. One at a time; a newer playlist stops it.</summary>
+    private async Task LoadPlaylistThumbsAsync(List<PlaylistRow> rows, int version)
     {
-        if (e.ClickedItem is UpNextRow row) _ = LoadAsync(row.Key, null);
+        var lib = AppServices.Library;
+        if (lib is null) return;
+        foreach (var row in rows)
+        {
+            if (version != _playlistVersion || _cleaned) return;
+            try
+            {
+                var media = lib.GetMedia(row.Key);
+                var jpg = await Task.Run(() => PlaylistThumbs.ReadSteamThumbnail(row.Key, media?.Folder));
+                if (version != _playlistVersion || _cleaned) return;
+                if (jpg is not null && await PlaylistThumbs.DecodeAsync(jpg, 156) is { } image)
+                {
+                    row.ThumbKeepAlive = image.KeepAlive;
+                    row.Thumb = image.Source;
+                    continue;
+                }
+                var trick = await Task.Run(() => lib.TrickplayFor(row.Key));
+                if (version != _playlistVersion || _cleaned) return;
+                if (trick is { Count: > 0 } && trick.FindNearest(media?.TfdtOriginSeconds ?? 0) is { } tile && await _thumbTiles.GetAsync(tile) is { } src)
+                    row.Thumb = src;
+            }
+            catch (Exception e) when (e is IOException or UnauthorizedAccessException or System.Runtime.InteropServices.COMException or ArgumentException)
+            {
+                /* no thumbnail: the glyph placeholder stays */
+            }
+        }
+    }
+
+    private void Playlist_ItemClick(object sender, ItemClickEventArgs e)
+    {
+        if (e.ClickedItem is PlaylistRow row && row.Key != _key) _ = LoadAsync(row.Key, null);
         Focus(FocusState.Programmatic);
     }
 
@@ -532,7 +609,8 @@ public sealed partial class PlayerPage : Page
         UpdateTime(ui);
         UpdateLiveUi(media);
 
-        if (_ab.ShouldJump(media) && !_loopJumping && _ab.A is { } a)
+        // mpv loops at B (ApplyAbLoop); this is only the safety net when it did not (B outside the loaded EDL window).
+        if (_ab.ShouldJump(media - LoopFallbackSeconds) && !_loopJumping && _ab.A is { } a)
         {
             _loopJumping = true;
             RunSeek(() => _host!.SeekAsync(a), then: () => _loopJumping = false);
@@ -558,8 +636,26 @@ public sealed partial class PlayerPage : Page
     //  UI state
     // =====================================================================================
 
+    /// <summary>F2/F3: <c>HH:MM:SS.FF / HH:MM:SS.FF</c> (position: FF = 1-based frame in the second; duration: whole frames).</summary>
     private void UpdateTime(double ui) =>
-        TimeText.Text = $"{MarkerIcons.Timecode(ui)} / {MarkerIcons.Timecode(_session?.UiDuration ?? 0, false)}";
+        TimeText.Text = FrameTimecode.PositionOfLength(ui, _session?.UiDuration ?? 0, _fps);
+
+    /// <summary>The stream's frame rate from mpv (<c>container-fps</c>, else <c>estimated-vf-fps</c>); kept when mpv has none yet.</summary>
+    private double ReadFps()
+    {
+        try
+        {
+            if (_host?.Mpv is { } mpv)
+            {
+                var fps = mpv.GetDouble("container-fps");
+                if (!(fps is > 1 and < 1000)) fps = mpv.GetDouble("estimated-vf-fps");
+                if (fps is > 1 and < 1000) _fps = fps;
+            }
+        }
+        catch (Exception e) when (e is ObjectDisposedException or MpvException) { /* keep the last known rate */ }
+        Timeline.Fps = _fps;
+        return _fps;
+    }
 
     private void UpdatePlayGlyph()
     {
@@ -600,7 +696,24 @@ public sealed partial class PlayerPage : Page
         var b = _ab.B is { } y && _session is not null ? _session.MediaToUi(y) : (double?)null;
         Timeline.SetLoop(a, b);
         LoopButton.IsChecked = _ab.A is not null;
-        LoopText.Text = a is null ? "" : b is null ? $"A {MarkerIcons.Timecode(a.Value)}  ·  set B" : $"A {MarkerIcons.Timecode(a.Value)}  ·  B {MarkerIcons.Timecode(b.Value)}";
+        LoopText.Text = a is null ? "" : b is null
+            ? $"A {FrameTimecode.Position(a.Value, _fps)}  ·  set B"
+            : $"A {FrameTimecode.Position(a.Value, _fps)}  ·  B {FrameTimecode.Position(b.Value, _fps)}";
+    }
+
+    /// <summary>
+    /// Hands the loop to mpv (<c>ab-loop-a/b</c>, media time): mpv loops at B itself, frame-exact and without waiting for the UI thread.
+    /// Only a complete loop is set; with A alone mpv would loop from A to the end.
+    /// </summary>
+    private void ApplyAbLoop()
+    {
+        if (_session is null) return;
+        try
+        {
+            if (_ab.Active) _session.SetAbLoop(_ab.A, _ab.B);
+            else _session.SetAbLoop(null, null);
+        }
+        catch (Exception e) when (e is MpvException or ObjectDisposedException) { PlayerLog.Write("ab-loop: " + e.Message); }
     }
 
     private void SyncSpeedUi(double speed)
@@ -720,21 +833,7 @@ public sealed partial class PlayerPage : Page
         RunSeek(() => _host.SeekRelativeAsync(seconds));
     }
 
-    private double FrameSeconds()
-    {
-        var fps = double.NaN;
-        try
-        {
-            var mpv = _host?.Mpv;
-            if (mpv is not null)
-            {
-                fps = mpv.GetDouble("container-fps");
-                if (!(fps > 0)) fps = mpv.GetDouble("estimated-vf-fps");
-            }
-        }
-        catch (ObjectDisposedException) { }
-        return fps > 0 && fps < 1000 ? 1 / fps : 1.0 / 30;
-    }
+    private double FrameSeconds() => 1 / ReadFps();
 
     private void FrameForward()
     {
@@ -781,6 +880,7 @@ public sealed partial class PlayerPage : Page
         var pos = _session.Position;
         if (which == 'A') _ab.SetA(pos);
         else if (!_ab.SetB(pos)) AppServices.Toast("B must come after A", "Press A first, then B later in the recording.", InfoBarSeverity.Informational, 3);
+        ApplyAbLoop();
         UpdateLoopUi();
     }
 
@@ -956,6 +1056,7 @@ public sealed partial class PlayerPage : Page
         if (_session?.Media is null) { LoopButton.IsChecked = false; return; }
         var result = _ab.Cycle(_session.Position);
         if (result == "B must be after A") AppServices.Toast(result, null, InfoBarSeverity.Informational, 3);
+        ApplyAbLoop();
         UpdateLoopUi();
         Focus(FocusState.Programmatic);
     }
@@ -1014,7 +1115,7 @@ public sealed partial class PlayerPage : Page
             case (int)VirtualKey.F: SetFullscreen(!_fullscreen); break;
             case (int)VirtualKey.Escape:
                 if (_fullscreen) SetFullscreen(false);
-                else if (_ab.A is not null) { _ab.Clear(); UpdateLoopUi(); }
+                else if (_ab.A is not null) { _ab.Clear(); ApplyAbLoop(); UpdateLoopUi(); }
                 else handled = false;
                 break;
             case (int)VirtualKey.A: SetAbPoint('A'); break;

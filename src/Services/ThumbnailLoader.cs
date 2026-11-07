@@ -31,7 +31,9 @@ public static class ThumbnailLoader
             {
                 Bounds = new BitmapBounds { X = (uint)tile.X, Y = (uint)tile.Y, Width = (uint)tile.Width, Height = (uint)tile.Height },
             };
-            using var bitmap = await decoder.GetSoftwareBitmapAsync(
+            // Never dispose this bitmap: XAML re-reads it whenever the Image is realised again (the Library page restored by Back from
+            // the Player), and a closed SoftwareBitmap fails fast there with RO_E_CLOSED (0xC000027B). The GC releases it with the source.
+            var bitmap = await decoder.GetSoftwareBitmapAsync(
                 BitmapPixelFormat.Bgra8, BitmapAlphaMode.Premultiplied, transform, ExifOrientationMode.IgnoreExifOrientation, ColorManagementMode.DoNotColorManage);
             var source = new SoftwareBitmapSource();
             await source.SetBitmapAsync(bitmap);

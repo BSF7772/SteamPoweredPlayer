@@ -19,6 +19,12 @@
   </ItemGroup>
 
   <ItemGroup>
+    <!-- The Player page's pure helpers (no XAML): timecode and timeline zoom maths (plan 2026-11-07 F2-F4). -->
+    <Compile Include="..\src\Views\Player\FrameTimecode.cs" Link="Player\Linked\FrameTimecode.cs" />
+    <Compile Include="..\src\Views\Player\TimelineView.cs" Link="Player\Linked\TimelineView.cs" />
+  </ItemGroup>
+
+  <ItemGroup>
     <Using Include="Xunit" />
     <None Include="fixtures\**\*" CopyToOutputDirectory="PreserveNewest" LinkBase="fixtures" />
   </ItemGroup>
