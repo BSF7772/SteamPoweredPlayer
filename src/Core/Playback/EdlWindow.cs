@@ -83,7 +83,7 @@ public static class EdlWindow
         var atSessionStart = first == media.FirstChunk;     // the lead part covers the axis before the first chunk: nothing to load there
         var atSessionEnd = last == media.LastChunk;         // nothing more to load after it (a live session growing makes this false again)
 
-        var chunk = ChunkOf(playheadSeconds, media.SegmentSeconds);
+        var chunk = media.ChunkAt(playheadSeconds);
         if ((!atSessionStart && chunk < first) || (!atSessionEnd && chunk > last)) return ReloadReason.OutsideWindow;
         if (!media.Contains(first) || !media.Contains(last)) return ReloadReason.WindowStale;
         if (!atSessionEnd && last - chunk <= ReloadMarginChunks) return ReloadReason.NearWindowEnd;
@@ -91,18 +91,10 @@ public static class EdlWindow
         return ReloadReason.None;
     }
 
-    /// <summary>Chunk number whose 3 s interval contains the media time (chunk N covers [(N−1)·S, N·S)). Clamped to the int range; NaN counts as 0.</summary>
-    private static long ChunkOf(double seconds, double segmentSeconds)
-    {
-        if (double.IsNaN(seconds)) seconds = 0;
-        var c = Math.Floor(seconds / segmentSeconds) + 1;
-        return (long)Math.Clamp(c, -1e9, 1e9);
-    }
-
     /// <summary>Index (0-based, over all complete chunks in order) of the chunk at the position, or of the next complete chunk if it is in a gap.</summary>
     private static int IndexOfPosition(SessionMedia media, double positionSeconds)
     {
-        var chunk = ChunkOf(positionSeconds, media.SegmentSeconds);
+        var chunk = media.ChunkAt(positionSeconds);
         var index = 0;
         foreach (var run in media.Runs)
         {

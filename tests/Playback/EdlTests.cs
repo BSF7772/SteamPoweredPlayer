@@ -21,6 +21,9 @@ public sealed class EdlTests
     private static string GoldenDir => Path.Combine(AppContext.BaseDirectory, "fixtures", "golden");
     private static string Lf(string s) => s.Replace("\r\n", "\n");
 
+    /// <summary>Optional <c>axisShiftSeconds</c> of a golden case (saved clips, Phase 2.1); absent = 0 (cache sessions).</summary>
+    private static double Shift(JsonElement c) => c.TryGetProperty("axisShiftSeconds", out var s) ? s.GetDouble() : 0;
+
     private static (int, int)[] Ranges(JsonElement e) => [.. e.EnumerateArray().Select(p => (p[0].GetInt32(), p[1].GetInt32()))];
 
     // ---- golden files -----------------------------------------------------------------------------------------------
@@ -39,7 +42,8 @@ public sealed class EdlTests
         using var doc = JsonDocument.Parse(File.ReadAllText(Path.Combine(GoldenDir, "edl-cases.json")));
         var c = doc.RootElement.GetProperty("cases").EnumerateArray().Single(x => x.GetProperty("name").GetString() == name);
         var chunks = Numbers(Ranges(c.GetProperty("chunks")));
-        var media = new SessionMedia(c.GetProperty("folder").GetString()!, ScanAnalysis.Runs(chunks), c.GetProperty("segmentSeconds").GetDouble(), false, true);
+        var media = new SessionMedia(c.GetProperty("folder").GetString()!, ScanAnalysis.Runs(chunks), c.GetProperty("segmentSeconds").GetDouble(), false, true,
+            Shift(c));
 
         var expected = Lf(File.ReadAllText(Path.Combine(GoldenDir, c.GetProperty("expected").GetString()!), new UTF8Encoding(false)));
         Assert.Equal(expected, Edl.Build(media, chunks, p => p));
@@ -192,7 +196,7 @@ public sealed class EdlTests
     {
         using var doc = JsonDocument.Parse(File.ReadAllText(Path.Combine(GoldenDir, "edl-cases.json")));
         var c = doc.RootElement.GetProperty("windowCases").EnumerateArray().Single(x => x.GetProperty("name").GetString() == name);
-        var media = Media(Folder, Ranges(c.GetProperty("runs")));
+        var media = Media(Folder, Ranges(c.GetProperty("runs"))) with { AxisShiftSeconds = Shift(c) };
         var got = EdlWindow.Window(media, c.GetProperty("position").GetDouble(), c.GetProperty("count").GetInt32());
         Assert.Equal(Numbers(Ranges(c.GetProperty("expected"))), got);
     }

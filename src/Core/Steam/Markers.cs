@@ -76,7 +76,7 @@ public static class Markers
     /// </summary>
     public static MarkerPlacement Place(IEnumerable<Marker> markers, SessionMedia media)
     {
-        var runs = media.Runs.Select(r => (Start: media.ChunkStartSeconds(r.First), End: r.Last * media.SegmentSeconds)).ToList();
+        var runs = media.Runs.Select(r => (Start: media.ChunkStartSeconds(r.First), End: media.ChunkEndSeconds(r.Last))).ToList();
         var visible = new List<Marker>();
         var trimmed = new List<TrimmedMarker>();
         foreach (var m in markers)

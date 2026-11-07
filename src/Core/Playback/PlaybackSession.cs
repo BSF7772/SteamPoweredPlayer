@@ -130,6 +130,8 @@ public sealed class PlaybackSession : IAsyncDisposable
             _window = [];
             _userPaused = !play;
         }
+        try { _player.SetDemuxerCache(DemuxerCache.For(media)); }
+        catch (Exception e) when (e is MpvException or ObjectDisposedException) { /* keep the start-up cache size */ }
         return Enqueue(new PendingReload(startMediaSeconds ?? StartOf(media), ReloadCause.Open, true, play), cancellationToken);
     }
 
@@ -189,10 +191,9 @@ public sealed class PlaybackSession : IAsyncDisposable
         var end = EndOf(media);
         if (double.IsNaN(seconds) || seconds <= start) return start;
         if (seconds >= end) return Math.Max(start, end - EndMarginSeconds);
-        var s = media.SegmentSeconds;
         for (var i = 1; i < media.Runs.Count; i++)
         {
-            var gapStart = media.Runs[i - 1].Last * s;
+            var gapStart = media.ChunkEndSeconds(media.Runs[i - 1].Last);
             var gapEnd = media.ChunkStartSeconds(media.Runs[i].First);
             // The last frames before a gap are not seekable: the part is stretched over the hole, and an hr-seek into the tail of
             // its content (found by --selftest: from 0.2 s before the content ends) lands in the next run, ~18 s late.
@@ -366,7 +367,7 @@ public sealed class PlaybackSession : IAsyncDisposable
     }
 
     private static double StartOf(SessionMedia? m) => m is { FirstChunk: { } f } ? m.ChunkStartSeconds(f) : 0;
-    private static double EndOf(SessionMedia? m) => m is { LastChunk: { } l } ? l * m.SegmentSeconds : 0;
+    private static double EndOf(SessionMedia? m) => m is { LastChunk: { } l } ? m.ChunkEndSeconds(l) : 0;
 
     public ValueTask DisposeAsync()
     {

@@ -54,6 +54,9 @@ public interface IMpvPlayer : IAsyncDisposable
     void SetMute(bool muted);
     void SetAudioDelay(double seconds);
 
+    /// <summary>Sizes mpv's demuxer cache for the next load (decision D-RAM, <see cref="DemuxerCache"/>). Fakes may ignore it.</summary>
+    void SetDemuxerCache(DemuxerCachePlan plan) { }
+
     /// <summary>Forward single-frame step (pauses). Stepping back across a chunk is a reload decided by the caller.</summary>
     void FrameStep();
 

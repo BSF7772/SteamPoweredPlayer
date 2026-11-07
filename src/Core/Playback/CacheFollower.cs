@@ -128,7 +128,7 @@ public sealed class CacheFollower : IDisposable
     /// <summary>Where to restart after the window's end: not before the window's last chunk ends (no replay of the last frames).</summary>
     private static double ResumePosition(IReadOnlyList<int> window, SessionMedia media, double position)
     {
-        var windowEnd = window[^1] * media.SegmentSeconds;
+        var windowEnd = media.ChunkEndSeconds(window[^1]);
         return double.IsNaN(position) ? windowEnd : Math.Max(position, windowEnd);
     }
 

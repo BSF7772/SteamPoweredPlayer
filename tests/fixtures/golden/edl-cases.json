@@ -1,5 +1,5 @@
 {
-  "_doc": "Inputs of the golden lead-EDL cases. Build(folder, chunks, segmentSeconds, identity url) must equal the expected file byte for byte (compare with LF newlines). chunks = sorted complete chunk numbers of the window; a [first,last] pair means every number in between. Shared by the C# and Kotlin EDL tests. windowCases: runs = [[first,last],...] of the session, position in media seconds, count; expected = chunk numbers EdlWindow.Window returns.",
+  "_doc": "Inputs of the golden lead-EDL cases. Build(folder, chunks, segmentSeconds, identity url) must equal the expected file byte for byte (compare with LF newlines). chunks = sorted complete chunk numbers of the window; a [first,last] pair means every number in between. Shared by the C# and Kotlin EDL tests. Optional axisShiftSeconds (default 0) = SessionMedia.AxisShiftSeconds: a saved clip restarts chunk numbers at 1 but keeps its absolute tfdt, so chunk N starts at (N-1)*S + shift and only the first part grows by the shift. windowCases: runs = [[first,last],...] of the session, position in media seconds, count; expected = chunk numbers EdlWindow.Window returns.",
   "cases": [
     { "name": "first-part",           "folder": "C:/rec/bg_730_20250101_120000", "segmentSeconds": 3, "chunks": [[1840, 1842]], "expected": "edl-first-part.txt" },
     { "name": "session-start",        "folder": "C:/rec/bg_730_20250101_120000", "segmentSeconds": 3, "chunks": [[1, 3]],       "expected": "edl-session-start.txt" },
@@ -7,7 +7,9 @@
     { "name": "gap",                  "folder": "C:/rec/bg_730_20250101_120000", "segmentSeconds": 3, "chunks": [[10, 12], [20, 21]], "expected": "edl-gap.txt" },
     { "name": "first-part-then-gap",  "folder": "C:/rec/bg_730_20250101_120000", "segmentSeconds": 3, "chunks": [[5, 5], [9, 10]],    "expected": "edl-first-part-then-gap.txt" },
     { "name": "two-gaps-window-edge", "folder": "C:/rec/bg_730_20250101_120000", "segmentSeconds": 3, "chunks": [[100, 100], [102, 102], [110, 111]], "expected": "edl-two-gaps.txt" },
-    { "name": "escaping",             "folder": "C:/rec/Gäme, 100% \u00fcber \ud83c\udfae/bg_730_20250101_120000", "segmentSeconds": 3, "chunks": [[1, 2]], "expected": "edl-escaping.txt" }
+    { "name": "clip-tfdt-origin",     "folder": "C:/rec/clip_730_20250101_120000/video/bg_730_20250101_115000", "segmentSeconds": 3, "axisShiftSeconds": 585, "chunks": [[1, 4]], "expected": "edl-clip-tfdt-origin.txt" },
+    { "name": "clip-tfdt-origin-gap", "folder": "C:/rec/clip_730_20250101_120000/video/bg_730_20250101_115000", "segmentSeconds": 3, "axisShiftSeconds": 585, "chunks": [[1, 1], [3, 4]], "expected": "edl-clip-tfdt-origin-gap.txt" },
+    { "name": "escaping",            "folder": "C:/rec/Gäme, 100% \u00fcber \ud83c\udfae/bg_730_20250101_120000", "segmentSeconds": 3, "chunks": [[1, 2]], "expected": "edl-escaping.txt" }
   ],
   "windowCases": [
     { "name": "middle",          "runs": [[1, 200]],           "position": 300.0,  "count": 60, "expected": [[86, 145]] },
@@ -16,6 +18,7 @@
     { "name": "trimmed-head",    "runs": [[1840, 1900]],       "position": 5517.0, "count": 60, "expected": [[1840, 1899]] },
     { "name": "spans-gap",       "runs": [[1, 30], [50, 100]], "position": 87.0,   "count": 20, "expected": [[25, 30], [50, 63]] },
     { "name": "position-in-gap", "runs": [[1, 30], [50, 100]], "position": 120.0,  "count": 10, "expected": [[29, 30], [50, 57]] },
-    { "name": "short-session",   "runs": [[5, 9]],             "position": 14.0,   "count": 60, "expected": [[5, 9]] }
+    { "name": "clip-tfdt-origin", "runs": [[1, 100]], "axisShiftSeconds": 585, "position": 735.0, "count": 20, "expected": [[46, 65]] },
+    { "name": "short-session",  "runs": [[5, 9]],             "position": 14.0,   "count": 60, "expected": [[5, 9]] }
   ]
 }

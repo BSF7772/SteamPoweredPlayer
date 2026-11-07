@@ -91,7 +91,37 @@ public static class Scanner
         long size = 0;
         foreach (var e in entries) size += e.Size;
         var result = ScanAnalysis.Analyze(full, entries, manifest, now, n => byName.GetValueOrDefault(n, HeadCheck.Vanished), options.Temporary);
-        return new CachedScan(result, FolderHeads.From(remember), toRead.Count, size);
+        var tfdt = await OriginAsync(full, result, info, trusted, ct).ConfigureAwait(false);
+        if (result.Media is { } m)
+        {
+            var shift = tfdt is { } t ? SessionMedia.AxisShiftFor(t.Seconds, t.Chunk, m.SegmentSeconds) : 0;
+            result = result with { Media = m with { AxisShiftSeconds = shift, BitsPerSecond = BitsPerSecond(m, info) } };
+        }
+        return new CachedScan(result, FolderHeads.From(remember, tfdt), toRead.Count, size);
+    }
+
+    /// <summary>Average bitrate of the complete chunks (both streams) from the listing's sizes: no extra I/O. Null for no duration.</summary>
+    internal static double? BitsPerSecond(SessionMedia media, IReadOnlyDictionary<string, ScanEntry> info)
+    {
+        if (media.DurationSeconds <= 0) return null;
+        long bytes = 0;
+        foreach (var n in media.Chunks())
+            for (var s = 0; s < 2; s++)
+                if (info.TryGetValue(FolderNames.ChunkFile(s, n), out var e)) bytes += e.Size;
+        return bytes > 0 ? bytes * 8.0 / media.DurationSeconds : null;
+    }
+
+    /// <summary>
+    /// The real tfdt of the first chunk on disk (it gives the axis shift of a saved clip): the remembered value while that file is
+    /// unchanged and still the first chunk, else one read (<see cref="ScanTfdt"/>). Null when it cannot be read (the shift stays 0).
+    /// </summary>
+    private static async ValueTask<CachedTfdt?> OriginAsync(string folder, ScanResult result, Dictionary<string, ScanEntry> info, FolderHeads? trusted,
+        CancellationToken ct)
+    {
+        if (result.Media?.FirstChunk is not { } first || !info.TryGetValue(FolderNames.ChunkFile(0, first), out var e)) return null;
+        var ticks = e.LastWriteUtc.UtcTicks;
+        if (trusted?.Tfdt is { } known && known.Matches(first, e.Size, ticks)) return known;
+        return await ScanTfdt.ReadSecondsAsync(folder, first, ct).ConfigureAwait(false) is { } s ? new CachedTfdt(first, e.Size, ticks, s) : null;
     }
 
     /// <summary>
