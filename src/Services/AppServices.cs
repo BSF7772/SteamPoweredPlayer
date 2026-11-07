@@ -120,6 +120,7 @@ public static class AppServices
         }
         LibraryCreated?.Invoke(Library);
         await Library.StartAsync().ConfigureAwait(true);
+        if (PlayerHost.Instance is { } player) _ = player.PreWarmAsync(Library);
     }
 
     /// <summary>The first-run card or Settings picked a valid data folder: save the choice and let the running library start writing there.</summary>

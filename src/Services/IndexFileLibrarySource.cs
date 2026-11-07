@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 using SteamPoweredPlayer.Core.Library;
+using SteamPoweredPlayer.Core.Steam;
 
 namespace SteamPoweredPlayer.Services;
 
@@ -89,9 +90,31 @@ public sealed class IndexFileLibrarySource : ILibrarySource, IDisposable
     }
 
     public IReadOnlyList<MarkerSpot> MarkersFor(RecordingEntry recording) => [];
-    public SessionMedia? GetMedia(string relativeFolder) => null;
-    public IReadOnlyList<Core.Steam.Marker> FullMarkersFor(string relativeFolder) => [];
-    public TrickplayIndex? TrickplayFor(string relativeFolder) => TrickplayIndex.TryLoad(_folder, relativeFolder);
+
+    // ---- Player page: simple index-based answers (this source never learns of changes beyond library.json reloads) ----
+
+    /// <summary>Built from the index entry (runs, live flag) over the recording folder; null when the entry or its chunks are missing.</summary>
+    public SessionMedia? GetMedia(string relativeFolder)
+    {
+        var entry = Current?.Recordings.FirstOrDefault(r => r.RelativeFolder == relativeFolder);
+        if (entry is null || entry.Runs.Count == 0) return null;
+        var folder = Path.GetFullPath(Path.Combine(_folder.BackgroundRecordPath, relativeFolder.Replace('/', Path.DirectorySeparatorChar)));
+        var root = Path.GetFullPath(_folder.BackgroundRecordPath).TrimEnd('\\') + "\\";
+        if (!folder.StartsWith(root, StringComparison.OrdinalIgnoreCase)) return null;     // the index is shared data: never leave the recordings
+        return new SessionMedia(folder, entry.Runs, entry.SegmentSeconds, entry.Live, entry.Temporary);
+    }
+
+    /// <summary>Timelines are not in the index (library.json only has counts): empty until the LibraryService provides them.</summary>
+    public IReadOnlyList<Marker> FullMarkersFor(string relativeFolder) => [];
+
+    /// <summary>Trickplay is stored by the recording's folder name (the key must be a single safe path element).</summary>
+    public TrickplayIndex? TrickplayFor(string relativeFolder)
+    {
+        var key = relativeFolder.Substring(relativeFolder.LastIndexOf('/') + 1);
+        return Trickplay_IsSafe(key) ? TrickplayIndex.TryLoad(_folder, key) : null;
+    }
+
+    private static bool Trickplay_IsSafe(string key) => Core.Library.Trickplay.IsSafeKey(key);
 
     public void Dispose()
     {
