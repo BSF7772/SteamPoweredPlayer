@@ -17,10 +17,14 @@ public static class Budgets
     public const double TwoHourChunks = 2400;
 
     /// <summary>
-    /// Leak signal: RSS growth after warm-up. S1 measured 19 MB/min while mpv's demuxer cache filled (200 MiB); with the ceiling of
-    /// <see cref="Playback.MpvPlayerOptions.DemuxerMaxBytes"/> the cache is full after a minute or two, so steady growth beyond this is a leak.
+    /// Leak signal (decision D-RAM, plan 2026-11-07 §0): RSS growth after warm-up. S1 measured 19 MB/min while mpv's demuxer cache filled
+    /// (200 MiB); the cache is sized in seconds (<see cref="Playback.DemuxerCache"/>) and is full after the warm-up, so steady growth
+    /// beyond this is a leak. A falling slope (the cache emptied by a reload) is not a leak.
     /// </summary>
-    public const double LeakMbPerMinute = 4;
+    public const double LeakMbPerMinute = 2;
+
+    /// <summary>D-RAM: the RAM gate is peak ≤ (base + expected demuxer cache) × (1 + this). The fixed <see cref="RamMb"/> is reported only.</summary>
+    public const double RamMarginFraction = 0.15;
 }
 
 /// <summary>Statistics of the seek timings: <see cref="OverBudget"/> counts seeks that took longer than the budget.</summary>
@@ -91,6 +95,20 @@ public static class BudgetRules
 
     public static CheckResult Ram(string id, string name, double peakMb) =>
         CheckResult.From(peakMb < Budgets.RamMb, id, name, F(peakMb) + " MB peak", number: peakMb, unit: "MB", budget: "< " + F(Budgets.RamMb) + " MB");
+
+    /// <summary>
+    /// Decision D-RAM: RAM is base (process + mpv + decoder + renderer, measured with a minimal demuxer cache) plus the demuxer cache,
+    /// whose size follows the bitrate (<see cref="Playback.DemuxerCache.ExpectedCacheBytes"/>). PASS when the peak is at most
+    /// (base + cache) × (1 + <see cref="Budgets.RamMarginFraction"/>).
+    /// </summary>
+    public static CheckResult RamGate(string id, string name, double peakMb, double baseMb, double expectedCacheMb)
+    {
+        var limit = (baseMb + expectedCacheMb) * (1 + Budgets.RamMarginFraction);
+        var ok = double.IsFinite(peakMb) && double.IsFinite(limit) && peakMb <= limit + 1e-6;
+        return CheckResult.From(ok, id, name,
+            $"{F(peakMb)} MB peak; base {F(baseMb)} MB + expected cache {F(expectedCacheMb)} MB + {F(Budgets.RamMarginFraction * 100)} % = limit {F(limit)} MB",
+            number: peakMb, unit: "MB", budget: "<= base + cache + " + F(Budgets.RamMarginFraction * 100) + " %");
+    }
 
     /// <summary>The leak signal: PASS when RSS grows by less than <see cref="Budgets.LeakMbPerMinute"/> per minute after warm-up.</summary>
     public static CheckResult Leak(string id, string name, double slopeMbPerMinute) =>
