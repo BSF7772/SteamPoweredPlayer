@@ -5,8 +5,7 @@ Question: can an unpackaged, self-contained WinUI 3 / .NET 10 app embed libmpv t
 (`mpv_render_context`) into a `SwapChainPanel`, play the S2 lead EDL, keep a XAML overlay on top, survive resize and fullscreen,
 and still meet the plan's S1 budgets?
 
-**Status: part A (build + correctness) done. Part B (everything timed) is prepared and smoke-tested, but NOT run: the PC was in use,
-so timing numbers would be invalid.** No timing, CPU, latency or frame-pacing number below is a result.
+**Status: part A (build + correctness) done. Part B (timed) run once on an idle machine, with a shortened 5-minute soak; results below.**
 
 ## What is here
 
@@ -72,7 +71,33 @@ a test-harness bug, fixed; the first run's files are left in `out/`).
 Seek latencies seen in the self-test (40–147 ms) are **informational only** (machine in use).
 `wid` fallback: **not needed**, the D3D11 render API works. It was therefore not implemented.
 
-## Part B: timed measurements (NOT run)
+## Part B: timed measurements
+
+### Results (one run, `-Repeats 3 -SoakSeconds 300`)
+Desktop NVIDIA GPU, 16 logical cores, HEVC 1440p60, `hwdec=d3d11va`. Machine CPU before start 6.9 % (idle gate passed, no `-Force`). Total
+wall time 765 s. Medians of 3 interleaved app/reference runs of 60 s each (min–max in brackets).
+
+| metric | app | reference mpv CLI | budget | result |
+|---|---|---|---|---|
+| CPU, % of all cores | 1.96 (1.93–2.00) | 0.35 (0.31–0.37) | < 3 | PASS |
+| CPU, % of one core | 31.4 (30.9–31.9) | 5.6 (5.0–5.9) | small overhead over reference | **app ≈ 5.6× reference** |
+| working set max, MB | 294.5 (294.2–294.9) | ≈ 193 | < 250 | **FAIL** |
+| GPU local memory, MB | 307.2 | | | |
+| seek-by-reload, median per run, ms | 96.5 (90.8–116.2) | | < 150 | PASS on median; 5 of 30 seeks > 150, worst 216 |
+| open → first frame, ms | 260.6 cold, 186–194 warm | | < 250 | cold start just over |
+| presents/s | 59.91 | | ≈ 60 | PASS, 0 black frames, 0 present errors |
+| present interval P99 / max, ms | ≈ 32 / ≈ 45 | | | about 0.7 % of presents took 2 frames |
+
+Soak (4.9 media-minutes, one pass of the 300 s EDL): the working set grows from ≈ 284 to ≈ 358 MB in 4 minutes (≈ 19 MB/min, peak 377 MB);
+private bytes grow from ≈ 400 to ≈ 481 MB (peak 588 MB); GPU memory stays flat. It drops only at the loop reload (≈ 310 MB after). No
+plateau within 5 minutes, so demuxer-cache fill and a leak can't be told apart yet. The reload at the loop end stalled playback for ≈ 6 s.
+Seeks landed ≈ 1.2 s past the target in this run, compared with ≈ 0.42 s in S2.
+
+Open for Phase 2 (each needs a look before the budgets can hold): the app's CPU overhead over plain mpv (managed render loop, probes and
+stats sampling in the spike), RAM (libmpv demuxer/cache defaults, WinUI, D3D11 runtime) and its growth over time, the reload stall at
+the window end, the seek tail, and a full 10-minute soak.
+
+### How to run
 
 Run **once, on an idle machine** (close games, browsers, Steam overlay; the script refuses to start above 10 % machine CPU unless `-Force`):
 
@@ -86,9 +111,7 @@ the **app** and the **reference** (mpv CLI, same `hwdec=d3d11va`, same EDL, same
 bytes and GPU local/non-local memory over a 10 media-minute soak. Budgets (plan S1): seek < 150 ms, open → first frame < 250 ms, CPU < 3 % of all cores at
 1440p60 HEVC, RAM < 250 MB.
 
-Smoke run (**SMOKE, machine at 34 % CPU from other work, 15 s plays: not results**) only proves the pipeline works: it produced all files and a summary in 67 s.
-Its numbers are deliberately not quoted here. One thing to watch in the real run: the smoke working set exceeded the 250 MB RAM budget (≈ 290-310 MB),
-so the RAM budget may need a look (libmpv demuxer/cache defaults, D3D11 runtime, WinUI itself); that is a question for part B, not a conclusion.
+The per-run `.log` files name the GPU model: don't publish `out/`.
 
 ## Known limitations
 
@@ -98,4 +121,5 @@ so the RAM budget may need a look (libmpv demuxer/cache defaults, D3D11 runtime,
 - Only HEVC 1440p60 was exercised (S2's fixture); H.264 sessions, live (growing) sessions and UNC libraries are untested.
 - Single GPU vendor; AMD/Intel behaviour of the D3D11 render API untested.
 
-Verdict: PARTIAL (perf pending, part B)
+Verdict: PARTIAL. The D3D11 render API embedding works (part A 26/26). CPU, frame rate and median seek meet the budgets. RAM
+fails (295 MB, still growing during the soak), and the app's CPU overhead over plain mpv is large.
