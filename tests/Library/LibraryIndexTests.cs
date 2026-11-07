@@ -79,7 +79,8 @@ public sealed class LibraryIndexTests
         if (Environment.GetEnvironmentVariable("SPP_UPDATE_GOLDEN") == "1")
             File.WriteAllBytes(path, Sample().ToUtf8());
 
-        var bytes = File.ReadAllBytes(path);
+        // git autocrlf may have turned LF into CRLF on checkout; the format itself is LF.
+        var bytes = File.ReadAllBytes(path).Where(b => b != (byte)'\r').ToArray();
         var parsed = LibraryIndex.Parse(bytes);
         Assert.Equal(LibraryIndexStatus.Ok, parsed.Status);
         Assert.Equal(Sample().LibraryId, parsed.Index!.LibraryId);
