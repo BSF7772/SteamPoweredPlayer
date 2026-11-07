@@ -1,0 +1,22 @@
+{
+  "description": "Exact offset from gamerecording.pb field 1.5.10 (57332 ms) for timeline 1001. Chunk runs [1..10] and [14..20] at 3 s cover media time [0,30) and [39,60). A port (Kotlin) must reproduce 'expected' within 1e-6 s.",
+  "timeline": "../timelines/timeline-basic.json",
+  "offset": { "source": "gamerecording", "file": "../pb/gamerecording-basic.pb", "timelineId": "1001" },
+  "bgStartUtc": null,
+  "media": { "segmentSeconds": 3, "runs": [[1, 10], [14, 20]] },
+  "expected": {
+    "alignment": "Exact",
+    "visible": [
+      { "id": "e1", "start": 12.668, "end": null },
+      { "id": "e3", "start": 42.668, "end": 50.668 }
+    ],
+    "trimmed": [
+      { "id": "p1", "start": -57.332, "end": null, "reason": "BeforeStart" },
+      { "id": "e0", "start": -37.332, "end": -22.332, "reason": "BeforeStart" },
+      { "id": "e2", "start": 32.668, "end": null, "reason": "InGap" },
+      { "id": "e4", "start": 72.668, "end": null, "reason": "AfterEnd" },
+      { "id": "e5", "start": 92.668, "end": null, "reason": "AfterEnd" },
+      { "id": "e6", "start": 142.668, "end": null, "reason": "AfterEnd" }
+    ]
+  }
+}

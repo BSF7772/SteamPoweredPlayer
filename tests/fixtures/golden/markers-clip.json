@@ -1,0 +1,22 @@
+{
+  "description": "Offset from clip.pb field 1.5.10 (57332 ms). One run [1..20] covers [0,60): the gap marker e2 is now visible. A partly covered range would stay visible.",
+  "timeline": "../timelines/timeline-basic.json",
+  "offset": { "source": "clip", "file": "../pb/clip-basic.pb" },
+  "bgStartUtc": null,
+  "media": { "segmentSeconds": 3, "runs": [[1, 20]] },
+  "expected": {
+    "alignment": "Exact",
+    "visible": [
+      { "id": "e1", "start": 12.668, "end": null },
+      { "id": "e2", "start": 32.668, "end": null },
+      { "id": "e3", "start": 42.668, "end": 50.668 }
+    ],
+    "trimmed": [
+      { "id": "p1", "start": -57.332, "end": null, "reason": "BeforeStart" },
+      { "id": "e0", "start": -37.332, "end": -22.332, "reason": "BeforeStart" },
+      { "id": "e4", "start": 72.668, "end": null, "reason": "AfterEnd" },
+      { "id": "e5", "start": 92.668, "end": null, "reason": "AfterEnd" },
+      { "id": "e6", "start": 142.668, "end": null, "reason": "AfterEnd" }
+    ]
+  }
+}
