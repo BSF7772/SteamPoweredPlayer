@@ -102,4 +102,21 @@ public sealed record ScanOptions
 
     /// <summary>Test seam: runs after the directory listing, before the head checks (simulates Steam trimming mid-scan).</summary>
     internal Action? AfterListing { get; init; }
+
+    /// <summary>Test seam: replaces the 8-byte head read (path in, classification out). Used to count head reads. Default <see cref="ScanHeads.ReadAsync"/>.</summary>
+    internal Func<string, CancellationToken, ValueTask<HeadCheck>>? HeadReader { get; init; }
+}
+
+/// <summary>
+/// A scan with what a caller needs to make the next one cheap.
+/// </summary>
+/// <param name="Result">The ordinary scan result.</param>
+/// <param name="Heads">Head results worth remembering (valid and zero-filled chunk files) with their length and last write time.</param>
+/// <param name="HeadReads">Head reads done by this scan (files that were not in the trusted set).</param>
+/// <param name="SizeBytes">Sum of the file sizes of the scanned folder listing.</param>
+/// <param name="MediaFolder">Clips only: the media folder that was scanned.</param>
+/// <param name="Clip">Clips only: the parsed <c>clip.pb</c> (an empty one when missing).</param>
+public sealed record CachedScan(ScanResult Result, FolderHeads Heads, int HeadReads, long SizeBytes, string? MediaFolder = null, Steam.ClipPb? Clip = null)
+{
+    internal static CachedScan GoneResult { get; } = new(ScanResult.Gone, FolderHeads.Empty, 0, 0);
 }

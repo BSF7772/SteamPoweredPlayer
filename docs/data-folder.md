@@ -25,6 +25,7 @@ trailing separators, `.` and `..` resolved; symlinks and junctions are not resol
   library-id          one line: a GUID ("D" format, lowercase), created once, never changed
   library.json        the index (below); replaced atomically
   library.json.tmp    transient, writer only; readers ignore it
+  scan-cache.json     desktop-only scan cache (below); phones never read it; replaced atomically
   art/<gameId>/       cover.<ext> hero.<ext> heroBlur.<ext> logo.<ext>, copied from Steam's library cache
   trick/              trickplay thumbnails (later phase)
   proxies/            viewing proxies (later phase)
@@ -104,3 +105,23 @@ relative paths used in the index. A copy is kept while its size and modification
 source's mtime). The source is only read, with read + delete sharing. `gameId` must be decimal digits (it is a folder name).
 Missing sources give no entry. Old copies with a different extension are left in place (the desktop never deletes outside the
 delete service); the index points to the current one.
+
+## `scan-cache.json` (desktop only, version 1)
+
+Remembers which chunk heads were already checked, so a warm start lists each folder and reads only new or changed files
+(a cold scan of ~21 000 chunks took 142 s on a cold disk, 2-3 s warm). Not part of the `library.json` contract: phones ignore it,
+and a missing, corrupt or newer-version file just means a cold scan. Written with the same atomic temp-and-swap as `library.json`
+(`scan-cache.json.tmp`), at most every few seconds, only after the data folder is confirmed.
+
+```json
+{ "version": 1,
+  "folders": {
+    "video/bg_730_20250101_120000": { "chunks": [ [0, 1, 123456, 638700000000000000, 1], [1, 1, 4567, 638700000000000000, 2] ] }
+  } }
+```
+
+Key = `recordings[].relativeFolder` (for a clip the clip folder; the chunks are in its media folder). A chunk entry is
+`[stream, number, length, lastWriteUtcTicks, head]`, `head` 1 = valid MP4 box, 2 = zero-filled. Only final-name chunk files are stored
+(never `.tmp`). An entry is trusted only while the file's name, length and last write time (UTC ticks) match the listing;
+anything else is head-read again. Other head results (too short, not a box, unreadable) are never stored.
+

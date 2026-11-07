@@ -71,7 +71,7 @@ public sealed class IndexStore
         }
     }
 
-    private static void Swap(string tmp, string target)
+    internal static void Swap(string tmp, string target)
     {
         // Readers hold the target with FileShare.Delete, so the swap normally succeeds at once; retry briefly for other sharing violations.
         for (var attempt = 0; ; attempt++)

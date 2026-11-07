@@ -14,7 +14,16 @@ public static class Scanner
     /// <summary>Concurrent head reads; heads are tiny, the cost is the open.</summary>
     private const int HeadReadParallelism = 16;
 
-    public static async Task<ScanResult> ScanAsync(string folder, ScanOptions? options = null, CancellationToken ct = default)
+    public static async Task<ScanResult> ScanAsync(string folder, ScanOptions? options = null, CancellationToken ct = default) =>
+        (await ScanCachedAsync(folder, null, options, ct).ConfigureAwait(false)).Result;
+
+    /// <summary>
+    /// <see cref="ScanAsync"/> with a trusted set: a chunk file whose (name, length, last write) matches <paramref name="trusted"/> skips
+    /// the 8-byte head read and takes the remembered result; new or changed files are read. The result also carries the head results to
+    /// remember next time, the number of head reads done and the folder size. With <paramref name="trusted"/> null it behaves exactly
+    /// like <see cref="ScanAsync"/>.
+    /// </summary>
+    public static async Task<CachedScan> ScanCachedAsync(string folder, FolderHeads? trusted, ScanOptions? options = null, CancellationToken ct = default)
     {
         options ??= new();
         var full = Path.GetFullPath(folder);
@@ -22,9 +31,9 @@ public static class Scanner
 
         List<ScanEntry> entries;
         try { entries = List(full, ct); }
-        catch (DirectoryNotFoundException) { return ScanResult.Gone; }
-        catch (IOException) when (!Directory.Exists(full)) { return ScanResult.Gone; }
-        catch (UnauthorizedAccessException) when (!Directory.Exists(full)) { return ScanResult.Gone; }
+        catch (DirectoryNotFoundException) { return CachedScan.GoneResult; }
+        catch (IOException) when (!Directory.Exists(full)) { return CachedScan.GoneResult; }
+        catch (UnauthorizedAccessException) when (!Directory.Exists(full)) { return CachedScan.GoneResult; }
 
         options.AfterListing?.Invoke();
 
@@ -33,35 +42,56 @@ public static class Scanner
             : ManifestKind.Missing;
 
         var candidates = ScanAnalysis.HeadCandidates(entries);
+        var info = new Dictionary<string, ScanEntry>(entries.Count, StringComparer.Ordinal);
+        foreach (var e in entries) info[e.Name] = e;
+
         var heads = new HeadCheck[candidates.Count];
+        var toRead = new List<int>();
+        for (var i = 0; i < candidates.Count; i++)
+        {
+            var e = info[candidates[i]];
+            if (trusted is not null && trusted.TryGet(e.Name, e.Size, e.LastWriteUtc.UtcTicks, out var known)) heads[i] = known;
+            else toRead.Add(i);
+        }
+
+        var reader = options.HeadReader ?? ScanHeads.ReadAsync;
         using (var gate = new SemaphoreSlim(HeadReadParallelism))
         {
-            var tasks = new Task[candidates.Count];
-            for (var i = 0; i < tasks.Length; i++)
+            var tasks = new Task[toRead.Count];
+            for (var t = 0; t < tasks.Length; t++)
             {
-                var idx = i;
+                var idx = toRead[t];
                 await gate.WaitAsync(ct).ConfigureAwait(false);
-                tasks[i] = ReadOne(idx);
+                tasks[t] = ReadOne(idx);
             }
             await Task.WhenAll(tasks).ConfigureAwait(false);
 
             async Task ReadOne(int idx)
             {
-                try { heads[idx] = await ScanHeads.ReadAsync(Path.Combine(full, candidates[idx]), ct).ConfigureAwait(false); }
+                try { heads[idx] = await reader(Path.Combine(full, candidates[idx]), ct).ConfigureAwait(false); }
                 finally { gate.Release(); }
             }
         }
 
         var byName = new Dictionary<string, HeadCheck>(candidates.Count, StringComparer.Ordinal);
         var anyVanished = false;
+        var remember = new Dictionary<string, CachedChunk>(candidates.Count, StringComparer.Ordinal);
         for (var i = 0; i < heads.Length; i++)
         {
             byName[candidates[i]] = heads[i];
             anyVanished |= heads[i] == HeadCheck.Vanished;
+            if (heads[i] is HeadCheck.Valid or HeadCheck.ZeroFilled)
+            {
+                var e = info[candidates[i]];
+                remember[candidates[i]] = new(e.Size, e.LastWriteUtc.UtcTicks, heads[i]);
+            }
         }
-        if (anyVanished && !Directory.Exists(full)) return ScanResult.Gone;
+        if (anyVanished && !Directory.Exists(full)) return CachedScan.GoneResult;
 
-        return ScanAnalysis.Analyze(full, entries, manifest, now, n => byName.GetValueOrDefault(n, HeadCheck.Vanished), options.Temporary);
+        long size = 0;
+        foreach (var e in entries) size += e.Size;
+        var result = ScanAnalysis.Analyze(full, entries, manifest, now, n => byName.GetValueOrDefault(n, HeadCheck.Vanished), options.Temporary);
+        return new CachedScan(result, FolderHeads.From(remember), toRead.Count, size);
     }
 
     /// <summary>
@@ -69,16 +99,24 @@ public static class Scanner
     /// <c>bg_*</c> name says). A vanished clip folder is <see cref="ScanStatus.Gone"/>; one without a media folder is
     /// <see cref="ScanStatus.NotPlayable"/> with <see cref="ScanIssueKind.MissingMediaFolder"/>.
     /// </summary>
-    public static async Task<ScanResult> ScanClipAsync(string clipFolder, ScanOptions? options = null, CancellationToken ct = default)
+    public static async Task<ScanResult> ScanClipAsync(string clipFolder, ScanOptions? options = null, CancellationToken ct = default) =>
+        (await ScanClipCachedAsync(clipFolder, null, options, ct).ConfigureAwait(false)).Result;
+
+    /// <summary><see cref="ScanClipAsync"/> with a trusted set (see <see cref="ScanCachedAsync"/>). Also returns the media folder and the parsed <c>clip.pb</c>.</summary>
+    public static async Task<CachedScan> ScanClipCachedAsync(string clipFolder, FolderHeads? trusted, ScanOptions? options = null, CancellationToken ct = default)
     {
         // clip.pb names the media folder exactly (recording_id); 196 of 196 real clips matched. Without it, fall back to the name rules.
         var pb = await RecordingPb.ReadClipAsync(Path.Combine(clipFolder, "clip.pb"), ct).ConfigureAwait(false);
         var media = FindClipMediaFolder(clipFolder, pb.MediaFolders.FirstOrDefault());
         if (media is null)
-            return Directory.Exists(clipFolder)
+        {
+            var r = Directory.Exists(clipFolder)
                 ? ScanResult.Gone with { Status = ScanStatus.NotPlayable, Issues = [new(ScanIssueKind.MissingMediaFolder)] }
                 : ScanResult.Gone;
-        return await ScanAsync(media, (options ?? new()) with { Temporary = false }, ct).ConfigureAwait(false);
+            return CachedScan.GoneResult with { Result = r, Clip = pb };
+        }
+        var scan = await ScanCachedAsync(media, trusted, (options ?? new()) with { Temporary = false }, ct).ConfigureAwait(false);
+        return scan with { MediaFolder = media, Clip = pb };
     }
 
     /// <summary>
