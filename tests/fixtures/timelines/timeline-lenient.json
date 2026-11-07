@@ -1,0 +1,14 @@
+{
+  "daterecorded": 1735736400,
+  "starttime": "0",
+  "endtime": "300000",
+  "entries": [
+    { "id": 17, "time": "5000", "type": "event", "title": "Numbers as strings", "duration": "2500.0", "priority": "3", "possible_clip": "true" },
+    { "id": "no-time", "type": "event", "title": "Missing time, skipped" },
+    "not an object",
+    { "id": "bad-time", "time": "soon", "type": "event" },
+    { "id": "neg-duration", "time": 9000, "type": "event", "duration": -5 },
+    { "id": "bad-tag", "time": 10000, "type": "phase", "tags": [ 5, { "group": "no name" }, { "name": "ok" } ] },
+    { "id": "no-type", "time": 11000 }
+  ]
+}

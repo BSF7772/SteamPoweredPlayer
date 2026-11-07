@@ -1,0 +1,22 @@
+{
+  "description": "No exact offset: fallback bgStartUtc (12:00:57Z, from the folder name) minus daterecorded (12:00:00Z) = 57 s, so every marker is approximate (about +-1 s). Same chunks as markers-exact.",
+  "timeline": "../timelines/timeline-basic.json",
+  "offset": { "source": "none" },
+  "bgStartUtc": "2025-01-01T12:00:57Z",
+  "media": { "segmentSeconds": 3, "runs": [[1, 10], [14, 20]] },
+  "expected": {
+    "alignment": "Approximate",
+    "visible": [
+      { "id": "e1", "start": 13.0, "end": null },
+      { "id": "e3", "start": 43.0, "end": 51.0 }
+    ],
+    "trimmed": [
+      { "id": "p1", "start": -57.0, "end": null, "reason": "BeforeStart" },
+      { "id": "e0", "start": -37.0, "end": -22.0, "reason": "BeforeStart" },
+      { "id": "e2", "start": 33.0, "end": null, "reason": "InGap" },
+      { "id": "e4", "start": 73.0, "end": null, "reason": "AfterEnd" },
+      { "id": "e5", "start": 93.0, "end": null, "reason": "AfterEnd" },
+      { "id": "e6", "start": 143.0, "end": null, "reason": "AfterEnd" }
+    ]
+  }
+}
