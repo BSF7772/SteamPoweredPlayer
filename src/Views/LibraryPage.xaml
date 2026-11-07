@@ -54,19 +54,19 @@
                                     </Grid.ColumnDefinitions>
                                     <Border Width="38" Height="52" CornerRadius="6" Background="{ThemeResource ControlFillColorSecondaryBrush}">
                                         <Grid>
-                                            <Border Style="{StaticResource ArtPlaceholder}" Visibility="{x:Bind NoCover}" />
-                                            <TextBlock Text="{x:Bind Initial}" Visibility="{x:Bind NoCover}" FontSize="18" FontWeight="SemiBold"
+                                            <Border Style="{StaticResource ArtPlaceholder}" Visibility="{x:Bind NoCover, Mode=OneWay}" />
+                                            <TextBlock Text="{x:Bind Initial, Mode=OneWay}" Visibility="{x:Bind NoCover, Mode=OneWay}" FontSize="18" FontWeight="SemiBold"
                                                        Foreground="White" HorizontalAlignment="Center" VerticalAlignment="Center" />
-                                            <Image Source="{x:Bind Cover}" Stretch="UniformToFill" />
+                                            <Image Source="{x:Bind Cover, Mode=OneWay}" Stretch="UniformToFill" />
                                         </Grid>
                                     </Border>
                                     <StackPanel Grid.Column="1" VerticalAlignment="Center" Spacing="2">
-                                        <TextBlock Text="{x:Bind Name}" TextTrimming="CharacterEllipsis" Style="{StaticResource BodyTextBlockStyle}" />
-                                        <TextBlock Text="{x:Bind Caption}" Style="{StaticResource Caption}" TextTrimming="CharacterEllipsis" />
+                                        <TextBlock Text="{x:Bind Name, Mode=OneWay}" TextTrimming="CharacterEllipsis" Style="{StaticResource BodyTextBlockStyle}" />
+                                        <TextBlock Text="{x:Bind Caption, Mode=OneWay}" Style="{StaticResource Caption}" TextTrimming="CharacterEllipsis" />
                                     </StackPanel>
                                     <Border Grid.Column="2" CornerRadius="9" Padding="8,1,8,2" VerticalAlignment="Center"
                                             Background="{ThemeResource ControlFillColorSecondaryBrush}">
-                                        <TextBlock Text="{x:Bind Count}" Style="{StaticResource Timecode}" />
+                                        <TextBlock Text="{x:Bind Count, Mode=OneWay}" Style="{StaticResource Timecode}" />
                                     </Border>
                                 </Grid>
                             </DataTemplate>
@@ -136,7 +136,7 @@
                             </Grid>
 
                             <StackPanel Orientation="Horizontal" Spacing="8" HorizontalAlignment="Right">
-                                <Button x:Name="ReplayButton" IsEnabled="False" ToolTipService.ToolTip="Replay the cache from here (arrives with the Player)">
+                                <Button x:Name="ReplayButton" IsEnabled="False" Click="Replay_Click" ToolTipService.ToolTip="Replay the cache: the session recording now, else the newest one">
                                     <StackPanel Orientation="Horizontal" Spacing="8">
                                         <FontIcon Glyph="&#xE768;" FontSize="14" />
                                         <TextBlock Text="Replay" />

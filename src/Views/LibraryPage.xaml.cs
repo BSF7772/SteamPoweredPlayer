@@ -3,6 +3,7 @@ using System.Globalization;
 using System.Numerics;
 using Microsoft.UI;
 using Microsoft.UI.Xaml;
+using Microsoft.UI.Xaml.Automation;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Input;
 using Microsoft.UI.Xaml.Media;
@@ -12,6 +13,7 @@ using Microsoft.UI.Xaml.Shapes;
 using SteamPoweredPlayer.Core.Library;
 using SteamPoweredPlayer.Core.Steam;
 using SteamPoweredPlayer.Services;
+using SteamPoweredPlayer.Views.Player;
 
 namespace SteamPoweredPlayer.Views;
 
@@ -30,12 +32,21 @@ public sealed partial class LibraryPage : Page
     private bool _suppressSelection;
     private string _shownSig = "";
     private string _clipsSig = "";
+    private List<ClipTile> _shownClips = [];
+    private string? _heroPath, _logoPath;
+
+    /// <summary>Clip card thumbnails are decoded at about the card's width (logical px; the grid stretches cards from 216 px).</summary>
+    private const double ClipThumbWidth = 360;
+    private const double CoverWidth = 48;
 
     public LibraryPage()
     {
         InitializeComponent();
         GameList.ItemsSource = _shown;
+        ClipRepeater.ElementPrepared += ClipRepeater_ElementPrepared;
     }
+
+    private double DpiScale => XamlRoot?.RasterizationScale ?? 1.0;
 
     protected override void OnNavigatedTo(NavigationEventArgs e)
     {
@@ -72,7 +83,7 @@ public sealed partial class LibraryPage : Page
     {
         // markers arrived for a session, or trickplay for a clip: redraw only that part
         if (_sessions.Any(x => x.RelativeFolder == folder)) DrawCache();
-        if (_clipTiles.TryGetValue(folder, out var tile)) { tile.ThumbRequested = false; RequestThumb(tile); }
+        if (_clipTiles.TryGetValue(folder, out var tile)) RequestThumb(tile, trickplayChanged: true);
     }
 
     private void FirstRun_Confirmed(object? sender, EventArgs e)
@@ -94,7 +105,7 @@ public sealed partial class LibraryPage : Page
 
         var src = AppServices.Library;
         var index = src?.Current;
-        _tiles = index is null || src is null ? [] : BuildTiles(index, src, _covers);
+        _tiles = index is null || src is null ? [] : BuildTiles(index, src, _covers, DpiScale);
 
         var noLibrary = index is null || (index.Recordings.Count == 0 && src?.Problem is not null);
         GameScroll.Visibility = noLibrary ? Visibility.Collapsed : Visibility.Visible;
@@ -106,7 +117,7 @@ public sealed partial class LibraryPage : Page
         ApplyGameFilter();
     }
 
-    private static List<GameTile> BuildTiles(LibraryIndex index, ILibrarySource src, Dictionary<string, ImageSource?> covers)
+    private static List<GameTile> BuildTiles(LibraryIndex index, ILibrarySource src, Dictionary<string, ImageSource?> covers, double scale)
     {
         var byGame = index.Recordings.ToLookup(r => r.GameId);
         var tiles = new List<GameTile>();
@@ -115,47 +126,39 @@ public sealed partial class LibraryPage : Page
         foreach (var g in index.Games)
         {
             seen.Add(g.GameId);
-            tiles.Add(MakeTile(g.GameId, g.Name, g, byGame[g.GameId].ToList(), src, covers));
+            tiles.Add(MakeTile(g.GameId, g.Name, g, byGame[g.GameId].ToList(), src, covers, scale));
         }
         foreach (var group in byGame.Where(x => x.Key is not null && !seen.Contains(x.Key)))
         {
             var name = ulong.TryParse(group.Key, NumberStyles.None, CultureInfo.InvariantCulture, out var id) ? GameNameResolver.Fallback(id) : "Unknown game";
-            tiles.Add(MakeTile(group.Key!, name, null, group.ToList(), src, covers));
+            tiles.Add(MakeTile(group.Key!, name, null, group.ToList(), src, covers, scale));
         }
         var loose = byGame[null].ToList();
-        if (loose.Count > 0) tiles.Add(MakeTile(null, "Downloaded clips", null, loose, src, covers));
+        if (loose.Count > 0) tiles.Add(MakeTile(null, "Downloaded clips", null, loose, src, covers, scale));
 
         return tiles.OrderByDescending(t => t.LastUtc).ThenBy(t => t.Name, StringComparer.OrdinalIgnoreCase).ToList();
     }
 
-    private static GameTile MakeTile(string? id, string name, GameEntry? entry, List<RecordingEntry> recs, ILibrarySource src, Dictionary<string, ImageSource?> covers)
+    private static GameTile MakeTile(string? id, string name, GameEntry? entry, List<RecordingEntry> recs, ILibrarySource src,
+        Dictionary<string, ImageSource?> covers, double scale)
     {
-        // one BitmapImage per file, however often the index refreshes
+        // one BitmapImage per file, however often the index refreshes; decoded at the rail's size (F8)
         var path = src.ResolveArt(entry?.Art?.Cover);
         ImageSource? cover = null;
-        if (path is not null && !covers.TryGetValue(path, out cover)) covers[path] = cover = Fmt.Image(path);
-        return MakeTile(id, name, entry, recs, cover, path ?? "");
+        if (path is not null && !covers.TryGetValue(path, out cover)) covers[path] = cover = Fmt.Image(path, CoverWidth, scale);
+        return GameTile.Create(id, name, entry, cover, path ?? "",
+            clips: recs.Count(r => r.Kind != RecordingKind.CacheSession),
+            sessions: recs.Count(r => r.Kind == RecordingKind.CacheSession),
+            sizeBytes: recs.Sum(r => r.SizeBytes),
+            lastUtc: recs.Count == 0 ? DateTimeOffset.MinValue : recs.Max(r => r.StartUtc + TimeSpan.FromSeconds(Fmt.Duration(r))));
     }
-
-    private static GameTile MakeTile(string? id, string name, GameEntry? entry, List<RecordingEntry> recs, ImageSource? cover, string coverPath) => new()
-    {
-        GameId = id,
-        Name = name,
-        Entry = entry,
-        Cover = cover,
-        CoverPath = coverPath,
-        Clips = recs.Count(r => r.Kind != RecordingKind.CacheSession),
-        Sessions = recs.Count(r => r.Kind == RecordingKind.CacheSession),
-        SizeBytes = recs.Sum(r => r.SizeBytes),
-        LastUtc = recs.Count == 0 ? DateTimeOffset.MinValue : recs.Max(r => r.StartUtc + TimeSpan.FromSeconds(Fmt.Duration(r))),
-    };
 
     private void SearchBox_TextChanged(AutoSuggestBox sender, AutoSuggestBoxTextChangedEventArgs args) => ApplyGameFilter();
 
     private void ApplyGameFilter()
     {
         var q = SearchBox.Text.Trim();
-        var list = q.Length == 0 ? _tiles : _tiles.Where(t => t.Name.Contains(q, StringComparison.OrdinalIgnoreCase)).ToList();
+        var list = q.Length == 0 ? _tiles.ToList() : _tiles.Where(t => t.Name.Contains(q, StringComparison.OrdinalIgnoreCase)).ToList();
 
         _suppressSelection = true;
         try
@@ -178,23 +181,24 @@ public sealed partial class LibraryPage : Page
         finally { _suppressSelection = false; }
     }
 
-    /// <summary>Makes the rail show <paramref name="list"/> with the fewest changes: unchanged tiles stay as they are, so the scroll position survives a refresh.</summary>
+    /// <summary>
+    /// Makes the rail show <paramref name="list"/> with the fewest changes (F11): a game that is already shown keeps its row object and
+    /// only its numbers change (no remove + add, so no entrance animation); rows are inserted or removed only when the set of games
+    /// changes, and moved only when the order really changes.
+    /// </summary>
     private void SyncShown(List<GameTile> list)
     {
         for (var i = 0; i < list.Count; i++)
         {
             var want = list[i];
-            if (i < _shown.Count && _shown[i].Key == want.Key)
-            {
-                if (_shown[i].Sig != want.Sig) _shown[i] = want;
-                continue;
-            }
+            if (i < _shown.Count && _shown[i].Key == want.Key) { _shown[i].Update(want); list[i] = _shown[i]; continue; }
             var j = -1;
             for (var k = i + 1; k < _shown.Count; k++) if (_shown[k].Key == want.Key) { j = k; break; }
             if (j >= 0)
             {
                 _shown.Move(j, i);
-                if (_shown[i].Sig != want.Sig) _shown[i] = want;
+                _shown[i].Update(want);
+                list[i] = _shown[i];
             }
             else _shown.Insert(i, want);
         }
@@ -229,14 +233,25 @@ public sealed partial class LibraryPage : Page
         if (!resetScroll && sig == _shownSig) return;
         _shownSig = sig;
 
-        // hero: Steam's blurred hero art + logo when we have them, brand gradient otherwise
+        // hero (F8): Steam's full-resolution hero art (1920 px), not the 192 px blurred one, decoded at the card's width; brand
+        // gradient when there is none. Same file as before: the image is kept (no reload, no flicker on a live refresh).
         var art = tile.Entry?.Art;
-        HeroImage.Source = Fmt.Image(src.ResolveArt(art?.HeroBlur ?? art?.Hero));
-        var logo = Fmt.Image(src.ResolveArt(art?.Logo));
-        LogoImage.Source = logo;
-        LogoImage.Visibility = logo is null ? Visibility.Collapsed : Visibility.Visible;
+        var heroPath = src.ResolveArt(art?.Hero ?? art?.HeroBlur);
+        if (heroPath != _heroPath)
+        {
+            _heroPath = heroPath;
+            HeroImage.Source = Fmt.Image(heroPath, Math.Max(GameScroll.ActualWidth, 1200), DpiScale);
+        }
+        var logoPath = src.ResolveArt(art?.Logo);
+        if (logoPath != _logoPath)
+        {
+            _logoPath = logoPath;
+            LogoImage.Source = Fmt.Image(logoPath, LogoImage.MaxWidth, DpiScale);
+        }
+        var hasLogo = LogoImage.Source is not null;
+        LogoImage.Visibility = hasLogo ? Visibility.Visible : Visibility.Collapsed;
         GameTitle.Text = tile.Name;
-        GameTitle.Visibility = logo is null ? Visibility.Visible : Visibility.Collapsed;
+        GameTitle.Visibility = hasLogo ? Visibility.Collapsed : Visibility.Visible;
         GameSubtitle.Text = tile.LastUtc == DateTimeOffset.MinValue ? "Nothing recorded yet" : "Last recorded " + Fmt.Ago(tile.LastUtc);
         HeroClips.Text = tile.Sessions > 0 ? tile.Caption : Fmt.Plural(tile.Clips, "clip");
         HeroSize.Text = Fmt.Bytes(tile.SizeBytes);
@@ -265,28 +280,50 @@ public sealed partial class LibraryPage : Page
             ApplyClips();
             if (!resetScroll) { GameScroll.UpdateLayout(); GameScroll.ChangeView(null, offset, null, disableAnimation: true); }
         }
-        foreach (var t in _clips) RequestThumb(t);
         if (resetScroll) GameScroll.ChangeView(null, 0, null, disableAnimation: true);
     }
 
     private static string RecSig(RecordingEntry r) => string.Create(CultureInfo.InvariantCulture,
         $"{r.RelativeFolder}|{r.SizeBytes}|{r.DurationSeconds}|{r.MarkerCount}|{r.Live}|{r.Title}|{r.Runs.Count}|{(r.Runs.Count > 0 ? r.Runs[^1].Last : 0)}");
 
-    /// <summary>Loads the first tile of the clip's trickplay sheet as its thumbnail, if the sheet exists yet (else the gradient placeholder stays).</summary>
-    private async void RequestThumb(ClipTile tile)
+    /// <summary>A card was realised (the grid virtualises): load its thumbnail now, not for every clip of the game up front.</summary>
+    private void ClipRepeater_ElementPrepared(ItemsRepeater sender, ItemsRepeaterElementPreparedEventArgs args)
     {
-        if (tile.Thumb is not null || tile.ThumbRequested) return;
+        if (args.Index >= 0 && args.Index < _shownClips.Count) RequestThumb(_shownClips[args.Index]);
+    }
+
+    /// <summary>
+    /// F7: the card shows Steam's own <c>thumbnail.jpg</c> of a saved clip (1080p, read-only with delete sharing), decoded at the card's
+    /// width × DPI; else the first tile of the clip's trickplay sheet, if it exists yet (else the gradient placeholder stays). Same
+    /// helper as the Player's playlist.
+    /// </summary>
+    private async void RequestThumb(ClipTile tile, bool trickplayChanged = false)
+    {
+        if (tile.ThumbRequested || tile.ThumbFromSteam || (tile.Thumb is not null && !trickplayChanged)) return;
         var src = _wired;
         if (src is null) return;
         tile.ThumbRequested = true;
         try
         {
+            if (!trickplayChanged)
+            {
+                var folder = src.GetMedia(tile.Key)?.Folder
+                    ?? (AppServices.Steam.RecordingsPath is { } root ? System.IO.Path.Combine(root, tile.Key.Replace('/', System.IO.Path.DirectorySeparatorChar)) : null);
+                var jpg = await Task.Run(() => PlaylistThumbs.ReadSteamThumbnail(tile.Key, folder)).ConfigureAwait(true);
+                if (jpg is not null && await PlaylistThumbs.DecodeAsync(jpg, (int)Math.Ceiling(ClipThumbWidth * DpiScale)) is { } image)
+                {
+                    tile.ThumbKeepAlive = image.KeepAlive;
+                    tile.ThumbFromSteam = true;
+                    tile.Thumb = image.Source;
+                    return;
+                }
+            }
             var index = await Task.Run(() => src.TrickplayFor(tile.Key)).ConfigureAwait(true);
-            if (index is null) { tile.ThumbRequested = false; return; }
-            var img = await ThumbnailLoader.FirstTileAsync(index);
-            if (img is not null) tile.Thumb = img; else tile.ThumbRequested = false;
+            if (index is null) return;
+            if (await ThumbnailLoader.FirstTileAsync(index) is { } img && !tile.ThumbFromSteam) tile.Thumb = img;
         }
-        catch (Exception e) when (e is IOException or UnauthorizedAccessException) { tile.ThumbRequested = false; }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException or System.Runtime.InteropServices.COMException) { }
+        finally { tile.ThumbRequested = false; }
     }
 
     // =====================================================================================
@@ -295,6 +332,20 @@ public sealed partial class LibraryPage : Page
 
     private void CacheHost_SizeChanged(object sender, SizeChangedEventArgs e) => DrawCache();
 
+    /// <summary>The wall-clock span of the chunks on disk: chunk N of a cache session starts (N − 1) · S after the folder's start time.</summary>
+    private static StripSpan SpanOf(RecordingEntry s)
+    {
+        if (s.Runs.Count == 0) return new(s.StartUtc, s.StartUtc + TimeSpan.FromSeconds(Fmt.Duration(s)));
+        return new(s.StartUtc + TimeSpan.FromSeconds((s.Runs[0].First - 1) * s.SegmentSeconds),
+                   s.StartUtc + TimeSpan.FromSeconds(s.Runs[^1].Last * s.SegmentSeconds));
+    }
+
+    private static string Clock(DateTimeOffset utc) => utc.ToLocalTime().ToString("HH:mm", CultureInfo.InvariantCulture);
+
+    /// <summary>
+    /// F9: every cache session is a block on an absolute time axis (local times; the date when the span crosses midnight), gaps between
+    /// sessions stay visible, long gaps (days) are drawn as a short break. Each block is a button (<c>LibraryCacheBlock</c>) that opens it.
+    /// </summary>
     private void DrawCache()
     {
         foreach (var s in _pulses) s.Stop();
@@ -304,6 +355,7 @@ public sealed partial class LibraryPage : Page
         var empty = _sessions.Count == 0;
         CacheEmpty.Visibility = empty ? Visibility.Visible : Visibility.Collapsed;
         StripCanvas.Visibility = empty ? Visibility.Collapsed : Visibility.Visible;
+        ReplayButton.IsEnabled = !empty;
         var live = _sessions.Any(s => s.Live);
         LiveBadge.Visibility = live ? Visibility.Visible : Visibility.Collapsed;
         if (live) Pulse(LiveDot);
@@ -313,59 +365,45 @@ public sealed partial class LibraryPage : Page
         if (w < 80) return;
         StripCanvas.Width = w;
 
-        var now = DateTimeOffset.UtcNow;
-        var keep = AppServices.Steam.MaxKeep ?? TimeSpan.FromHours(2);
-        var firstStart = _sessions.Min(s => s.StartUtc);
-        var span = TimeSpan.FromSeconds(Math.Max(keep.TotalSeconds, (now - firstStart).TotalSeconds + 60));
-        var axisStart = now - span;
-        double X(DateTimeOffset t) => Math.Clamp((t - axisStart).TotalSeconds / span.TotalSeconds, 0, 1) * w;
-
+        var spans = _sessions.Select(SpanOf).ToList();
+        var layout = CacheStripLayout.Build(spans, w, TimeZoneInfo.Local);
         const double top = 6, barH = 36;
+        var dim = new SolidColorBrush(Windows.UI.Color.FromArgb(0x33, 0x80, 0x80, 0x80));
+        var caption = (Style)Application.Current.Resources["Caption"];
 
-        // the track is the whole window Steam may keep; whatever is not a session is a gap
-        StripCanvas.Children.Add(new Rectangle
+        // the track behind the blocks: whatever is not a block is a gap
+        var track = new Rectangle
         {
             Width = w, Height = barH, RadiusX = 8, RadiusY = 8,
-            Fill = new SolidColorBrush(Windows.UI.Color.FromArgb(0x1A, 0x80, 0x80, 0x80)), Stroke = new SolidColorBrush(Windows.UI.Color.FromArgb(0x33, 0x80, 0x80, 0x80)), StrokeThickness = 1,
-        });
-        Place(StripCanvas.Children[^1], 0, top);
+            Fill = new SolidColorBrush(Windows.UI.Color.FromArgb(0x1A, 0x80, 0x80, 0x80)), Stroke = dim, StrokeThickness = 1,
+        };
+        Place(track, 0, top);
+        StripCanvas.Children.Add(track);
 
-        // hour ticks, labelled below
-        for (var h = 0; h * 3600 <= span.TotalSeconds; h++)
+        foreach (var g in layout.Gaps.Where(g => g.Compressed))
         {
-            var x = X(now - TimeSpan.FromHours(h));
-            if (h > 0 && x > 1)
-            {
-                var line = new Rectangle { Width = 1, Height = barH, Fill = new SolidColorBrush(Windows.UI.Color.FromArgb(0x33, 0x80, 0x80, 0x80)) };
-                Place(line, x, top);
-                StripCanvas.Children.Add(line);
-            }
-            var label = new TextBlock { Text = h == 0 ? "now" : $"−{h} h", Style = (Style)Application.Current.Resources["Caption"], FontSize = 11 };
-            Place(label, h == 0 ? w - 26 : Math.Max(0, x - 12), 68);
-            StripCanvas.Children.Add(label);
+            var mark = new TextBlock { Text = "≈", Style = caption, FontSize = 16, Width = g.X1 - g.X0, TextAlignment = TextAlignment.Center };
+            ToolTipService.SetToolTip(mark, "No recording for " + (g.Length.TotalDays >= 1 ? string.Create(CultureInfo.InvariantCulture, $"{g.Length.TotalDays:0.#} days") : Fmt.Span(g.Length)));
+            Place(mark, g.X0, top + barH / 2 - 12);
+            StripCanvas.Children.Add(mark);
         }
 
-        var n = 0;
-        foreach (var s in _sessions)
+        foreach (var b in layout.Blocks)
         {
-            n++;
-            var dur = s.Live ? (now - s.StartUtc).TotalSeconds : Fmt.Duration(s);
-            var x0 = X(s.StartUtc);
-            var x1 = X(s.StartUtc + TimeSpan.FromSeconds(dur));
-            var bw = Math.Max(8, x1 - x0);
+            var s = _sessions[b.Index];
+            var bw = Math.Max(2, b.X1 - b.X0);
+            var dur = b.Span.Seconds;
+            var range = $"{Fmt.DateTime(b.Span.StartUtc)} – {Clock(b.Span.EndUtc)}";
 
-            var bar = new Border
-            {
-                Width = bw, Height = barH, CornerRadius = new CornerRadius(8), Background = (Brush)Application.Current.Resources["BrandGradientH"],
-                Tag = s,
-            };
             var text = new TextBlock
             {
-                Text = bw > 150 ? $"session {n} · {Fmt.Timecode(dur)}" : bw > 60 ? $"#{n}" : "",
+                Text = bw > 210 ? $"{Clock(b.Span.StartUtc)} – {Clock(b.Span.EndUtc)} · {Fmt.Timecode(dur)}" : bw > 70 ? Fmt.Timecode(dur) : "",
                 Foreground = new SolidColorBrush(Colors.White), FontSize = 12, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
                 VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(12, 0, 12, 0), TextTrimming = TextTrimming.CharacterEllipsis,
             };
-            if (s.Live && bw > 60)
+            Microsoft.UI.Xaml.Documents.Typography.SetNumeralAlignment(text, FontNumeralAlignment.Tabular);
+            var face = new Border { CornerRadius = new CornerRadius(8), Background = (Brush)Application.Current.Resources["BrandGradientH"] };
+            if (s.Live && bw > 120)
             {
                 var grid = new Grid();
                 grid.Children.Add(text);
@@ -374,31 +412,61 @@ public sealed partial class LibraryPage : Page
                     Text = "▶ live", Foreground = new SolidColorBrush(Colors.White), FontSize = 12, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
                     HorizontalAlignment = HorizontalAlignment.Right, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 28, 0),
                 });
-                bar.Child = grid;
+                face.Child = grid;
             }
-            else bar.Child = text;
-            ToolTipService.SetToolTip(bar, $"{Fmt.DateTime(s.StartUtc)} · {Fmt.Timecode(dur)}" + (s.Live ? " · live" : ""));
-            bar.Tapped += Session_Tapped;
-            Place(bar, x0, top);
+            else face.Child = text;
+
+            // A real button: keyboard and UI Automation can open the block (the --uicheck invokes it by AutomationId and Tag).
+            var bar = new Button
+            {
+                Width = bw, Height = barH, Padding = new Thickness(0), BorderThickness = new Thickness(0), CornerRadius = new CornerRadius(8),
+                Background = new SolidColorBrush(Colors.Transparent), MinWidth = 0, MinHeight = 0,
+                HorizontalContentAlignment = HorizontalAlignment.Stretch, VerticalContentAlignment = VerticalAlignment.Stretch,
+                Content = face, Tag = s,
+            };
+            AutomationProperties.SetAutomationId(bar, "LibraryCacheBlock");
+            AutomationProperties.SetName(bar, $"Cache session {range}" + (s.Live ? ", recording now" : ""));
+            ToolTipService.SetToolTip(bar, $"{range} · {Fmt.Timecode(dur)}" + (s.Live ? " · live" : ""));
+            bar.Click += Session_Click;
+            Place(bar, b.X0, top);
             StripCanvas.Children.Add(bar);
 
             if (s.Live)
             {
-                var dot = new Ellipse { Width = 9, Height = 9, Fill = (Brush)Application.Current.Resources["LiveBrush"], Stroke = new SolidColorBrush(Colors.White), StrokeThickness = 1.5 };
-                Place(dot, Math.Min(w - 12, x0 + bw - 12), top + barH / 2 - 4.5);
+                var dot = new Ellipse
+                {
+                    Width = 9, Height = 9, Fill = (Brush)Application.Current.Resources["LiveBrush"], Stroke = new SolidColorBrush(Colors.White),
+                    StrokeThickness = 1.5, IsHitTestVisible = false,
+                };
+                Place(dot, Math.Max(b.X0 + 2, b.X1 - 14), top + barH / 2 - 4.5);
                 StripCanvas.Children.Add(dot);
                 Pulse(dot);
             }
 
-            // markers sit in their own lane under the bar, at their exact offset
+            // markers sit in their own lane under the block, at their wall-clock time (marker offsets are on the tfdt axis)
+            var shift = AppServices.Library?.GetMedia(s.RelativeFolder)?.AxisShiftSeconds ?? 0;
             foreach (var m in AppServices.Library?.MarkersFor(s) ?? [])
             {
-                var mx = X(s.StartUtc + TimeSpan.FromSeconds(m.OffsetSeconds));
+                var mx = CacheStripLayout.XOf(b, s.StartUtc + TimeSpan.FromSeconds(m.OffsetSeconds - shift));
                 var glyph = new TextBlock { Text = m.Glyph, FontSize = 14, Tag = s };
-                ToolTipService.SetToolTip(glyph, $"{m.Label} · {Fmt.Timecode(m.OffsetSeconds)}");
+                ToolTipService.SetToolTip(glyph, $"{m.Label} · {Clock(s.StartUtc + TimeSpan.FromSeconds(m.OffsetSeconds - shift))}");
                 Place(glyph, mx - 9, top + barH + 6);
                 StripCanvas.Children.Add(glyph);
             }
+        }
+
+        // absolute times under the axis: each block's start and end, round times inside long blocks
+        foreach (var t in layout.Ticks)
+        {
+            var tick = new Rectangle { Width = 1, Height = 5, Fill = dim };
+            Place(tick, Math.Clamp(t.X, 0, w - 1), top + barH);
+            StripCanvas.Children.Add(tick);
+            var label = new TextBlock { Text = t.Label, Style = caption, FontSize = 11 };
+            Microsoft.UI.Xaml.Documents.Typography.SetNumeralAlignment(label, FontNumeralAlignment.Tabular);
+            label.Measure(new Windows.Foundation.Size(double.PositiveInfinity, double.PositiveInfinity));
+            var lw = label.DesiredSize.Width;
+            Place(label, Math.Clamp(t.X - lw / 2, 0, Math.Max(0, w - lw)), 66);
+            StripCanvas.Children.Add(label);
         }
     }
 
@@ -423,9 +491,16 @@ public sealed partial class LibraryPage : Page
         _pulses.Add(sb);
     }
 
-    private void Session_Tapped(object sender, TappedRoutedEventArgs e)
+    private void Session_Click(object sender, RoutedEventArgs e)
     {
         if (sender is FrameworkElement { Tag: RecordingEntry r }) Open(r.RelativeFolder);
+    }
+
+    /// <summary>Replays the cache: the session that is recording now, else the newest one.</summary>
+    private void Replay_Click(object sender, RoutedEventArgs e)
+    {
+        var s = _sessions.FirstOrDefault(x => x.Live) ?? _sessions.LastOrDefault();
+        if (s is not null) Open(s.RelativeFolder);
     }
 
     // =====================================================================================
@@ -454,6 +529,7 @@ public sealed partial class LibraryPage : Page
             _ => q.OrderByDescending(c => c.Entry.StartUtc),
         };
         var list = q.ToList();
+        _shownClips = list;
         ClipRepeater.ItemsSource = list;
         ClipCount.Text = tag == "all" ? $"· {_clips.Count}" : $"· {list.Count} of {_clips.Count}";
 

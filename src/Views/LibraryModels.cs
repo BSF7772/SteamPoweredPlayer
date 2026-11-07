@@ -51,26 +51,78 @@ public static class Fmt
     public static double Duration(RecordingEntry r) =>
         r.DurationSeconds > 0 ? r.DurationSeconds : r.Runs.Sum(x => x.Count) * r.SegmentSeconds;
 
-    public static ImageSource? Image(string? absolutePath)
+    /// <summary>
+    /// F8: decodes <paramref name="absolutePath"/> at the width it is shown (<paramref name="displayWidth"/> logical px × the DPI scale)
+    /// and never above the file's own width (no upscaling in memory; XAML stretches what is left). Unknown size: the file's full size.
+    /// </summary>
+    public static ImageSource? Image(string? absolutePath, double displayWidth, double scale)
     {
         if (absolutePath is null) return null;
-        try { return new BitmapImage(new Uri(absolutePath)) { DecodePixelWidth = 640 }; }
+        try
+        {
+            var want = (int)Math.Ceiling(Math.Max(1, displayWidth) * Math.Max(1, scale));
+            var natural = ImageHeader.Width(absolutePath);
+            var image = new BitmapImage { DecodePixelType = DecodePixelType.Physical };
+            if (natural is { } n && want < n) image.DecodePixelWidth = want;
+            image.UriSource = new Uri(absolutePath);
+            return image;
+        }
         catch (Exception e) when (e is UriFormatException or ArgumentException) { return null; }
     }
 }
 
-/// <summary>One row of the games rail. <see cref="GameId"/> is null for the "Downloaded clips" group (clips without a game).</summary>
-public sealed class GameTile
+/// <summary>Reads a JPEG's or PNG's pixel width from its header (a few KB, shared read), or null.</summary>
+public static class ImageHeader
+{
+    public static int? Width(string path)
+    {
+        try
+        {
+            using var fs = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete, 1, FileOptions.None);
+            var buf = new byte[(int)Math.Min(fs.Length, 64 * 1024)];
+            var n = fs.ReadAtLeast(buf, buf.Length, throwOnEndOfStream: false);
+            var head = buf.AsSpan(0, n);
+            if (n >= 24 && head[0] == 0x89 && head[1] == (byte)'P' && head[2] == (byte)'N' && head[3] == (byte)'G')
+                return head[16] << 24 | head[17] << 16 | head[18] << 8 | head[19];
+            return Trickplay.TryGetJpegSize(head, out var w, out _) ? w : null;
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException) { return null; }
+    }
+}
+
+/// <summary>
+/// One row of the games rail. <see cref="GameId"/> is null for the "Downloaded clips" group (clips without a game). F11: a row is
+/// created once per game and updated in place (<see cref="Update"/>), so live growth changes its numbers without re-animating the list.
+/// </summary>
+public sealed class GameTile : INotifyPropertyChanged
 {
     public string? GameId { get; init; }
-    public string Name { get; init; } = "";
-    public GameEntry? Entry { get; init; }
-    public ImageSource? Cover { get; init; }
-    public int Clips { get; init; }
-    public int Sessions { get; init; }
-    public long SizeBytes { get; init; }
-    public DateTimeOffset LastUtc { get; init; }
-    public string CoverPath { get; init; } = "";
+    public string Name { get; private set; } = "";
+    public GameEntry? Entry { get; private set; }
+    public ImageSource? Cover { get; private set; }
+    public int Clips { get; private set; }
+    public int Sessions { get; private set; }
+    public long SizeBytes { get; private set; }
+    public DateTimeOffset LastUtc { get; private set; }
+    public string CoverPath { get; private set; } = "";
+
+    public event PropertyChangedEventHandler? PropertyChanged;
+
+    public static GameTile Create(string? gameId, string name, GameEntry? entry, ImageSource? cover, string coverPath,
+        int clips, int sessions, long sizeBytes, DateTimeOffset lastUtc) => new()
+    {
+        GameId = gameId, Name = name, Entry = entry, Cover = cover, CoverPath = coverPath,
+        Clips = clips, Sessions = sessions, SizeBytes = sizeBytes, LastUtc = lastUtc,
+    };
+
+    /// <summary>Takes <paramref name="other"/>'s values (same <see cref="Key"/>) and raises one change notification when anything differs.</summary>
+    public void Update(GameTile other)
+    {
+        if (other.Key != Key || other.Sig == Sig && Equals(other.Entry, Entry)) return;
+        (Name, Entry, Cover, CoverPath, Clips, Sessions, SizeBytes, LastUtc) =
+            (other.Name, other.Entry, other.Cover, other.CoverPath, other.Clips, other.Sessions, other.SizeBytes, other.LastUtc);
+        PropertyChanged?.Invoke(this, new(string.Empty));     // all properties
+    }
 
     /// <summary>Changes whenever anything the rail shows changed; the page replaces a tile only then (so selection and scroll survive a refresh).</summary>
     public string Sig => string.Create(CultureInfo.InvariantCulture, $"{Name}|{Clips}|{Sessions}|{SizeBytes}|{LastUtc.Ticks}|{CoverPath}");
@@ -82,7 +134,7 @@ public sealed class GameTile
     public bool NoCover => Cover is null;
 }
 
-/// <summary>One card of the clips grid. <see cref="Thumb"/> arrives later (first tile of the clip's trickplay sheet), hence the change notification.</summary>
+/// <summary>One card of the clips grid. <see cref="Thumb"/> arrives later (Steam's <c>thumbnail.jpg</c>, else the first trickplay tile), hence the change notification.</summary>
 public sealed class ClipTile : INotifyPropertyChanged
 {
     private ImageSource? _thumb;
@@ -105,6 +157,12 @@ public sealed class ClipTile : INotifyPropertyChanged
 
     /// <summary>The trickplay tile is being (or was) loaded; avoids queueing it again on every refresh.</summary>
     public bool ThumbRequested { get; set; }
+
+    /// <summary>The thumbnail is Steam's own <c>thumbnail.jpg</c> (sharper than a trickplay tile): a new trickplay sheet does not replace it.</summary>
+    public bool ThumbFromSteam { get; set; }
+
+    /// <summary>The stream behind a decoded <c>thumbnail.jpg</c>: held as long as the image can be shown (a closed one fails fast in XAML).</summary>
+    public object? ThumbKeepAlive { get; set; }
 
     public string Key => Entry.RelativeFolder;
     public string Title => Entry.Title ?? "Clip";
