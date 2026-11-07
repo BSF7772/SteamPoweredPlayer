@@ -6,7 +6,15 @@
     <!-- The submodule (plan D5). Override for joint development: -p:FastEncoderDir=<path to a FastEncoder checkout> -->
     <FastEncoderDir Condition="'$(FastEncoderDir)' == ''">$(MSBuildThisFileDirectory)..\..\external\FastEncoder\</FastEncoderDir>
     <FastEncoderDir>$([MSBuild]::EnsureTrailingSlash('$(FastEncoderDir)'))</FastEncoderDir>
+    <!-- libmpv binding (function pointers, struct params) and the D3D11 renderer -->
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
   </PropertyGroup>
+
+  <ItemGroup>
+    <!-- D3D11 device + DXGI swap chain for the libmpv render API (plan §2 D2; approved tech stack) -->
+    <PackageReference Include="Vortice.Direct3D11" Version="3.8.3" />
+    <PackageReference Include="Vortice.DXGI" Version="3.8.3" />
+  </ItemGroup>
 
   <ItemGroup>
     <InternalsVisibleTo Include="SteamPoweredPlayer.Tests" />
