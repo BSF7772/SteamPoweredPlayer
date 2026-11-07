@@ -20,6 +20,9 @@ public sealed record RecordingName(RecordingKind Kind, ulong? GameId, DateTimeOf
 /// <summary><c>timeline_&lt;gameid&gt;&lt;yyyyMMdd&gt;_&lt;HHmmss&gt;.json</c> (no separator between game id and date).</summary>
 public sealed record TimelineName(ulong GameId, DateTimeOffset StartUtc);
 
+/// <summary>A clip's media folder: <c>bg_*</c>, <c>bg_*_&lt;n&gt;</c> (<see cref="Index"/>) or <c>fg_*</c> (<see cref="Foreground"/>).</summary>
+public sealed record MediaFolderName(bool Foreground, ulong GameId, DateTimeOffset StartUtc, int? Index);
+
 /// <summary><c>chunk-stream{0,1}-NNNNN.m4s</c> (stream 0 = video, 1 = audio). <see cref="Temporary"/> = a <c>.tmp</c> suffix.</summary>
 public sealed record ChunkName(int Stream, int Number, bool Temporary);
 
@@ -34,6 +37,9 @@ public static partial class FolderNames
 
     [GeneratedRegex(@"^timeline_(\d+)(\d{8})_(\d{6})\.json$", RegexOptions.CultureInvariant)]
     private static partial Regex TimelineRegex();
+
+    [GeneratedRegex(@"^(bg|fg)_(\d+)_(\d{8})_(\d{6})(?:_(\d+))?$", RegexOptions.CultureInvariant)]
+    private static partial Regex MediaFolderRegex();
 
     [GeneratedRegex(@"^chunk-stream([01])-(\d+)\.m4s(\.tmp)?$", RegexOptions.CultureInvariant)]
     private static partial Regex ChunkRegex();
@@ -52,6 +58,20 @@ public static partial class FolderNames
         if (d.Success && ParseUtc(d.Groups[1].Value, d.Groups[2].Value) is { } dutc)
             return new(RecordingKind.DownloadedClip, null, dutc);
         return null;
+    }
+
+    /// <summary>
+    /// The media folder inside a clip (<c>clip_*/video/&lt;name&gt;</c>): <c>bg_&lt;gameid&gt;_&lt;date&gt;_&lt;time&gt;</c>, the same with an index
+    /// suffix (<c>_0</c>), or <c>fg_…</c> (seen in real libraries; probably on-demand recordings). Null for anything else.
+    /// </summary>
+    public static MediaFolderName? ParseMediaFolder(string folderName)
+    {
+        var m = MediaFolderRegex().Match(folderName);
+        if (!m.Success) return null;
+        if (!ulong.TryParse(m.Groups[2].Value, NumberStyles.None, CultureInfo.InvariantCulture, out var gameId)) return null;
+        if (ParseUtc(m.Groups[3].Value, m.Groups[4].Value) is not { } utc) return null;
+        int? index = m.Groups[5].Success && int.TryParse(m.Groups[5].Value, NumberStyles.None, CultureInfo.InvariantCulture, out var i) ? i : null;
+        return new(m.Groups[1].Value == "fg", gameId, utc, index);
     }
 
     public static TimelineName? ParseTimeline(string fileName)

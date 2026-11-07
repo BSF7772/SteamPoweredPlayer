@@ -49,14 +49,22 @@ public sealed record SteamPaths(string Root)
         return doc is null ? null : ParseActiveUser(doc);
     }
 
+    /// <summary>
+    /// The entry with <c>MostRecent</c> = 1. Current Steam clients no longer write <c>MostRecent</c>; then the entry with the highest
+    /// <c>timestamp</c> (unix s of the last login) wins. Null when there is no user entry at all.
+    /// </summary>
     public static SteamUser? ParseActiveUser(VdfNode doc)
     {
         var users = doc.Get("users") ?? doc;
+        SteamUser? newest = null;
+        long newestStamp = long.MinValue;
         foreach (var u in users.Children)
         {
             if (!ulong.TryParse(u.Name, NumberStyles.None, CultureInfo.InvariantCulture, out var id)) continue;
             if (u.GetString("MostRecent") == "1") return new SteamUser(id);
+            var stamp = long.TryParse(u.GetString("timestamp"), NumberStyles.None, CultureInfo.InvariantCulture, out var t) ? t : 0;
+            if (stamp > newestStamp) { newestStamp = stamp; newest = new SteamUser(id); }
         }
-        return null;
+        return newest;
     }
 }

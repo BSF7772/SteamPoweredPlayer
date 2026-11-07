@@ -461,8 +461,18 @@ Phase 6, 1.11 → Phase 2). Notes from the implementation:
 - Data folder at a drive/share root: no proposal (the sibling would be inside Steam's tree); the user must pick a folder elsewhere.
 - `library.json` readers retry briefly (≈ 60 ms) because a reader can see "not found" during the atomic swap; Android must do the same.
 
-Still to verify with `SPP_REAL_LIBRARY` (read-only): `appinfo.vdf` layouts, `.pb` fields that might repeat, timeline `duration`
-unit (ms assumed), the real `BackgroundMaxKeep` forms above 2 h. Open: the scanner re-reads every chunk head per scan (Phase 2's
-CacheFollower should pass already-validated chunks); one writer per chunk key in the download queue (Phase 3).
+**Real-library run (2026-11-07, read-only, `tests/RealLibrary/`, about 200 recordings):** all pass after three fixes.
+- Fixed: current Steam has no `MostRecent` in `loginusers.vdf` (newest `timestamp` now); clip media folders can be `bg_…_0` or `fg_…`
+  (6 clips were unplayable, now 196/196 play); `"entries": {}` is an empty timeline. A clip with no media folder is now
+  NotPlayable, not Gone. Shapes reproduced in `RealWorldShapesTests` (synthetic).
+- Confirmed: every folder name parses; every `.pb` parses with 0 diagnostics and round-trips byte-exactly; every timeline parses;
+  `duration` is ms; all 53 games get a real name (8 shortcuts, 39 from manifests, 6 from `appinfo.vdf`), 49 have art; markers map
+  with the exact offset (BeforeStart trims only, as expected for timelines that start before the session).
+- **Cold scan is disk-bound:** the first full scan took 142 s (≈ 21 000 8-byte head reads on a cold HDD-class disk, ≈ 7 ms each),
+  2–3 s warm. Phase 2 must persist which chunks were head-checked (index) and only check new ones, and show the library from the
+  index while a first scan runs in the background.
+- Still unseen: `BackgroundMaxKeep` forms above 2 h (unknown forms are reported, not guessed).
+
+Open: one writer per chunk key in the download queue (Phase 3).
 
 Resolved in rev 3.1: FastEncoder is published and used as a submodule (D5); Linux is out of scope; licence GPL-3.0-or-later (D19).

@@ -63,6 +63,22 @@ public sealed class FolderNamesTests
     [InlineData("chunk-stream0-00001.mp4")]
     public void Non_chunks_return_null(string name) => Assert.Null(FolderNames.ParseChunk(name));
 
+    [Theory]
+    [InlineData("bg_730_20250101_120000", false, null)]
+    [InlineData("bg_730_20250101_120000_0", false, 0)]
+    [InlineData("fg_730_20250101_120000", true, null)]
+    public void Clip_media_folders_parse(string name, bool foreground, int? index)
+    {
+        var m = FolderNames.ParseMediaFolder(name);
+        Assert.Equal(new MediaFolderName(foreground, 730UL, new DateTimeOffset(2025, 1, 1, 12, 0, 0, TimeSpan.Zero), index), m);
+    }
+
+    [Theory]
+    [InlineData("clip_730_20250101_120000")]
+    [InlineData("bg_730_20250101_120000_")]
+    [InlineData("xg_730_20250101_120000")]
+    public void Other_media_folder_names_return_null(string name) => Assert.Null(FolderNames.ParseMediaFolder(name));
+
     [Fact]
     public void Chunk_file_round_trips() => Assert.Equal("chunk-stream0-01840.m4s", FolderNames.ChunkFile(0, 1840));
 }

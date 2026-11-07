@@ -62,6 +62,8 @@ public enum ScanIssueKind
     UnreadableChunk,
     StaleTemporaryChunk,
     ZeroFilledManifest,
+    /// <summary>A clip folder without a media folder (<c>video/bg_*</c> or <c>video/fg_*</c>).</summary>
+    MissingMediaFolder,
 }
 
 /// <summary>A reported problem. <see cref="File"/> is a file name inside the folder; <see cref="Chunk"/> the chunk number if known.</summary>

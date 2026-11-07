@@ -66,18 +66,23 @@ public static class Scanner
 
     /// <summary>
     /// Scans a saved clip: its chunks live in <c>clip_*/video/bg_*/</c> and are permanent (Temporary = false, whatever the inner
-    /// <c>bg_*</c> name says). A clip without a media folder is <see cref="ScanStatus.Gone"/>.
+    /// <c>bg_*</c> name says). A vanished clip folder is <see cref="ScanStatus.Gone"/>; one without a media folder is
+    /// <see cref="ScanStatus.NotPlayable"/> with <see cref="ScanIssueKind.MissingMediaFolder"/>.
     /// </summary>
     public static Task<ScanResult> ScanClipAsync(string clipFolder, ScanOptions? options = null, CancellationToken ct = default)
     {
         var media = FindClipMediaFolder(clipFolder);
-        if (media is null) return Task.FromResult(ScanResult.Gone);
+        if (media is null)
+            return Task.FromResult(Directory.Exists(clipFolder)
+                ? ScanResult.Gone with { Status = ScanStatus.NotPlayable, Issues = [new(ScanIssueKind.MissingMediaFolder)] }
+                : ScanResult.Gone);
         return ScanAsync(media, (options ?? new()) with { Temporary = false }, ct);
     }
 
     /// <summary>
-    /// The folder with the chunks of a clip: <c>&lt;clip&gt;/video/bg_*</c>. If there are several (not seen so far) the newest by name
-    /// (names carry a UTC timestamp) wins. Null when there is none or the clip folder is gone.
+    /// The folder with the chunks of a clip: <c>&lt;clip&gt;/video/&lt;media folder&gt;</c>, named <c>bg_&lt;gameid&gt;_&lt;date&gt;_&lt;time&gt;</c>,
+    /// <c>bg_…_&lt;n&gt;</c> or <c>fg_…</c> (see <see cref="FolderNames.ParseMediaFolder"/>). If there are several the newest by name wins.
+    /// Null when there is none or the clip folder is gone.
     /// </summary>
     public static string? FindClipMediaFolder(string clipFolder)
     {
@@ -88,7 +93,7 @@ public static class Scanner
             foreach (var dir in Directory.EnumerateDirectories(video))
             {
                 var name = Path.GetFileName(dir);
-                if (FolderNames.ParseRecording(name) is not { Kind: RecordingKind.CacheSession }) continue;
+                if (FolderNames.ParseMediaFolder(name) is null) continue;
                 if (best is null || string.CompareOrdinal(name, Path.GetFileName(best)) > 0) best = dir;
             }
             return best;

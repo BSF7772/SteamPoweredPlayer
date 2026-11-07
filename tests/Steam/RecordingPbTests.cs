@@ -274,8 +274,8 @@ public sealed class RecordingPbTests
         {
             var name = Path.GetFileName(file);
             if (name is not ("clip.pb" or "gamerecording.pb")) continue;
-            byte[] bytes;
-            try { bytes = await File.ReadAllBytesAsync(file); } catch (IOException) { continue; }   // Steam may trim while we scan
+            // read + write + delete sharing so Steam's cleanup never fails; null = Steam trimmed it while we scanned
+            if (await RealLibrary.RealLibraryTests.ReadSharedAsync(file) is not { } bytes) continue;
             if (name == "clip.pb")
             {
                 var c = RecordingPb.ParseClip(bytes);

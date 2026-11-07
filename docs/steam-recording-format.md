@@ -16,7 +16,9 @@ block; the file holds unrelated keys.
 | `ExportDirectory` | — | Where Steam itself exports MP4s (not used as our default) |
 | `PerGameSettings.<appid>.enabled` | `0` | Recording disabled for that game |
 
-Steam's install folder: `HKCU\Software\Valve\Steam\SteamPath`. The active user: `config/loginusers.vdf` → `MostRecent`.
+Steam's install folder: `HKCU\Software\Valve\Steam\SteamPath`. The active user: `config/loginusers.vdf` → `MostRecent` = 1 on
+older clients; current clients (2026) no longer write `MostRecent`, so the entry with the highest `timestamp` (last login, unix s)
+is used. `BackgroundMaxKeep` was `120min` in every library seen so far.
 
 ## Layout under `BackgroundRecordPath`
 ```
@@ -27,6 +29,10 @@ timelines/timeline_<gameid><yyyyMMdd>_<HHmmss>.json   (no separator between game
 gamerecording.pb                              Steam's index (protobuf), plus stray *.async*.tmp files
 ```
 Regexes: `^(bg|clip)_(\d+)_(\d{8})_(\d{6})$`, `^clip_downloaded_(\d{8})_(\d{6})$`, `^timeline_(\d+)(\d{8})_(\d{6})\.json$`.
+
+**A clip's media folder** (`clip_*/video/<name>/`, same files as a cache session) is not always `bg_<gameid>_<date>_<time>`.
+Also seen: the same name with an index suffix (`bg_…_0`) and `fg_<gameid>_<date>_<time>` (probably an on-demand recording saved
+as a clip). Regex: `^(bg|fg)_(\d+)_(\d{8})_(\d{6})(?:_(\d+))?$`. Empty `video/bg_*` cache folders (no files at all) also exist.
 
 **All timestamps in names are UTC.** `timeline_73020250101_120000.json` has `"daterecorded": "1735732800"`
 (2025-01-01T12:00:00Z), while a clip's title (`clip.pb` field 7) shows local time.
@@ -106,6 +112,8 @@ What S2 found with real sessions:
   `userdata/<id>/config/grid/`. Copy it once into the app's data folder so the app keeps working without Steam.
 
 ## Timeline JSON
+A timeline without events has no `entries` key, or `"entries": {}` (an empty object, not an array).
+`duration` is in milliseconds: multi-kill ranges are about 4–8 s (median 7.45 s); a few band entries last up to about 45 min.
 `daterecorded` (unix s), `starttime`/`endtime` (ms), `entries[]`: `id`, `time` (ms), `type` ∈ {`event`, `state_description`,
 `gamemode`, `screenshot`, `achievement`, `phase`, `error`}, `title`, `description` (may contain emoji; read as UTF-8), `icon` (e.g.
 `cs2_death`, `cs2_gun_kill`, `cs2_bomb_plant`, `steam_screenshot`), `priority`, `duration`, `possible_clip`, `mode` (game-mode bands),

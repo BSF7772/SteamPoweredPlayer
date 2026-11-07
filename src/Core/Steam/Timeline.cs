@@ -68,7 +68,9 @@ public static class Timeline
                     i++;
                 }
             }
-            else if (root.TryGetProperty("entries", out var bad) && bad.ValueKind != JsonValueKind.Null) d.Add("entries: not an array");
+            // Steam writes "entries": {} for a timeline without events (seen in real libraries); that's an empty list, not an error.
+            else if (root.TryGetProperty("entries", out var bad) && bad.ValueKind != JsonValueKind.Null
+                     && !(bad.ValueKind == JsonValueKind.Object && !bad.EnumerateObject().Any())) d.Add("entries: not an array");
             return new(date, start, end, entries, d);
         }
         catch (JsonException e)

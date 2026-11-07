@@ -36,11 +36,15 @@ public sealed class SteamPathsTests
     }
 
     [Fact]
-    public void No_most_recent_entry_gives_null()
+    public void Without_most_recent_the_only_user_is_active()
     {
+        // Real Steam clients (2026) no longer write MostRecent = 1; the newest timestamp, or the only user, is the active one.
         var doc = Vdf.ParseText("\"users\" { \"76561197960266729\" { \"MostRecent\" \"0\" } }");
-        Assert.Null(SteamPaths.ParseActiveUser(doc));
+        Assert.Equal(new SteamUser(76561197960266729UL), SteamPaths.ParseActiveUser(doc));
     }
+
+    [Fact]
+    public void No_users_gives_null() => Assert.Null(SteamPaths.ParseActiveUser(Vdf.ParseText("\"users\" { }")));
 
     [Fact]
     public async Task Missing_login_users_gives_null()
