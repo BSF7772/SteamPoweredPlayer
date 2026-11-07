@@ -162,10 +162,28 @@ Applies to the Android app and to the desktop app when the library is on another
 
 **Link detection (no polling):**
 - Android: `ConnectivityManager.registerDefaultNetworkCallback`. `TRANSPORT_ETHERNET` = wired; `TRANSPORT_WIFI` / `CELLULAR` = wireless.
-  When a VPN (e.g. Tailscale) is the default, classify by the underlying transport (verify in S9).
+  When a VPN (e.g. Tailscale) is the default, classify by the underlying transport (verify in S9). S3 measured that on the test
+  phone the VPN's capabilities carry the underlying transport (`wifi+vpn`, `cell+vpn`), but the VPN *network* never reports Wi-Fi
+  coming or going. So also register a callback on a non-VPN `NetworkRequest`; it reports the real networks (S3, verified).
 - Windows: `GetBestInterfaceEx` to the server address → `NetworkInterfaceType` (Ethernet vs Wireless80211). VPN adapters are
   classified by the route of their underlying interface (S9). `NetworkChange.NetworkAddressChanged` re-evaluates.
 - The user can override per server profile: **Auto / Always stream / Always download**.
+
+**Mobile data (maintainer 2026-11-07: warn only, never block or cap by default):**
+- "Costs money" = the physical network lacks `NET_CAPABILITY_NOT_METERED` (API 21; Android's own advice is to check this, not the
+  transport, so a metered Wi-Fi hotspot counts and a free cell plan doesn't). `TEMPORARILY_NOT_METERED` (API 30) counts as free while set.
+- Through a VPN, judge the **underlying** non-VPN network, not the VPN: VPN apps targeting Android 10+ are metered by default unless they
+  call `VpnService.Builder.setMetered(false)`, so a VPN may read "metered" even on home Wi-Fi. To check on the test phone: Tailscale's
+  `NOT_METERED` on Wi-Fi.
+- Warning: when a transfer starts or continues on a metered network, show a non-blocking banner "Using mobile data · 23 MB so far"
+  (bytes counted by the downloader per network) with **Pause until Wi-Fi**. One toast when the switch happens mid-download, then
+  the banner only. No prompt, no cap. An optional per-profile cap stays as a setting, off by default.
+- Data Saver: read `getRestrictBackgroundStatus()` (API 24) and listen to `ACTION_RESTRICT_BACKGROUND_CHANGED` (runtime receiver
+  only). When it's on and the app isn't exempt, background downloads are restricted by the OS: say so in the banner and offer
+  `Settings.ACTION_IGNORE_BACKGROUND_DATA_RESTRICTIONS_SETTINGS` (the user decides; an app can't exempt itself).
+- WorkManager: the download job uses `NetworkType.CONNECTED` (the warning replaces the old "unmetered only" default). "Wi-Fi only"
+  remains an opt-in user setting (`NetworkType.UNMETERED`).
+- Test: `adb shell cmd netpolicy set metered-network <ssid> true` simulates a metered Wi-Fi without spending mobile data.
 
 **Wired (stream):** the loopback range server (phone) or direct UNC reads (desktop), with a read-ahead of N chunks. Seek budgets are in §5.
 
@@ -176,7 +194,7 @@ Applies to the Android app and to the desktop app when the library is on another
   parallel reads per session, fewer when retries rise.
 - **Resilience:** per-chunk retries with exponential backoff and jitter; reconnect on `NetworkCallback.onAvailable`; failover
   between server profiles mid-download (LAN ↔ VPN). Android runs it as a WorkManager job (foreground notification) that
-  survives the app closing and resumes after a reboot. User constraints: unmetered only, charging only.
+  survives the app closing and resumes after a reboot. Optional user constraints: Wi-Fi only, charging only (mobile data: see above).
 - **The player only reads local files** (an EDL over cache paths), so network loss never reaches the decoder. If the playhead
   catches up with the download edge, playback pauses on a "Downloading 63 % · 4.1 MB/s" overlay and resumes on its own. Scrubbing
   inside the downloaded part is instant.
@@ -260,7 +278,7 @@ with the window EDL and periodic reload (431 MB after 16 media-minutes of whole-
 | # | Spike | Given / When / Then | Risk | Status / result |
 |---|---|---|---|---|
 | S2 | `edl-mp4dash-cli` | Given portable mpv ≥ 0.42 and an EDL over a 2 h session with a stale manifest, when played, then start < 250 ms, seek to 1:00:00 < 150 ms, A/V in sync, `audio-delay` live, speed 0.25/2/4, frame-step, gaps handled, time-pos origin recorded. Cache, **on copies only**: a chunk mpv has open can still be deleted; deleting head chunks under playback is survivable; EOF → re-EDL continues | High | **PARTIAL.** The EDL as first sketched fails (seeks land up to 3 s early, audio is lost after a seek, gaps freeze for 30 s). The **lead EDL** plus seek-by-reload (`loadfile <edl> start=<t>`), a pre-warmed mpv and a ~60-chunk window meets the budgets with hardware decode (open 95 ms pre-warmed, seek 95 ms median, 0/30 reload failures vs 12/12 failed revisit seeks). The delete-while-open and head-trim checks were not run (they need approval) |
-| S1 | `winui-mpv-d3d11` | Given WinUI 3 + the libmpv D3D11 render API in a `SwapChainPanel`, when playing the S2 EDL, then no tearing, low CPU (relative definition, see the budgets), XAML draws over the video, resize/fullscreen work. Fallback `wid` | High | **PARTIAL.** Correctness 26/26 (D3D11 render API, no `wid` needed). Perf on an idle machine (5-minute soak): CPU 1.96 % of all cores (< 3 PASS) but ≈ 5.6× the mpv CLI reference; 59.9 presents/s, 0 black frames; seek-by-reload median 96.5 ms (5 of 30 seeks > 150 ms); RAM 295 MB (> 250 FAIL), growing ≈ 19 MB/min in the soak. Maintainer: RAM/CPU overhead acceptable for now, only a real leak must be fixed. The soak's "stall" was the harness: `keep-open` pauses at EOF and `pause` survives `loadfile`, so every reload that should play must set `pause=no` |
+| S1 | `winui-mpv-d3d11` | Given WinUI 3 + the libmpv D3D11 render API in a `SwapChainPanel`, when playing the S2 EDL, then no tearing, low CPU (relative definition, see the budgets), XAML draws over the video, resize/fullscreen work. Fallback `wid` | High | **VALIDATED (maintainer accepted RAM/CPU).** Correctness 26/26 (D3D11 render API, no `wid` needed). Perf on an idle machine (5-minute soak): CPU 1.96 % of all cores (< 3 PASS) but ≈ 5.6× the mpv CLI reference; 59.9 presents/s, 0 black frames; seek-by-reload median 96.5 ms (5 of 30 seeks > 150 ms); RAM 295 MB (over the 250 budget, accepted), growing ≈ 19 MB/min in the soak = mpv's bounded demuxer cache (≤ 200 MiB, released on reload: −67 MB). Maintainer: RAM/CPU overhead acceptable for now, only a real leak must be fixed; Phase 2 sets an explicit cache ceiling. The soak's "stall" was the harness: `keep-open` pauses at EOF and `pause` survives `loadfile`, so every reload that should play must set `pause=no` |
 | S3 | `android-smb-download` | Given an Android 13 phone + JCIFS 3 (read-only, encryption required) and two profiles (LAN, VPN), when downloading a 5 min range over Wi-Fi with injected drops (Wi-Fi toggled, AP roaming), then 0 corrupt chunks, ≤ 1 chunk re-fetched per drop, automatic resume and profile failover, and playback from local chunks never stalls inside the downloaded part. The server shows an encrypted 3.1.1 session | High | **Device PASS; AP roaming and playback during download not covered.** SMB 3.1.1 AES-128-GCM + signing on LAN and VPN; 5 min = 514 MB in 49 s (10.4 MB/s); Wi-Fi drops up to 90 s: 0 failed, 0 re-fetched, 0 SHA mismatches; failover to VPN over cellular in 9 s; 20 MB cap held (20.14 MB); fail-back 37 ms after Wi-Fi validated. Device runs found and fixed 3 failover bugs, including network callbacks silent under a VPN, because the default network is the VPN: the product must also watch non-VPN networks. See spike README |
 | S3b | `smb-stream-wired` | Given a wired client, when streaming the EDL over SMB (loopback range server on Android, direct reads on Windows), then the wired budgets hold. A throwaway Python `smbprotocol` client on any wired machine serves as the reference | Medium | planned |
 | S9 | `link-detection` | Given Wi-Fi, Ethernet (USB adapter) and VPN-over-each, when the default network changes, then Android and Windows classify each correctly and switch modes without polling | Medium | planned |

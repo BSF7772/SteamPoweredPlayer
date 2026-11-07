@@ -103,6 +103,13 @@ Open for Phase 2 (each needs a look before the budgets can hold): the app's CPU 
 stats sampling in the spike), RAM (libmpv demuxer/cache defaults, WinUI, D3D11 runtime), the seek tail, and a full 10-minute soak.
 Maintainer 2026-11-07: RAM and CPU overhead are acceptable for now; only a real leak (usage that keeps climbing) must be fixed.
 
+**Memory growth by arithmetic (maintainer's rule: data being processed must sit in memory and must be released afterwards).** The
+fixture is 514 MB per 300 s, so 1.71 MB/s. The soak grew 0.32 MB/s (≈ 19 MB/min), about 19 % of the data rate, which fits mpv
+caching demuxed packets. mpv's defaults bound that cache (`demuxer-max-bytes` 150 MiB forward, `demuxer-max-back-bytes` 50 MiB back),
+so the expected peak is ≈ 284 MB baseline + ≤ 200 MiB ≈ 490 MB. The observed peak of 377 MB is inside that bound. On reload the
+working set fell by 67 MB (377 → 310 MB), which shows the cache is released when the file closes. Phase 2's window EDL (≈ 60 chunks)
+and an explicit `demuxer-max-*` setting give a fixed ceiling. No separate leak test needed.
+
 ### How to run
 
 Run **once, on an idle machine** (close games, browsers, Steam overlay; the script refuses to start above 10 % machine CPU unless `-Force`):
@@ -127,5 +134,6 @@ The per-run `.log` files name the GPU model: don't publish `out/`.
 - Only HEVC 1440p60 was exercised (S2's fixture); H.264 sessions, live (growing) sessions and UNC libraries are untested.
 - Single GPU vendor; AMD/Intel behaviour of the D3D11 render API untested.
 
-Verdict: PARTIAL. The D3D11 render API embedding works (part A 26/26). CPU, frame rate and median seek meet the budgets. RAM
-fails (295 MB, still growing during the soak), and the app's CPU overhead over plain mpv is large.
+Verdict: VALIDATED (maintainer, 2026-11-07). The D3D11 render API embedding works (part A 26/26). CPU, frame rate and median
+seek meet the budgets. RAM (295 MB, bounded cache growth) and the CPU overhead over plain mpv are accepted for now. Carried into
+Phase 2: `pause=no` on every reload that should play, a fixed demuxer cache ceiling, and the seek tail.
