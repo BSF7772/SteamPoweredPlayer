@@ -1,0 +1,46 @@
+<!-- SPDX-License-Identifier: GPL-3.0-or-later -->
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <!-- Directory.Build.props sets net10.0-windows for everything; the WinUI app needs the Windows SDK projection. -->
+    <TargetFramework>net10.0-windows10.0.22621.0</TargetFramework>
+    <TargetPlatformMinVersion>10.0.19041.0</TargetPlatformMinVersion>
+    <RootNamespace>SteamPoweredPlayer</RootNamespace>
+    <AssemblyName>SteamPoweredPlayer</AssemblyName>
+    <Platforms>x64</Platforms>
+    <Platform>x64</Platform>
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <UseWinUI>true</UseWinUI>
+    <WindowsPackageType>None</WindowsPackageType>
+    <WindowsAppSDKSelfContained>true</WindowsAppSDKSelfContained>
+    <SelfContained>false</SelfContained>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <ApplicationIcon>Assets\SteamPoweredPlayer.ico</ApplicationIcon>
+    <GenerateDocumentationFile>false</GenerateDocumentationFile>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.WindowsAppSDK" Version="1.8.260921001" />
+    <PackageReference Include="Microsoft.Windows.SDK.BuildTools" Version="10.0.28000.2705" />
+  </ItemGroup>
+
+  <!-- Core lives in src/Core as its own project; keep its files (and its bin/obj) out of this project's globs. -->
+  <ItemGroup>
+    <Compile Remove="Core/**" />
+    <None Remove="Core/**" />
+    <Content Remove="Core/**" />
+    <EmbeddedResource Remove="Core/**" />
+    <Page Remove="Core/**" />
+    <ApplicationDefinition Remove="Core/**" />
+    <Compile Remove="bin/**;obj/**" />
+    <ProjectReference Include="Core\SteamPoweredPlayer.Core.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Content Include="Assets\SteamPoweredPlayer.ico" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="Assets\logo.png" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+  <!-- Copies libmpv, ffmpeg and the licences next to the exe (written by the dependencies task). -->
+  <Import Project="..\tools\Dependencies.targets" Condition="Exists('..\tools\Dependencies.targets')" />
+</Project>

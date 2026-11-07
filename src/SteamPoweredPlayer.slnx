@@ -1,4 +1,5 @@
 <Solution>
   <Project Path="Core/SteamPoweredPlayer.Core.csproj" />
+  <Project Path="SteamPoweredPlayer.csproj" />
   <Project Path="../tests/SteamPoweredPlayer.Tests.csproj" />
 </Solution>

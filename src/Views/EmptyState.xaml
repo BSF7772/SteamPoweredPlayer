@@ -1,0 +1,17 @@
+<!-- SPDX-License-Identifier: GPL-3.0-or-later -->
+<!-- Dashed empty state, same look as FastEncoder's queue placeholder (MIT). -->
+<UserControl
+    x:Class="SteamPoweredPlayer.Views.EmptyState"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+    <Grid MinHeight="110">
+        <Rectangle RadiusX="10" RadiusY="10" StrokeThickness="1.5" StrokeDashArray="4,3"
+                   Stroke="{ThemeResource ControlStrongStrokeColorDefaultBrush}" />
+        <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center" Spacing="6" Padding="16">
+            <TextBlock x:Name="EmojiText" FontSize="30" HorizontalAlignment="Center" />
+            <TextBlock x:Name="TitleText" HorizontalAlignment="Center" Style="{StaticResource BodyStrongTextBlockStyle}" />
+            <TextBlock x:Name="MessageText" HorizontalAlignment="Center" TextAlignment="Center" TextWrapping="Wrap"
+                       MaxWidth="420" Style="{StaticResource Caption}" />
+        </StackPanel>
+    </Grid>
+</UserControl>
