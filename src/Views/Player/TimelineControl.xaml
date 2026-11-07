@@ -1,0 +1,42 @@
+<!-- SPDX-License-Identifier: GPL-3.0-or-later -->
+<!-- Trickplay filmstrip + playhead (design after FastEncoder's trim strip, MIT) with the markers lane under it. -->
+<UserControl
+    x:Class="SteamPoweredPlayer.Views.Player.TimelineControl"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+
+    <Grid RowSpacing="4">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="54" />
+            <RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
+
+        <Grid x:Name="Strip" Height="54" CornerRadius="6" Background="{ThemeResource ControlFillColorSecondaryBrush}"
+              PointerPressed="Strip_PointerPressed" PointerMoved="Strip_PointerMoved" PointerReleased="Strip_PointerReleased"
+              PointerCaptureLost="Strip_PointerCaptureLost" PointerExited="Strip_PointerExited" SizeChanged="Strip_SizeChanged">
+            <Grid x:Name="Film" />
+            <Canvas x:Name="Overlay" IsHitTestVisible="False">
+                <Rectangle x:Name="PlayedRect" Height="54" Width="0" Fill="#557C3AED" />
+                <Rectangle x:Name="LoopRect" Height="54" Width="0" Fill="#7706B6D4" Stroke="#06B6D4" StrokeThickness="2" Visibility="Collapsed" />
+                <Rectangle x:Name="LoopA" Width="3" Height="54" Fill="#06B6D4" Visibility="Collapsed" />
+                <Rectangle x:Name="LoopB" Width="3" Height="54" Fill="#06B6D4" Visibility="Collapsed" />
+                <Rectangle x:Name="HoverLine" Width="1" Height="54" Fill="#AAFFFFFF" Visibility="Collapsed" />
+                <Rectangle x:Name="PlayheadHalo" Width="7" Height="62" Canvas.Top="-4" RadiusX="3.5" RadiusY="3.5" Fill="#99000000" />
+                <Rectangle x:Name="Playhead" Width="3" Height="62" Canvas.Top="-4" RadiusX="1.5" RadiusY="1.5" Fill="White" />
+            </Canvas>
+        </Grid>
+
+        <Canvas x:Name="Lane" Grid.Row="1" Height="28" />
+
+        <Popup x:Name="Preview" IsLightDismissEnabled="False" HorizontalAlignment="Left" VerticalAlignment="Top">
+            <Border CornerRadius="8" Background="#EE101018" BorderBrush="#33FFFFFF" BorderThickness="1" Padding="4" IsHitTestVisible="False">
+                <StackPanel Spacing="4">
+                    <Border x:Name="PreviewFrame" Width="224" Height="126" CornerRadius="5" Background="#FF1B1B24">
+                        <Image x:Name="PreviewImage" Stretch="UniformToFill" />
+                    </Border>
+                    <TextBlock x:Name="PreviewTime" Style="{StaticResource Timecode}" Foreground="White" HorizontalAlignment="Center" />
+                </StackPanel>
+            </Border>
+        </Popup>
+    </Grid>
+</UserControl>
