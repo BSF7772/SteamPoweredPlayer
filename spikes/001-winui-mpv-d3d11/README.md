@@ -90,12 +90,18 @@ wall time 765 s. Medians of 3 interleaved app/reference runs of 60 s each (min�
 
 Soak (4.9 media-minutes, one pass of the 300 s EDL): the working set grows from ≈ 284 to ≈ 358 MB in 4 minutes (≈ 19 MB/min, peak 377 MB);
 private bytes grow from ≈ 400 to ≈ 481 MB (peak 588 MB); GPU memory stays flat. It drops only at the loop reload (≈ 310 MB after). No
-plateau within 5 minutes, so demuxer-cache fill and a leak can't be told apart yet. The reload at the loop end stalled playback for ≈ 6 s.
+plateau within 5 minutes, so demuxer-cache fill and a leak can't be told apart yet.
+
+**The "stall" at the loop end is a harness bug, not a playback problem.** With `keep-open=yes`, mpv pauses at the end of the file,
+and `pause` is a player-wide property that survives `loadfile`. The loop reloaded the EDL, mpv showed the first frame in 48 ms,
+and then sat paused (log: `playback restart complete … video=playing (paused)`) until the run ended 8 s later. The reload itself
+was fast. Fix: set `pause=no` with the reload whenever playback should continue. The product should also react to the
+`eof-reached` property change (observed, event-driven) instead of polling it every 100 ms as the spike does.
 Seeks landed ≈ 1.2 s past the target in this run, compared with ≈ 0.42 s in S2.
 
 Open for Phase 2 (each needs a look before the budgets can hold): the app's CPU overhead over plain mpv (managed render loop, probes and
-stats sampling in the spike), RAM (libmpv demuxer/cache defaults, WinUI, D3D11 runtime) and its growth over time, the reload stall at
-the window end, the seek tail, and a full 10-minute soak.
+stats sampling in the spike), RAM (libmpv demuxer/cache defaults, WinUI, D3D11 runtime), the seek tail, and a full 10-minute soak.
+Maintainer 2026-11-07: RAM and CPU overhead are acceptable for now; only a real leak (usage that keeps climbing) must be fixed.
 
 ### How to run
 

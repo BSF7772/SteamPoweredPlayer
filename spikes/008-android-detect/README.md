@@ -1,7 +1,8 @@
 # S8 `android-detect`: Kotlin port of FastEncoder's AudioSync
 
 Given FastEncoder's synthetic "sound 300 ms late" clip, when the Kotlin `AudioSync` port runs on the phone, then it reports
-300 ± 10 ms, matches C#, and analyses 75 s in < 30 s.
+what the C# detector reports (+277 ms on this clip), with High confidence, and analyses 75 s in < 30 s. (Criterion set by the
+maintainer 2026-11-07: the reference is the C# result, not the nominal 300 ms.)
 
 ## What is here
 | Path | What |
@@ -33,7 +34,7 @@ Inputs dumped with ffmpeg 9.0 using the C# detector's arguments; expected values
 Agreement is within the test tolerance of 1 µs and the confidence, agreeing and consistent counts are identical. C#'s own wall
 time on a desktop for the 75 s file (decode + analysis) is 5.2 s.
 
-**Criterion conflict (needs a maintainer decision):** both implementations read **+277 ms** for a true +300 ms, so "300 ± 10 ms"
+**Criterion conflict (decided 2026-11-07: matches C#, +277 ms):** both implementations read **+277 ms** for a true +300 ms, so "300 ± 10 ms"
 and "matches C#" cannot both hold for a faithful port. The bias belongs to the detector (S6 saw the same), and FastEncoder's own
 self-test accepts `|AudioLate − 0.3| < 0.035`. Proposal: S8 passes on "matches C# within 1 ms + High confidence", and the 300 ±
 35 ms window from FastEncoder's self-test.
@@ -70,4 +71,4 @@ adb shell am start -S -n spp.spike.s8/.MainActivity --es raw late300_75s --ei re
 adb pull $F/results .
 ```
 
-Verdict: **PASS** on "matches C# + High + < 30 s". The literal "300 ± 10 ms" fails for C# itself (+277 ms); maintainer decision on the criterion still open.
+Verdict: **VALIDATED** on the maintainer's criterion "matches C# (+277 ms) + High + < 30 s".
