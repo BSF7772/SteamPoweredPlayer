@@ -117,6 +117,27 @@ public sealed class ChunkPlanTests
         Assert.Empty(ChunkPlan.AroundMarkers(Media(new SegmentRun(1, 10)), [], 30.0));
 
     [Fact]
+    public void Around_moments_takes_the_whole_range_plus_the_margins()
+    {
+        var media = Media(new SegmentRun(1, 100));
+        // a range 90..98 s with 30 s before and 6 s after: [60, 104] -> chunks 21..35 (104 s is inside chunk 35)
+        Assert.Equal(Enumerable.Range(21, 15), ChunkPlan.AroundMoments(media, [(90.0, 98.0)], 30.0, 6.0));
+    }
+
+    [Fact]
+    public void Around_moments_clamps_to_chunks_that_exist_and_merges_neighbours()
+    {
+        var media = Media(new SegmentRun(5, 7), new SegmentRun(20, 22));  // chunks 5..7 and 20..22; a gap in between
+        var sel = ChunkPlan.AroundMoments(media, [(15.0, 15.0), (60.0, 60.0), (16.0, 16.0)], 3.0, 3.0);
+        Assert.Equal([5, 6, 7, 20, 21, 22], sel);
+        Assert.Empty(ChunkPlan.AroundMoments(media, [(1000.0, 1000.0)], 30.0, 30.0));
+    }
+
+    [Fact]
+    public void Around_moments_rejects_negative_margins() =>
+        Assert.Throws<ArgumentOutOfRangeException>(() => ChunkPlan.AroundMoments(Media(new SegmentRun(1, 10)), [(1.0, 1.0)], -1.0, 0.0));
+
+    [Fact]
     public void Plan_around_a_marker_orders_from_the_playhead()
     {
         var media = Media(new SegmentRun(1, 100));

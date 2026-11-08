@@ -89,6 +89,39 @@ public static class RemoteLibrary
         }
     }
 
+    /// <summary>
+    /// The markers of many recordings with one read of the library's context, keyed by <see cref="RemoteRecording.Folder"/>. A recording
+    /// the library has no answer for yet (timeout, unreachable) is missing from the result; one with no markers has an empty list.
+    /// <paramref name="onLoaded"/> is called from a worker thread as each recording's markers arrive.
+    /// </summary>
+    public static async Task<IReadOnlyDictionary<string, IReadOnlyList<Marker>>> TryLoadAllMarkersAsync(
+        string root, IEnumerable<RemoteRecording> recordings, double timeoutSeconds = 30, Action<string, IReadOnlyList<Marker>>? onLoaded = null, CancellationToken ct = default)
+    {
+        var result = new Dictionary<string, IReadOnlyList<Marker>>();
+        using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        cts.CancelAfter(TimeSpan.FromSeconds(timeoutSeconds));
+        try
+        {
+            await Task.Run(async () =>
+            {
+                var builder = new LibraryBuilder(root);
+                var context = await builder.LoadContextAsync(cts.Token).ConfigureAwait(false);
+                foreach (var recording in recordings)
+                {
+                    cts.Token.ThrowIfCancellationRequested();
+                    var relative = (recording.Name.Kind == RecordingKind.CacheSession ? "video" : "clips") + "/" + recording.Folder;
+                    var markers = builder.FolderFor(relative) is { } folder
+                        ? (await builder.LoadMarkersAsync(folder, context, cts.Token).ConfigureAwait(false)).Markers
+                        : [];
+                    lock (result) result[recording.Folder] = markers;
+                    onLoaded?.Invoke(recording.Folder, markers);
+                }
+            }, cts.Token).ConfigureAwait(false);
+        }
+        catch (Exception e) when (e is OperationCanceledException or IOException or UnauthorizedAccessException) { }
+        lock (result) return new Dictionary<string, IReadOnlyList<Marker>>(result);
+    }
+
     /// <exception cref="IOException">The library can't be reached.</exception>
     public static async Task<IReadOnlyList<RemoteRecording>> ListAsync(string root, CancellationToken ct)
     {

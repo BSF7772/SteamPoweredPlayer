@@ -32,6 +32,13 @@
                             ToolTipService.ToolTip="Forget this library. Downloaded chunks stay in the cache." />
                 </Grid>
                 <TextBlock x:Name="StatusText" AutomationProperties.AutomationId="DownloadsStatus" Style="{StaticResource Caption}" TextWrapping="Wrap" />
+                <InfoBar x:Name="MeteredBar" IsOpen="False" IsClosable="True" Severity="Informational" Title="This network is metered"
+                         AutomationProperties.AutomationId="DownloadsMetered"
+                         Message="Downloads use data from your plan. The app shows how much it has fetched, and nothing else changes.">
+                    <InfoBar.ActionButton>
+                        <Button Content="Don't show again" Click="DontShowMetered_Click" AutomationProperties.AutomationId="DownloadsMeteredHide" />
+                    </InfoBar.ActionButton>
+                </InfoBar>
             </StackPanel>
         </Border>
 
@@ -51,6 +58,7 @@
                                     <ColumnDefinition Width="Auto" />
                                     <ColumnDefinition Width="Auto" />
                                     <ColumnDefinition Width="Auto" />
+                                    <ColumnDefinition Width="Auto" />
                                 </Grid.ColumnDefinitions>
                                 <StackPanel VerticalAlignment="Center" Spacing="4">
                                     <TextBlock Text="{x:Bind Title}" TextTrimming="CharacterEllipsis" Style="{StaticResource BodyTextBlockStyle}" />
@@ -59,9 +67,11 @@
                                 </StackPanel>
                                 <Button Grid.Column="1" VerticalAlignment="Center" Content="{x:Bind ActionText, Mode=OneWay}" Tag="{x:Bind Self}" Click="Action_Click"
                                         AutomationProperties.AutomationId="DownloadsAction" />
-                                <Button Grid.Column="2" VerticalAlignment="Center" Content="Play" Tag="{x:Bind Self}" Click="Play_Click" IsEnabled="{x:Bind CanPlay, Mode=OneWay}"
+                                <Button Grid.Column="2" VerticalAlignment="Center" Content="Around markers" Tag="{x:Bind Self}" Click="Around_Click" IsEnabled="{x:Bind CanAround, Mode=OneWay}"
+                                        AutomationProperties.AutomationId="DownloadsAround" ToolTipService.ToolTip="{x:Bind AroundTooltip, Mode=OneWay}" />
+                                <Button Grid.Column="3" VerticalAlignment="Center" Content="Play" Tag="{x:Bind Self}" Click="Play_Click" IsEnabled="{x:Bind CanPlay, Mode=OneWay}"
                                         AutomationProperties.AutomationId="DownloadsPlay" />
-                                <ToggleButton Grid.Column="3" VerticalAlignment="Center" Content="Keep offline" Tag="{x:Bind Self}" Click="Keep_Click" IsChecked="{x:Bind Pinned, Mode=OneWay}"
+                                <ToggleButton Grid.Column="4" VerticalAlignment="Center" Content="Keep offline" Tag="{x:Bind Self}" Click="Keep_Click" IsChecked="{x:Bind Pinned, Mode=OneWay}"
                                               AutomationProperties.AutomationId="DownloadsKeep" ToolTipService.ToolTip="Never evict this recording from the cache" />
                             </Grid>
                         </DataTemplate>

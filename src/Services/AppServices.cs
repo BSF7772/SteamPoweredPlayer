@@ -175,6 +175,39 @@ public static class AppServices
         finally { s_downloadsGate.Release(); }
     }
 
+    /// <summary>Decides when the metered-network notice shows (once per run, never after "Don't show again").</summary>
+    public static MeteredNotice Metered { get; } = new();
+
+    /// <summary>What Windows says the current internet connection costs; <see cref="ConnectionCost.Unknown"/> when there is no answer.</summary>
+    public static ConnectionCost CurrentConnectionCost()
+    {
+        try
+        {
+            return Windows.Networking.Connectivity.NetworkInformation.GetInternetConnectionProfile()?.GetConnectionCost().NetworkCostType switch
+            {
+                Windows.Networking.Connectivity.NetworkCostType.Unrestricted => ConnectionCost.Unrestricted,
+                Windows.Networking.Connectivity.NetworkCostType.Fixed => ConnectionCost.Fixed,
+                Windows.Networking.Connectivity.NetworkCostType.Variable => ConnectionCost.Variable,
+                _ => ConnectionCost.Unknown,
+            };
+        }
+        catch (Exception e) when (e is InvalidOperationException or System.Runtime.InteropServices.COMException)
+        {
+            return ConnectionCost.Unknown;
+        }
+    }
+
+    /// <summary>Settings changed the download cache cap: the open cache takes it now (trimming happens at the next download).</summary>
+    public static void ApplyDownloadCacheCap() =>
+        s_cache?.SetMaxBytes(Math.Max(1, Settings.DownloadCacheGb) * (1L << 30));
+
+    /// <summary>The download cache's size and folder for Settings, opening it if needed.</summary>
+    public static async Task<(long Bytes, string Folder)> DownloadCacheInfoAsync()
+    {
+        var (cache, _) = await DownloadsAsync();
+        return (cache.TotalBytes, DownloadsFolder!);
+    }
+
     private static void OnDownloadChanged(DownloadItem item)
     {
         if (item.State is DownloadItemState.Done or DownloadItemState.Failed)

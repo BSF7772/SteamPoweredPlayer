@@ -26,6 +26,44 @@ public sealed partial class SettingsPage : Page
 
         ShowFolders();
         ChangeDataButton.IsEnabled = !AppServices.Options.Sample && AppServices.Steam.RecordingsPath is not null;
+
+        _loading = true;
+        CacheCapBox.Value = Math.Max(1, AppServices.Settings.DownloadCacheGb);
+        _loading = false;
+        _ = ShowCacheAsync();
+    }
+
+    private async Task ShowCacheAsync()
+    {
+        if (AppServices.Options.Sample)
+        {
+            CacheSizeText.Text = "";
+            CacheFolderText.Text = "(sample library, nothing on disk)";
+            return;
+        }
+        try
+        {
+            var (bytes, folder) = await AppServices.DownloadCacheInfoAsync();
+            CacheSizeText.Text = $"In use: {FastEncoder.Core.Pipeline.Size(bytes)}";
+            CacheFolderText.Text = folder;
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+        {
+            CacheSizeText.Text = "The download cache can't be opened: " + e.Message;
+        }
+    }
+
+    private void CacheCap_Changed(NumberBox sender, NumberBoxValueChangedEventArgs args)
+    {
+        if (_loading) return;
+        if (double.IsNaN(args.NewValue))                                  // emptied or invalid text: back to the saved value
+        {
+            sender.Value = Math.Max(1, AppServices.Settings.DownloadCacheGb);
+            return;
+        }
+        AppServices.Settings.DownloadCacheGb = (int)Math.Round(args.NewValue);
+        AppServices.Settings.Save();
+        AppServices.ApplyDownloadCacheCap();
     }
 
     private void ShowFolders()
