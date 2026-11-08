@@ -243,14 +243,27 @@ public sealed partial class MainWindow : Window
     //  toasts
     // =====================================================================================
 
+    /// <summary>A link-style button with the hand cursor: <c>HyperlinkButton</c> is accent-coloured and keyboard reachable already.</summary>
+    private sealed class HandLinkButton : HyperlinkButton
+    {
+        public HandLinkButton() => ProtectedCursor = Microsoft.UI.Input.InputSystemCursor.Create(Microsoft.UI.Input.InputSystemCursorShape.Hand);
+    }
+
+    private static readonly TimeSpan ToastLife = TimeSpan.FromSeconds(5);
+
     /// <summary>
     /// F6: toasts sit bottom-left, away from the player controls; on the Player page only errors and the result of a button pressed there
     /// are shown (anything else would cover the video), and opening the Player closes the toasts that are still up.
+    /// Every toast except an error closes itself after 5 s (hovering it pauses that); errors stay until dismissed.
+    /// With <paramref name="openPath"/> the file name is a blue link and a click on the toast opens the file; the name goes into the link, so
+    /// <paramref name="message"/> then holds only what comes after it.
     /// </summary>
-    public void ShowToast(string title, string? message, InfoBarSeverity severity, int seconds = 6, bool overPlayer = false)
+    /// <param name="seconds">Kept for the callers; the life of a toast is fixed (5 s, errors never).</param>
+    public void ShowToast(string title, string? message, InfoBarSeverity severity, int seconds = 6, bool overPlayer = false, string? openPath = null)
     {
         if (severity != InfoBarSeverity.Error && !overPlayer && ContentFrame.Content is PlayerPage) return;
-        ToastHost.Width = ContentFrame.Content is PlayerPage ? 296 : 400;      // over the playlist, clear of the transport
+        var hostWidth = ContentFrame.Content is PlayerPage ? 296 : 400;      // over the playlist, clear of the transport
+        ToastHost.Width = hostWidth;
         var bar = new InfoBar
         {
             Title = title,
@@ -262,17 +275,48 @@ public sealed partial class MainWindow : Window
             Shadow = new ThemeShadow(),
             Translation = new Vector3(0, 0, 24),
         };
-        bar.Closed += (_, _) => ToastHost.Children.Remove(bar);
+        if (openPath is not null)
+        {
+            var name = System.IO.Path.GetFileName(openPath);
+            var link = new HandLinkButton
+            {
+                Padding = new Thickness(0),
+                HorizontalAlignment = HorizontalAlignment.Left,
+                Content = new TextBlock { Text = name, TextTrimming = TextTrimming.CharacterEllipsis, MaxWidth = hostWidth - 72 },
+            };
+            Microsoft.UI.Xaml.Automation.AutomationProperties.SetAutomationId(link, "ToastOpenFile");
+            Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(link, "Open " + name);
+            ToolTipService.SetToolTip(link, "Open " + name);
+            link.Click += (_, _) => { FileOpener.Open(openPath); bar.IsOpen = false; };
+            bar.ActionButton = link;
+            // a click anywhere else on the toast opens it too, but not on a button (the close X, or the link, which does it itself)
+            bar.Tapped += (_, e) =>
+            {
+                for (var d = e.OriginalSource as DependencyObject; d is not null && d != bar; d = VisualTreeHelper.GetParent(d))
+                    if (d is Microsoft.UI.Xaml.Controls.Primitives.ButtonBase) return;
+                e.Handled = true;
+                FileOpener.Open(openPath);
+                bar.IsOpen = false;
+            };
+        }
+
+        // 5 s, paused while the pointer is over it; no timer outlives its toast
+        Microsoft.UI.Dispatching.DispatcherQueueTimer? timer = null;
+        if (severity != InfoBarSeverity.Error)
+        {
+            timer = DispatcherQueue.CreateTimer();
+            timer.Interval = ToastLife;
+            timer.IsRepeating = false;
+            timer.Tick += (_, _) => { timer.Stop(); bar.IsOpen = false; };
+            bar.PointerEntered += (_, _) => timer.Stop();
+            bar.PointerExited += (_, _) => timer.Start();
+        }
+        void Retire() { timer?.Stop(); timer = null; }
+        bar.Closed += (_, _) => { Retire(); ToastHost.Children.Remove(bar); };
+        bar.Unloaded += (_, _) => Retire();
         ToastHost.Children.Add(bar);
         while (ToastHost.Children.Count > 3) ToastHost.Children.RemoveAt(0);
-        if (seconds > 0)
-        {
-            var t = DispatcherQueue.CreateTimer();
-            t.Interval = TimeSpan.FromSeconds(seconds);
-            t.IsRepeating = false;
-            t.Tick += (_, _) => bar.IsOpen = false;
-            t.Start();
-        }
+        timer?.Start();
     }
 
     private void CloseToasts(bool keepErrors)

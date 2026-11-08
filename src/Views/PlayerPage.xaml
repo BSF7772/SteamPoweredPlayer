@@ -195,8 +195,8 @@
                     <StackPanel x:Name="SyncCard" AutomationProperties.AutomationId="PlayerEdits" Spacing="4">
                         <StackPanel Orientation="Horizontal" Spacing="6">
                             <TextBlock Text="Audio sync" Style="{StaticResource Caption}" VerticalAlignment="Center" />
-                            <Slider x:Name="SyncSlider" AutomationProperties.AutomationId="PlayerSyncSlider" Width="160" Minimum="-5000" Maximum="5000" StepFrequency="1" Value="0" VerticalAlignment="Center"
-                                    IsThumbToolTipEnabled="False" ValueChanged="SyncSlider_ValueChanged" IsTabStop="False" ToolTipService.ToolTip="Audio delay from −5 s to +5 s. Applied 1 s after the last change, to playback and exports" />
+                            <Slider x:Name="SyncSlider" AutomationProperties.AutomationId="PlayerSyncSlider" Width="160" Minimum="-5000" Maximum="5000" StepFrequency="10" SnapsTo="StepValues" Value="0" VerticalAlignment="Center"
+                                    IsThumbToolTipEnabled="False" ValueChanged="SyncSlider_ValueChanged" IsTabStop="False" ToolTipService.ToolTip="Audio delay from −5 s to +5 s in 10 ms steps. Applied 1 s after the last change, to playback and exports" />
                             <NumberBox x:Name="SyncBox" AutomationProperties.AutomationId="PlayerSyncBox" Width="84" Minimum="-5000" Maximum="5000" Value="0" SpinButtonPlacementMode="Hidden" VerticalAlignment="Center"
                                        ValueChanged="SyncBox_ValueChanged" ToolTipService.ToolTip="Type the exact delay in milliseconds. Negative = sound earlier" />
                             <TextBlock Text="ms" Style="{StaticResource Caption}" VerticalAlignment="Center" />
