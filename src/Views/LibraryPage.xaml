@@ -142,7 +142,8 @@
                                         <TextBlock Text="Replay" />
                                     </StackPanel>
                                 </Button>
-                                <Button x:Name="SaveClipButton" IsEnabled="False" ToolTipService.ToolTip="Save the last moments as a clip (arrives with editing)">
+                                <Button x:Name="SaveClipButton" IsEnabled="False" Click="SaveClip_Click" AutomationProperties.AutomationId="LibrarySaveClip"
+                                        ToolTipService.ToolTip="Open the newest part of the cache in the Player, where Save clip cuts it">
                                     <StackPanel Orientation="Horizontal" Spacing="8">
                                         <FontIcon Glyph="&#xE8C6;" FontSize="14" />
                                         <TextBlock Text="Save clip" />
@@ -236,8 +237,43 @@
                         </Border>
                         <Border Grid.Column="1" Style="{StaticResource Card}">
                             <StackPanel Spacing="10">
-                                <TextBlock Text="EXPORTS" Style="{StaticResource BodyStrongTextBlockStyle}" />
-                                <local:EmptyState Emoji="📦" Title="Nothing exported yet"
+                                <StackPanel Orientation="Horizontal" Spacing="8">
+                                    <TextBlock Text="EXPORTS" Style="{StaticResource BodyStrongTextBlockStyle}" />
+                                    <TextBlock x:Name="ExportCount" Style="{StaticResource Caption}" VerticalAlignment="Center" />
+                                </StackPanel>
+                                <ItemsRepeater x:Name="ExportRepeater" AutomationProperties.AutomationId="LibraryExportList">
+                                    <ItemsRepeater.Layout>
+                                        <StackLayout Spacing="6" />
+                                    </ItemsRepeater.Layout>
+                                    <ItemsRepeater.ItemTemplate>
+                                        <DataTemplate x:DataType="local:ExportRow">
+                                            <Grid ColumnSpacing="8">
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="*" />
+                                                    <ColumnDefinition Width="Auto" />
+                                                </Grid.ColumnDefinitions>
+                                                <StackPanel Spacing="1" VerticalAlignment="Center">
+                                                    <TextBlock Text="{x:Bind Name}" TextTrimming="CharacterEllipsis" ToolTipService.ToolTip="{x:Bind Name}" />
+                                                    <TextBlock Text="{x:Bind Meta}" Style="{StaticResource Caption}" TextTrimming="CharacterEllipsis" />
+                                                </StackPanel>
+                                                <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="4" VerticalAlignment="Center">
+                                                    <Button Tag="{x:Bind Path}" Click="ExportOpen_Click" AutomationProperties.AutomationId="LibraryExportOpen"
+                                                            ToolTipService.ToolTip="Open with the default app">
+                                                        <StackPanel Orientation="Horizontal" Spacing="6">
+                                                            <FontIcon Glyph="&#xE768;" FontSize="12" />
+                                                            <TextBlock Text="Open" />
+                                                        </StackPanel>
+                                                    </Button>
+                                                    <Button Tag="{x:Bind Path}" Click="ExportReveal_Click" AutomationProperties.AutomationId="LibraryExportReveal"
+                                                            ToolTipService.ToolTip="Show in folder" AutomationProperties.Name="Show in folder">
+                                                        <FontIcon Glyph="&#xE838;" FontSize="12" />
+                                                    </Button>
+                                                </StackPanel>
+                                            </Grid>
+                                        </DataTemplate>
+                                    </ItemsRepeater.ItemTemplate>
+                                </ItemsRepeater>
+                                <local:EmptyState x:Name="ExportsEmpty" Emoji="📦" Title="Nothing exported yet"
                                                   Message="Cuts you export from a clip or the cache will appear here." />
                             </StackPanel>
                         </Border>

@@ -66,6 +66,8 @@ public sealed partial class LibraryPage : Page
     {
         base.OnNavigatedFrom(e);
         Unwire();
+        StopWatchingExports();
+        _watchedFolder = null;
     }
 
     private void Unwire()
@@ -232,6 +234,7 @@ public sealed partial class LibraryPage : Page
         var sig = tile.Sig + "#" + string.Join(';', recs.Select(RecSig)) + "#" + (tile.Entry?.Art is { } a0 ? $"{a0.Hero}|{a0.HeroBlur}|{a0.Logo}" : "");
         if (!resetScroll && sig == _shownSig) return;
         _shownSig = sig;
+        ShowExports(tile.GameId is null ? null : tile.Name);
 
         // hero (F8): Steam's full-resolution hero art (1920 px), not the 192 px blurred one, decoded at the card's width; brand
         // gradient when there is none. Same file as before: the image is kept (no reload, no flicker on a live refresh).
@@ -356,6 +359,7 @@ public sealed partial class LibraryPage : Page
         CacheEmpty.Visibility = empty ? Visibility.Visible : Visibility.Collapsed;
         StripCanvas.Visibility = empty ? Visibility.Collapsed : Visibility.Visible;
         ReplayButton.IsEnabled = !empty;
+        SaveClipButton.IsEnabled = !empty;
         var live = _sessions.Any(s => s.Live);
         LiveBadge.Visibility = live ? Visibility.Visible : Visibility.Collapsed;
         if (live) Pulse(LiveDot);
