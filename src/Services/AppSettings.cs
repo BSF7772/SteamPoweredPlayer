@@ -37,6 +37,12 @@ public sealed class AppSettings
     /// <summary>FastEncoder preset id of the last export.</summary>
     public string? ExportPreset { get; set; }
 
+    /// <summary>The user's FastEncoder.exe, chosen the first time "Open in FastEncoder" is used.</summary>
+    public string? FastEncoderPath { get; set; }
+
+    /// <summary>Audio delay in seconds applied to every recording of a game, by game id.</summary>
+    public Dictionary<string, double> GameAudioDelays { get; set; } = [];
+
     public static string FilePath => Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "SteamPoweredPlayer", "settings.json");
 

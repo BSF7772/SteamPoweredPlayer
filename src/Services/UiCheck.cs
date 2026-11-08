@@ -355,10 +355,72 @@ internal static partial class UiCheck
             }
             s.SetPause(true);
             await Capture(id + "-ab");
-            Invoke(loop);                      // clear
             var ab = RealCheckRules.EvaluateAbLoop(samples, 1, 3, fps);
             Add(CheckResult.From(aSet && bSet && ab.Ok, $"{id}.ab-loop", "A-B loop through the loop button (A = 1 s, B = 3 s)",
                 (aSet && bSet ? "" : "the button could not be pressed; ") + ab.Describe()));
+            await ExportChecks(id, loop);
+        }
+
+        /// <summary>
+        /// The Export card through its real controls, with the A-B range still set (1 s to 3 s): estimate, detect, Save clip, Export, a kept
+        /// span, a screenshot. Output goes to a temp folder set in memory only, so the user's settings and folders are untouched and the
+        /// folder picker (which automation can't drive) never opens.
+        /// </summary>
+        private async Task ExportChecks(string id, FrameworkElement loop)
+        {
+            var dir = Path.Combine(Path.GetTempPath(), "spp-uicheck-export-" + Guid.NewGuid().ToString("N")[..8]);
+            Directory.CreateDirectory(dir);
+            var savedFolder = AppServices.Settings.ExportFolder;
+            AppServices.Settings.ExportFolder = dir;
+            try
+            {
+                foreach (var e in Descendants(window.Content).OfType<Expander>()) e.IsExpanded = true;
+                await Task.Delay(300);
+                await WaitFor(() => Find("PlayerExport") is Button { IsEnabled: true }, 30);        // encoder detection may still be running
+
+                var estimate = Find("PlayerEstimate");
+                var estimated = estimate is not null && Invoke(estimate) && await WaitFor(() => Find("PlayerEstimateText") is TextBlock { Text: var t } && t.Length > 0 && !t.StartsWith("Estimating", StringComparison.Ordinal), 60);
+                Add(CheckResult.From(estimated, $"{id}.export-estimate", "Estimate size button gives a size", estimated ? "a size is shown" : "no size within 60 s"));
+
+                var detect = Find("PlayerDetectSync");
+                var detected = detect is not null && Invoke(detect) && await WaitFor(() => Find("PlayerSyncStatus") is TextBlock { Text: var t } && t.Length > 0 && !t.StartsWith("Analysing", StringComparison.Ordinal), 60);
+                Add(CheckResult.From(detected, $"{id}.export-detect", "Detect button reports a verdict", detected ? "a verdict is shown" : "no verdict within 60 s"));
+
+                await ExportButtonCheck(id, "save-clip", "PlayerSaveClip", "Save clip (lossless, snapped to chunks)", dir, 2, 6.5);
+                await ExportButtonCheck(id, "export", "PlayerExport", "Export with the selected preset (A = 1 s, B = 3 s)", dir, 1.7, 2.3);
+
+                var keep = Find("PlayerKeepAb");
+                var kept = keep is not null && Invoke(keep) && await WaitFor(() => Find("PlayerExportRange") is TextBlock { Text: var t } && t.StartsWith("1 kept part", StringComparison.Ordinal), 3);
+                Add(CheckResult.From(kept, $"{id}.export-keep", "Keep A-B adds a kept part and clears the loop", kept ? "1 kept part" : "the range text did not change"));
+                await ExportButtonCheck(id, "export-kept", "PlayerExport", "Export the kept part", dir, 1.7, 2.3);
+                if (!kept) Invoke(loop);                                    // Keep A-B clears the loop; otherwise clear it here
+
+                var shot = Find("PlayerScreenshot");
+                var shotTaken = shot is not null && Invoke(shot) && await WaitFor(() => Directory.EnumerateFiles(dir, "*.png").Any(f => new FileInfo(f).Length > 0), 5);
+                Add(CheckResult.From(shotTaken, $"{id}.screenshot", "Screenshot button saves a frame", shotTaken ? "a PNG was written" : "no PNG within 5 s"));
+            }
+            finally
+            {
+                AppServices.Settings.ExportFolder = savedFolder;
+                try { Directory.Delete(dir, true); } catch (Exception e) when (e is IOException or UnauthorizedAccessException) { }
+            }
+        }
+
+        private async Task ExportButtonCheck(string id, string name, string automationId, string title, string dir, double minSeconds, double maxSeconds)
+        {
+            var before = Directory.EnumerateFiles(dir, "*.mp4").ToHashSet();
+            var button = Find(automationId);
+            if (button is null || !Invoke(button))
+            {
+                Add(CheckResult.Fail($"{id}.{name}", title, $"no {automationId} element"));
+                return;
+            }
+            await WaitFor(() => AppServices.Exports.Pending == 0 && Directory.EnumerateFiles(dir, "*.mp4").Any(f => !before.Contains(f)), 120);
+            var output = Directory.EnumerateFiles(dir, "*.mp4").FirstOrDefault(f => !before.Contains(f));
+            var info = output is null ? null : await FastEncoder.Core.Ff.ProbeAsync(output);
+            var ok = info is { HasAudio: true } && info.Duration >= minSeconds && info.Duration <= maxSeconds;
+            var state = AppServices.Exports.Items.LastOrDefault()?.State.ToString() ?? "none";
+            Add(CheckResult.From(ok, $"{id}.{name}", title, info is null ? $"no output (queue item: {state})" : $"{F(info.Duration, "0.00")} s, audio {info.HasAudio}"));
         }
 
         /// <summary>The transport controls (the volume slider or, when narrow, its button) and the timeline's zoom group.</summary>
@@ -393,6 +455,7 @@ internal static partial class UiCheck
             {
                 aw.Resize(original);
                 await Task.Delay(300);
+                await WaitFor(() => Find("PlayerExport") is Button { IsEnabled: true }, 30);        // encoder detection may still be running
             }
         }
 

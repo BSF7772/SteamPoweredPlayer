@@ -27,6 +27,7 @@
     <Compile Include="$(FastEncoderDir)src\Core\Presets.cs" Link="FastEncoder\Presets.cs" />
     <Compile Include="$(FastEncoderDir)src\Core\Pipeline.cs" Link="FastEncoder\Pipeline.cs" />
     <Compile Include="$(FastEncoderDir)src\Core\AudioSync.cs" Link="FastEncoder\AudioSync.cs" />
+    <Compile Include="$(FastEncoderDir)src\Core\Taskbar.cs" Link="FastEncoder\Taskbar.cs" />
   </ItemGroup>
 
   <Target Name="CheckFastEncoder" BeforeTargets="BeforeBuild" Condition="!Exists('$(FastEncoderDir)src\Core\Ff.cs')">

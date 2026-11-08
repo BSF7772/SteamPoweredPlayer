@@ -242,6 +242,7 @@ public sealed partial class PlayerPage : Page
         UpdateLoopUi();
         _entry = lib?.Current?.Recordings.FirstOrDefault(r => r.RelativeFolder == key);
         BuildPlaylist();
+        ResetExportEdits();
         Timeline.ResetZoom();
         ClearEvents();
         ShowStatus("Opening…", null, busy: true);
@@ -1182,6 +1183,7 @@ public sealed partial class PlayerPage : Page
                 break;
             case (int)VirtualKey.A: SetAbPoint('A'); break;
             case (int)VirtualKey.B: SetAbPoint('B'); break;
+            case (int)VirtualKey.S: _ = TakeScreenshotAsync(); break;
             case (int)VirtualKey.N: NextEvent(); break;
             case (int)VirtualKey.P: PreviousEvent(); break;
             case (int)VirtualKey.Home: if (_session?.Media is not null) RunSeek(() => _host!.SeekAsync(_session.MediaStartSeconds)); break;

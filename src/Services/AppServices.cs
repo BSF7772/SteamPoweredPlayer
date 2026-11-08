@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
+using FastEncoder.Core;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
+using SteamPoweredPlayer.Core.Export;
 using SteamPoweredPlayer.Core.Library;
 using SteamPoweredPlayer.Core.Steam;
 
@@ -138,4 +140,52 @@ public static class AppServices
 
     public static void Toast(string title, string? message = null, InfoBarSeverity severity = InfoBarSeverity.Informational, int seconds = 6) =>
         Window?.ShowToast(title, message, severity, seconds);
+
+    // ---- exports --------------------------------------------------------------------------------------------------------
+
+    private static ExportQueue? s_exports;
+    private static Taskbar? s_taskbar;
+
+    /// <summary>Fires on any thread after a queued export changed.</summary>
+    public static event Action? ExportsChanged;
+
+    /// <summary>The app's one export queue: outlives pages, shows progress on the taskbar and reports each result as a toast.</summary>
+    public static ExportQueue Exports
+    {
+        get
+        {
+            if (s_exports is null)
+            {
+                s_exports = new ExportQueue();
+                s_exports.Changed += OnExportChanged;
+            }
+            return s_exports;
+        }
+    }
+
+    private static void OnExportChanged(ExportItem item)
+    {
+        ExportsChanged?.Invoke();
+        if (Window is not { } window) return;
+        window.DispatcherQueue.TryEnqueue(() =>
+        {
+            s_taskbar ??= new Taskbar(window.Hwnd);
+            if (Exports.OverallFraction is { } fraction) s_taskbar.Set(Taskbar.State.Normal, fraction);
+            else s_taskbar.Set(Taskbar.State.None);
+            switch (item.State)
+            {
+                case ExportItemState.Done when item.Result is { } result:
+                    Toast("Export finished", $"{Path.GetFileName(result.Path)}  ·  {Pipeline.Size(result.Bytes)}", InfoBarSeverity.Success);
+                    s_taskbar.Flash();
+                    break;
+                case ExportItemState.Cancelled:
+                    Toast("Export cancelled", null, InfoBarSeverity.Informational, 3);
+                    break;
+                case ExportItemState.Failed when item.Error is { } error:
+                    PlayerLog.Write("export failed: " + error.GetType().Name);
+                    Toast("Export failed", error is ChunkGoneException gone ? ExportService.DescribeGone(item.Job.Media, gone) : error.Message, InfoBarSeverity.Error);
+                    break;
+            }
+        });
+    }
 }
