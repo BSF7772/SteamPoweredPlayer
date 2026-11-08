@@ -18,6 +18,9 @@ data class ChunkKey(val libraryId: String, val recording: String, val stream: In
     }
 }
 
+/** The stream ended short of, or ran past, the expected size. The connection itself may be fine. */
+class ChunkSizeException(message: String) : IOException(message)
+
 private val plainName = Regex("^[A-Za-z0-9._-]+$")
 private val initName = Regex("""^init-stream([01])\.m4s$""")
 
@@ -88,7 +91,7 @@ class LocalChunkCache private constructor(private val dir: File, val maxBytes: L
         }
         if (written != expectedSize) {
             part.delete()
-            throw IOException("expected $expectedSize bytes for ${path.name}, got ${if (written > expectedSize) "more" else written.toString()}")
+            throw ChunkSizeException("expected $expectedSize bytes for ${path.name}, got ${if (written > expectedSize) "more" else written.toString()}")
         }
         synchronized(lock) {
             if (!part.renameTo(path)) {
