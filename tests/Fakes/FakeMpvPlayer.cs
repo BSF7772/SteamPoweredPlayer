@@ -53,7 +53,8 @@ public sealed class FakeMpvPlayer : IMpvPlayer
     public DemuxerCachePlan? DemuxerCache { get; private set; }
     public void SetDemuxerCache(DemuxerCachePlan plan) => DemuxerCache = plan;
     public void FrameStep() { FrameSteps++; Paused = true; }
-    public void SetAbLoop(double? a, double? b) { }
+    public (double? A, double? B) AbLoop { get; private set; }
+    public void SetAbLoop(double? a, double? b) => AbLoop = (a, b);
     public Task ScreenshotToFileAsync(string path, CancellationToken cancellationToken = default) => Task.CompletedTask;
     public ValueTask DisposeAsync() => ValueTask.CompletedTask;
     internal void Unused() => EndFile?.Invoke(new MpvEndFile(MpvEndReason.Stop, 0, null));

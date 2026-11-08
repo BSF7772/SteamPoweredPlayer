@@ -16,6 +16,8 @@ public enum ReloadCause
     CacheChange,
     /// <summary><see cref="CacheFollower"/>: playback reached the end of the window and more media exists.</summary>
     EndOfWindow,
+    /// <summary>The A-B loop reached B and jumped back to A (<see cref="PlaybackSession.SetLoop"/>).</summary>
+    Loop,
 }
 
 /// <summary>A completed reload.</summary>
@@ -55,6 +57,7 @@ public sealed class PlaybackSession : IAsyncDisposable
     private IReadOnlyList<int> _window = [];
     private string _edl = "";
     private bool _userPaused;
+    private double? _loopA, _loopB;
     private double _position = double.NaN, _lastTick, _playedSinceLoad;
     private bool _reloading, _pumping, _atEnd, _disposed;
     private PendingReload? _pending;
@@ -167,6 +170,21 @@ public sealed class PlaybackSession : IAsyncDisposable
     public void SetMute(bool muted) => _player.SetMute(muted);
     public void SetAudioDelay(double seconds) => _player.SetAudioDelay(seconds);
     public void SetAbLoop(double? a, double? b) => _player.SetAbLoop(a, b);
+
+    /// <summary>
+    /// The A-B loop, driven by the session: when the position reaches B it reloads at A (the seek-by-reload rule). mpv's own ab-loop
+    /// seeks inside the EDL, revisits a chunk and then wraps early (P1: every lap after the first was a fraction of A→B), so it stays off.
+    /// Both ends in media seconds; null or B ≤ A clears it.
+    /// </summary>
+    public void SetLoop(double? a, double? b)
+    {
+        lock (_gate)
+        {
+            if (a is { } x && b is { } y && double.IsFinite(x) && double.IsFinite(y) && y > x) { _loopA = x; _loopB = y; }
+            else { _loopA = null; _loopB = null; }
+        }
+        _player.SetAbLoop(null, null);
+    }
 
     /// <summary>Swap in a new index (Steam trimmed or the session grew) without reloading. <see cref="CacheFollower"/> decides what follows.</summary>
     public void ReplaceMedia(SessionMedia media)
@@ -327,7 +345,8 @@ public sealed class PlaybackSession : IAsyncDisposable
             if (d is > 0 and < 2) _playedSinceLoad += d;      // sequential play; a jump is not "played"
             _position = t;
             reason = EdlWindow.ShouldReload(_window, _media, t, _playedSinceLoad);
-            if (reason != ReloadReason.None && Worthwhile(reason, _media, t))
+            if (_loopA is { } la && _loopB is { } lb && t >= lb) auto = new PendingReload(la, ReloadCause.Loop, false, null);
+            else if (reason != ReloadReason.None && Worthwhile(reason, _media, t))
                 auto = new PendingReload(t, ReloadCause.Policy, true, null);
         }
         SafeInvoke(PositionChanged, t);
@@ -349,14 +368,25 @@ public sealed class PlaybackSession : IAsyncDisposable
 
     private void OnEof(bool eof)
     {
-        double pos;
+        if (!eof) return;
+        double pos = 0;
+        double? loopA = null;
         lock (_gate)
         {
-            if (!eof) return;
             if (_reloading || _disposed) return;
-            _atEnd = true;
-            pos = double.IsNaN(_player.TimePos) ? _position : _player.TimePos;
-            _position = pos;
+            if (_loopA is { } la && _loopB is not null) loopA = la;       // the end came before B: still a lap
+            else
+            {
+                _atEnd = true;
+                pos = double.IsNaN(_player.TimePos) ? _position : _player.TimePos;
+                _position = pos;
+            }
+        }
+        if (loopA is { } a)
+        {
+            try { _ = Enqueue(new PendingReload(a, ReloadCause.Loop, false, null), default).ContinueWith(static _ => { }, TaskScheduler.Default); }
+            catch (ObjectDisposedException) { /* closing */ }
+            return;
         }
         SafeInvoke(ReachedEnd, pos);
     }
