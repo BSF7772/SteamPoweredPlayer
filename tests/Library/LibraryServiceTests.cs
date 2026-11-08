@@ -165,6 +165,34 @@ public sealed class LibraryServiceTests
     }
 
     [Fact]
+    public async Task A_timeline_rewrite_raises_MarkersChanged_for_the_games_cache_sessions_even_when_the_entry_is_unchanged()
+    {
+        await using var r = new Rig();
+        r.S.AddBg(Bg, 1, 3);
+        r.Create();
+        var markerEvents = new List<string[]>();
+        await r.StartAndSettleAsync();
+        r.Service.MarkersChanged += f => { lock (markerEvents) markerEvents.Add([.. f]); };
+        r.IndexEvents.Clear();
+
+        // Steam rewrites the game's timeline: no chunk changed, so neither the entry nor the media differ
+        var timeline = Path.Combine(r.S.Root, "timelines", "timeline_73020250101_120000.json");
+        r.Watcher.Raise(FolderChangeKind.Changed, timeline);
+        r.S.Clock.Advance(Window);
+        await r.SettleAsync();
+
+        var one = Assert.Single(markerEvents);
+        Assert.Equal(["video/" + Bg], one);
+        Assert.Empty(r.IndexEvents);
+
+        // another game's timeline touches nothing
+        r.Watcher.Raise(FolderChangeKind.Changed, Path.Combine(r.S.Root, "timelines", "timeline_44020250101_120000.json"));
+        r.S.Clock.Advance(Window);
+        await r.SettleAsync();
+        Assert.Single(markerEvents);
+    }
+
+    [Fact]
     public async Task Continuous_events_still_rescan_within_the_max_debounce()
     {
         await using var r = new Rig();

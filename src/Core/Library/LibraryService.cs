@@ -86,6 +86,8 @@ public sealed class LibraryService : IAsyncDisposable
     private readonly LibraryBuilder? _markerBuilder;                           // own pb cache: marker loads never race the scan's LoadContextAsync
     private readonly SemaphoreSlim _markerLock = new(1);
     private (RecordingContext Ctx, long Tick)? _markerCtx;
+    private int _markerCtxStale;                                          // 1 after a timelines/ file changed: the cached context is dropped
+    private readonly HashSet<string> _timelineTouched = new(StringComparer.Ordinal);   // cache sessions whose game's timeline changed (guarded by _lock)
     private readonly CancellationTokenSource _cts = new();
     private readonly Channel<(WorkKind Kind, string? Folder)> _queue = Channel.CreateUnbounded<(WorkKind, string?)>(new() { SingleReader = true });
 
@@ -144,6 +146,9 @@ public sealed class LibraryService : IAsyncDisposable
 
     /// <summary>The playable media of one recording folder changed (new chunks, trimmed, live flag), or is gone (null). First argument: <c>RelativeFolder</c>.</summary>
     public event Action<string, SessionMedia?>? MediaChanged;
+
+    /// <summary>Raised after Steam rewrote a game's timeline and its cache sessions were rescanned, even when the index entries stayed equal: markers of these recordings are stale.</summary>
+    public event Action<IReadOnlyCollection<string>>? MarkersChanged;
 
     public event Action<LibraryStatus>? StatusChanged;
     public event Action<ScanProgress>? ProgressChanged;
@@ -212,6 +217,7 @@ public sealed class LibraryService : IAsyncDisposable
         try
         {
             var now = _clock.GetTimestamp();
+            if (Interlocked.Exchange(ref _markerCtxStale, 0) == 1) _markerCtx = null;
             if (_markerCtx is not { } c || _clock.GetElapsedTime(c.Tick, now) > TimeSpan.FromSeconds(10))
                 _markerCtx = c = (await _markerBuilder.LoadContextAsync(ct).ConfigureAwait(false), now);
             return await _markerBuilder.LoadMarkersAsync(folder, c.Ctx, ct).ConfigureAwait(false);
@@ -411,6 +417,13 @@ public sealed class LibraryService : IAsyncDisposable
         await b.ScanFoldersAsync(list, k => { lock (_lock) return _heads.GetValueOrDefault(k); }, ctx, _o.ScanParallelism,
             s => { CommitAndNotify(s, changed); return ValueTask.CompletedTask; }, ct).ConfigureAwait(false);
         await PublishAsync(changed, resolveNames: true, ct).ConfigureAwait(false);
+
+        string[] touched;
+        lock (_lock)
+        {
+            touched = [.. relative.Where(_timelineTouched.Remove)];
+        }
+        if (touched.Length > 0) Raise(() => MarkersChanged?.Invoke(touched));
     }
 
     /// <summary>Applies one folder result to the state, raises <see cref="MediaChanged"/> if its media changed, and arms the live-expiry timer.</summary>
@@ -544,7 +557,11 @@ public sealed class LibraryService : IAsyncDisposable
     {
         string[] keys;
         lock (_lock)
+        {
             keys = [.. _entries.Where(e => e.Value.Kind == RecordingKind.CacheSession && e.Value.GameId == gameId).Select(e => e.Key)];
+            foreach (var k in keys) _timelineTouched.Add(k);
+        }
+        Volatile.Write(ref _markerCtxStale, 1);
         foreach (var k in keys) ArmFolder(k);
     }
 
