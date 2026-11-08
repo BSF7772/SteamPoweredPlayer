@@ -249,7 +249,7 @@ public sealed class PlayerHost
     public void Resize(int widthPixels, int heightPixels, float scale)
     {
         try { Renderer?.Resize(widthPixels, heightPixels, scale); }
-        catch (Exception e) when (e is COMException or InvalidOperationException or ObjectDisposedException)
+        catch (Exception e) when (e is COMException or SharpGen.Runtime.SharpGenException or InvalidOperationException or ObjectDisposedException)   // ResizeBuffers on a lost device
         {
             PlayerLog.Write("resize failed: " + e.Message);
         }

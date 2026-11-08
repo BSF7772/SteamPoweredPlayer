@@ -31,13 +31,13 @@ public static class ThumbnailLoader
             {
                 Bounds = new BitmapBounds { X = (uint)tile.X, Y = (uint)tile.Y, Width = (uint)tile.Width, Height = (uint)tile.Height },
             };
-            // Never dispose this bitmap: XAML re-reads it whenever the Image is realised again (the Library page restored by Back from
-            // the Player), and a closed SoftwareBitmap fails fast there with RO_E_CLOSED (0xC000027B). The GC releases it with the source.
-            var bitmap = await decoder.GetSoftwareBitmapAsync(
+            // A WriteableBitmap owns its pixels: XAML re-reads a SoftwareBitmapSource's bitmap, which can fail fast with RO_E_CLOSED (0xC000027B).
+            using var decoded = await decoder.GetSoftwareBitmapAsync(
                 BitmapPixelFormat.Bgra8, BitmapAlphaMode.Premultiplied, transform, ExifOrientationMode.IgnoreExifOrientation, ColorManagementMode.DoNotColorManage);
-            var source = new SoftwareBitmapSource();
-            await source.SetBitmapAsync(bitmap);
-            return source;
+            var image = new WriteableBitmap(decoded.PixelWidth, decoded.PixelHeight);
+            decoded.CopyToBuffer(image.PixelBuffer);
+            image.Invalidate();
+            return image;
         }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException or System.Runtime.InteropServices.COMException or ArgumentException)
         {
