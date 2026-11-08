@@ -139,6 +139,9 @@ public static class SelfTest
                 await Step("trickplay.sheets", "Trickplay sheets generated", () => TrickplayChecks(ct)).ConfigureAwait(false);
                 await Step("trickplay.live", "Trickplay follows a growing session", () => TrickplayLiveChecks(ct)).ConfigureAwait(false);
                 await Step("play.live-trickplay", "Playback is undisturbed while trickplay builds", () => PlayWhileTrickplayBuilds(ct)).ConfigureAwait(false);
+                await Step("export.presets", "Every export preset encodes", async () =>
+                    await ExportSelfChecks.PresetsAsync(await NormalMedia(ct).ConfigureAwait(false), _s.Scratch("presets"), ct).ConfigureAwait(false)).ConfigureAwait(false);
+                await Step("export.sync", "Audio-sync detect and fix", () => ExportSelfChecks.SyncAsync(_s.Scratch("sync"), ct)).ConfigureAwait(false);
                 LaterPhases();
             }
         }
@@ -638,11 +641,8 @@ public static class SelfTest
 
         private void LaterPhases()
         {
-            Add(CheckResult.Skip("later.presets", "Every export preset encodes", "Phase 3/6"));
-            Add(CheckResult.Skip("later.sync", "Audio-sync detect and fix (300 ms injected)", "Phase 3/6"));
             Add(CheckResult.Skip("later.download", "Interrupted download resumes without corruption", "Phase 3/6"));
             Add(CheckResult.Skip("later.delete-guard", "Delete path guard", "Phase 3/6"));
-            Add(CheckResult.Skip("later.colour-range", "Colour range per encoder", "Phase 3/6"));
         }
     }
 }
