@@ -114,6 +114,7 @@ public static class RealCheck
                     await Step("cache", "Cache session, last 10 s", () => RecordingSection("cache", (cache.Live ? "active" : "newest") + " cache session, last 10 s", cache, cacheMedia, tail: true, ct)).ConfigureAwait(false);
                 else Add(CheckResult.Skip("cache", "Cache session, last 10 s", "no cache session in the library"));
 
+                await Step("trickplay.live", "Trickplay follows the active session", () => LiveTrickplaySection(cache, ct)).ConfigureAwait(false);
                 await Step("gap", "Seek into a gap", () => GapSection(all, ct)).ConfigureAwait(false);
                 await Step("markers.library", "Markers, whole library", () => MarkerSweep(all, ct)).ConfigureAwait(false);
                 TimecodeSection();
@@ -124,6 +125,88 @@ public static class RealCheck
                 try { Directory.Delete(_temp, recursive: true); }
                 catch (Exception e) when (e is IOException or UnauthorizedAccessException) { }
             }
+        }
+
+        // ---- live trickplay ----------------------------------------------------------------------------------------------
+
+        private const int LiveWindowChunks = 10;
+        private const int LiveWantedChunks = 3;
+        private static readonly TimeSpan LiveWait = TimeSpan.FromSeconds(15);
+
+        /// <summary>
+        /// While Steam records, new chunks must turn into tiles within one chunk interval. Only the newest chunks are built (a whole
+        /// rolling cache would not fit the budget); each further chunk is awaited through the library's MediaChanged event, never polled.
+        /// Skipped when nothing is being recorded.
+        /// </summary>
+        private async Task LiveTrickplaySection(RecordingEntry? cache, CancellationToken ct)
+        {
+            const string id = "trickplay.live", name = "Trickplay follows the active session";
+            if (cache is null || !cache.Live || _svc!.GetMedia(cache.RelativeFolder) is not { } media0)
+            {
+                Add(CheckResult.Skip(id, name, "Steam is not recording right now (no live cache session)"));
+                return;
+            }
+            var data = DataFolder.Open(Path.Combine(_temp!, "data-live"), Root);
+            data.EnsureCreated();
+            var options = new TrickplayOptions(DecodeMode.Cpu);
+
+            // Only the newest window: drop the head of the runs.
+            static SessionMedia Tail(SessionMedia m, int chunks)
+            {
+                var keep = new List<SegmentRun>();
+                var left = chunks;
+                for (var i = m.Runs.Count - 1; i >= 0 && left > 0; i--)
+                {
+                    var r = m.Runs[i];
+                    var take = Math.Min(left, r.Count);
+                    keep.Insert(0, r with { First = r.Last - take + 1 });
+                    left -= take;
+                }
+                return m with { Runs = keep };
+            }
+
+            var arrived = new SemaphoreSlim(0);
+            void OnMedia(string folder, SessionMedia? m) { if (m is not null && folder == cache.RelativeFolder) arrived.Release(); }
+            _svc.MediaChanged += OnMedia;
+            try
+            {
+                var first = TrickplayLive.Buildable(Tail(media0, LiveWindowChunks));
+                if (first is null) { Add(CheckResult.Skip(id, name, "the live session has no finished chunk yet")); return; }
+                var r0 = await Trickplay.GenerateAsync(data, "live", first, options, null, ct).ConfigureAwait(false);
+                var lastBuilt = first.LastChunk;
+                var latencies = new List<double>();
+                var cpu = new List<double>();
+                var tiles = 0;
+                var deadline = Stopwatch.StartNew();
+                while (latencies.Count < LiveWantedChunks && deadline.Elapsed < LiveWait && !ct.IsCancellationRequested)
+                {
+                    if (!await arrived.WaitAsync(LiveWait - deadline.Elapsed, ct).ConfigureAwait(false)) break;
+                    var sw = Stopwatch.StartNew();
+                    var cur = _svc.GetMedia(cache.RelativeFolder);
+                    var buildable = cur is null ? null : TrickplayLive.Buildable(Tail(cur, LiveWindowChunks));
+                    if (buildable is null || buildable.LastChunk <= lastBuilt) continue;
+                    var proc = Process.GetCurrentProcess();
+                    var cpu0 = proc.TotalProcessorTime;
+                    var r = await Trickplay.GenerateAsync(data, "live", buildable, options, null, ct).ConfigureAwait(false);
+                    proc.Refresh();
+                    if (r.NewChunks <= 0) continue;
+                    latencies.Add(sw.Elapsed.TotalMilliseconds);
+                    cpu.Add((proc.TotalProcessorTime - cpu0).TotalMilliseconds / r.NewChunks);
+                    tiles += r.NewChunks;
+                    lastBuilt = buildable.LastChunk;
+                }
+                if (latencies.Count == 0)
+                {
+                    Add(CheckResult.Fail(id, name, $"no new tile within {F(LiveWait.TotalSeconds, "0")} s although the session is live ({r0.NewChunks} tiles at start)"));
+                    return;
+                }
+                var worst = latencies.Max();
+                var interval = media0.SegmentSeconds * 1000;
+                Add(CheckResult.From(worst < interval, id, name,
+                    $"{r0.NewChunks} tiles at start, then {tiles} new tile(s) in {latencies.Count} update(s); worst build latency {F(worst)} ms of {F(interval, "0")} ms (one chunk), {F(cpu.Average())} ms CPU per tile",
+                    number: worst, unit: "ms", budget: "< " + F(interval, "0") + " ms"));
+            }
+            finally { _svc.MediaChanged -= OnMedia; }
         }
 
         // ---- rig -------------------------------------------------------------------------------------------------------

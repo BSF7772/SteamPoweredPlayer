@@ -130,7 +130,7 @@
                             </Grid>
 
                             <Grid x:Name="CacheHost" SizeChanged="CacheHost_SizeChanged">
-                                <Canvas x:Name="StripCanvas" Height="84" />
+                                <Canvas x:Name="StripCanvas" Height="112" />
                                 <local:EmptyState x:Name="CacheEmpty" Emoji="⏺️" Title="No cache sessions" Visibility="Collapsed"
                                                   Message="When Steam records this game in the background, the last stretch shows up here." />
                             </Grid>

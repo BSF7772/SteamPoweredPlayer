@@ -40,6 +40,7 @@ public sealed class LibraryServiceSource : ILibrarySource, IDisposable
         _service = new LibraryService(new LibraryServiceOptions { RecordingRoot = recordingRoot, DataFolder = data, Names = names });
         _service.IndexChanged += OnIndexChanged;
         _service.MediaChanged += OnMediaChanged;
+        _service.MarkersChanged += OnMarkersChanged;
         _service.StatusChanged += OnStatusChanged;
         _service.ProgressChanged += OnProgress;
     }
@@ -114,6 +115,9 @@ public sealed class LibraryServiceSource : ILibrarySource, IDisposable
 
     private void OnMediaChanged(string folder, SessionMedia? media) =>
         _ui.TryEnqueue(() => MediaChanged?.Invoke(this, new MediaChangedArgs(folder, media)));
+
+    /// <summary>Steam rewrote a timeline while recording: the markers already shown are loaded again (the index entry may be unchanged).</summary>
+    private void OnMarkersChanged(IReadOnlyCollection<string> folders) => _ui.TryEnqueue(() => RefreshMarkersOf(folders));
 
     private void OnStatusChanged(LibraryStatus status) => _ui.TryEnqueue(() => ApplyStatus(status));
 
