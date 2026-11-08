@@ -254,6 +254,21 @@ internal static partial class UiCheck
                     await Nav("NavLibrary", typeof(LibraryPage), $"nav.library.{round}", $"Settings -> Library ({round}/3)");
                 }
                 await Capture("library-again");
+
+                // Downloads, listing the real library as if it were remote. In memory only: settings.json is not written.
+                Step("downloads");
+                var root = AppServices.Steam.RecordingsPath;
+                if (root is not null) AppServices.Settings.NetworkLibraries.Insert(0, root);
+                await Nav("NavDownloads", typeof(DownloadsPage), "nav.downloads", "Downloads page opens from the title bar");
+                if (root is not null)
+                {
+                    var listed = await WaitFor(() => Find("DownloadsStatus") is TextBlock { Text: var t } && t.Contains("recording", StringComparison.Ordinal), 120);
+                    Add(CheckResult.From(listed, "downloads.list", "Downloads lists a library read-only", listed ? "recordings listed" : "no list within 120 s"));
+                    await Capture("downloads");
+                    AppServices.Settings.NetworkLibraries.Remove(root);
+                }
+                Step("downloads-to-library");
+                await Nav("NavLibrary", typeof(LibraryPage), "nav.library.downloads", "Downloads -> Library");
             }
 
             if (Runs("cache") && cache is not null)

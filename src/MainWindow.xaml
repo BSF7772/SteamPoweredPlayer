@@ -43,6 +43,9 @@
                 <SelectorBarItem x:Name="NavLibrary" AutomationProperties.AutomationId="NavLibrary" Text="Library" Tag="library">
                     <SelectorBarItem.Icon><FontIcon Glyph="&#xE8F1;" /></SelectorBarItem.Icon>
                 </SelectorBarItem>
+                <SelectorBarItem x:Name="NavDownloads" AutomationProperties.AutomationId="NavDownloads" Text="Downloads" Tag="downloads">
+                    <SelectorBarItem.Icon><FontIcon Glyph="&#xE896;" /></SelectorBarItem.Icon>
+                </SelectorBarItem>
                 <SelectorBarItem x:Name="NavSettings" AutomationProperties.AutomationId="NavSettings" Text="Settings" Tag="settings">
                     <SelectorBarItem.Icon><FontIcon Glyph="&#xE713;" /></SelectorBarItem.Icon>
                 </SelectorBarItem>

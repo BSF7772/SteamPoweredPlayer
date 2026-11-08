@@ -110,6 +110,7 @@ public sealed partial class MainWindow : Window
         switch (AppServices.Options.Page)
         {
             case "settings": ContentFrame.Navigate(typeof(SettingsPage)); break;
+            case "downloads": ContentFrame.Navigate(typeof(DownloadsPage)); break;
             case "player": ContentFrame.Navigate(typeof(PlayerPage), new PlayerRequest("sample")); break;
             default: ContentFrame.Navigate(typeof(LibraryPage)); break;
         }
@@ -156,7 +157,7 @@ public sealed partial class MainWindow : Window
     private void Nav_SelectionChanged(SelectorBar sender, SelectorBarSelectionChangedEventArgs args)
     {
         if (_syncingNav || sender.SelectedItem is not { } item) return;
-        var target = item.Tag as string == "settings" ? typeof(SettingsPage) : typeof(LibraryPage);
+        var target = (item.Tag as string) switch { "settings" => typeof(SettingsPage), "downloads" => typeof(DownloadsPage), _ => typeof(LibraryPage) };
         if (ContentFrame.CurrentSourcePageType != target)
             ContentFrame.Navigate(target, null, new EntranceNavigationTransitionInfo());
     }
@@ -164,7 +165,7 @@ public sealed partial class MainWindow : Window
     private void SyncNav(Type page)
     {
         _syncingNav = true;
-        Nav.SelectedItem = page == typeof(LibraryPage) ? NavLibrary : page == typeof(SettingsPage) ? NavSettings : null;
+        Nav.SelectedItem = page == typeof(LibraryPage) ? NavLibrary : page == typeof(DownloadsPage) ? NavDownloads : page == typeof(SettingsPage) ? NavSettings : null;
         _syncingNav = false;
     }
 

@@ -43,6 +43,12 @@ public sealed class AppSettings
     /// <summary>Audio delay in seconds applied to every recording of a game, by game id.</summary>
     public Dictionary<string, double> GameAudioDelays { get; set; } = [];
 
+    /// <summary>Other PCs' recording folders, as the user chose them.</summary>
+    public List<string> NetworkLibraries { get; set; } = [];
+
+    /// <summary>Cap of the download cache; the least recently used chunks of unpinned recordings go first.</summary>
+    public int DownloadCacheGb { get; set; } = 50;
+
     public static string FilePath => Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "SteamPoweredPlayer", "settings.json");
 

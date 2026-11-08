@@ -192,6 +192,15 @@ public sealed class ExportEditEndToEndTests : IDisposable
     }
 
     [Fact]
+    public async Task Lossless_with_an_audio_delay_keeps_both_streams_and_the_length()
+    {
+        var job = Job(Copy, new ExportSpan(O, O + 6)) with { AudioDelay = 0.25 };
+        var info = await Ff.ProbeAsync((await ExportService.RunAsync(job, null, default)).Path);
+        Assert.True(info!.HasAudio);
+        Assert.InRange(info.Duration, 5.5, 6.6);
+    }
+
+    [Fact]
     public async Task Markers_become_chapters_on_the_output_axis()
     {
         var job = Job(X264, new(O, O + 2), new(O + 8, O + 10)) with

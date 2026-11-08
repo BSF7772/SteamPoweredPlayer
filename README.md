@@ -44,7 +44,7 @@ FastEncoder is a git submodule (`external/FastEncoder`), and its `src/Core` file
 - **Delete with care**: off until you enable it, clips only (never Steam's cache), Recycle Bin by default, and every delete confirmed.
 
 Keys: `Space` play/pause · `I` / `O` set start/end · `R` reset trim · `← →` ±5 s · `, .` frame step · `[ ]` previous/next event ·
-`J K L` slower/pause/faster · `F` fullscreen · `Ctrl+E` export · `Ctrl+F` search
+`J K L` slower/pause/faster · `F` fullscreen · `Ctrl+E` export · `S` screenshot · `Ctrl+F` search
 
 ## Android
 - **Server profiles**, as many as you like per library, e.g. one for home LAN and one for Tailscale or another VPN. The app uses

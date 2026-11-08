@@ -3,6 +3,8 @@ using System.Globalization;
 using FastEncoder.Core;
 using SteamPoweredPlayer.Core.Export;
 using SteamPoweredPlayer.Core.Library;
+using SteamPoweredPlayer.Core.Net;
+using SteamPoweredPlayer.Core.Steam;
 
 namespace SteamPoweredPlayer.Core.Diagnostics;
 
@@ -89,6 +91,50 @@ public static class ExportSelfChecks
         var after = await AudioSync.DetectAsync(fixedFile.Path, 0, info?.Duration ?? 18, null, ct).ConfigureAwait(false);
         return CheckResult.From(after.Confidence == AudioSync.Confidence.High && AudioSync.InSync(after.AudioLate), id, name,
             $"measured {(-advice.AudioDelay).ToString("+0.000;-0.000", inv)} s; after the fix {after.AudioLate.ToString("+0.000;-0.000", inv)} s ({after.Confidence})");
+    }
+
+    /// <summary>Every third file's connection dies halfway through; the download must finish and match the source byte for byte.</summary>
+    public static async Task<CheckResult> InterruptedDownloadAsync(SessionMedia media, string scratch, CancellationToken ct)
+    {
+        const string id = "net.download", name = "Interrupted download resumes without corruption";
+        var chunks = media.Chunks().Take(6).ToList();
+        var cacheDir = Path.Combine(scratch, "cache");
+        var files = new DyingFiles();
+        var cache = await LocalChunkCache.OpenAsync(cacheDir, 1L << 30, ct).ConfigureAwait(false);
+        var result = await new ChunkDownloader(cache, files, parallel: 1).RunAsync(new DownloadRequest("net-selftest", "clip", media, chunks), null, ct).ConfigureAwait(false);
+        var local = Path.Combine(cacheDir, "net-selftest", "clip");
+        var names = chunks.SelectMany(c => new[] { FolderNames.ChunkFile(0, c), FolderNames.ChunkFile(1, c) }).Concat([FolderNames.InitFile(0), FolderNames.InitFile(1)]);
+        var different = names.Count(n => !File.Exists(Path.Combine(local, n))
+            || !File.ReadAllBytes(Path.Combine(local, n)).AsSpan().SequenceEqual(File.ReadAllBytes(Path.Combine(media.Folder, n))));
+        return CheckResult.From(result.State == DownloadState.Done && different == 0 && files.Killed > 0, id, name,
+            $"{files.Killed} connections killed, {result.Done}/{result.Total} files, {different} different");
+    }
+
+    private sealed class DyingFiles : IRemoteFiles
+    {
+        private readonly SharedFolderFiles _real = new();
+        private int _opens;
+        public int Killed { get; private set; }
+
+        public ValueTask<long?> SizeAsync(string path, CancellationToken ct) => _real.SizeAsync(path, ct);
+
+        public Stream Open(string path)
+        {
+            var bytes = File.ReadAllBytes(path);
+            if (++_opens % 3 != 0) return new MemoryStream(bytes);
+            Killed++;
+            return new ConcatFailure(bytes[..(bytes.Length / 2)]);
+        }
+    }
+
+    /// <summary>Delivers its bytes, then fails like a dropped connection instead of ending.</summary>
+    private sealed class ConcatFailure(byte[] bytes) : MemoryStream(bytes)
+    {
+        public override ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default)
+        {
+            var n = Read(buffer.Span);
+            return n > 0 ? new(n) : throw new IOException("connection reset");
+        }
     }
 
     private static async Task<string> ColourRangeAsync(string path, CancellationToken ct)

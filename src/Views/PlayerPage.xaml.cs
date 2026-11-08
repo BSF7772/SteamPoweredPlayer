@@ -242,12 +242,13 @@ public sealed partial class PlayerPage : Page
         UpdateLoopUi();
         _entry = lib?.Current?.Recordings.FirstOrDefault(r => r.RelativeFolder == key);
         BuildPlaylist();
+        if (Request is { Title: { } title } request && request.RecordingKey == key) GameText.Text = title;
         ResetExportEdits();
         Timeline.ResetZoom();
         ClearEvents();
         ShowStatus("Opening…", null, busy: true);
 
-        var media = lib?.GetMedia(key);
+        var media = Request is { Media: { } requested } asked && asked.RecordingKey == key ? requested : lib?.GetMedia(key);
         if (media is null || media.ChunkCount == 0)
         {
             ShowStatus("This recording isn't available", "Steam may have removed it, or its files are not readable.", icon: true);
@@ -1184,6 +1185,7 @@ public sealed partial class PlayerPage : Page
             case (int)VirtualKey.A: SetAbPoint('A'); break;
             case (int)VirtualKey.B: SetAbPoint('B'); break;
             case (int)VirtualKey.S: _ = TakeScreenshotAsync(); break;
+            case (int)VirtualKey.E when Down(VirtualKey.Control): if (SelectedPreset is { } exportPreset) _ = EnqueueAsync(exportPreset); break;
             case (int)VirtualKey.N: NextEvent(); break;
             case (int)VirtualKey.P: PreviousEvent(); break;
             case (int)VirtualKey.Home: if (_session?.Media is not null) RunSeek(() => _host!.SeekAsync(_session.MediaStartSeconds)); break;
