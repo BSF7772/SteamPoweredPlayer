@@ -131,19 +131,44 @@ public static class ScanManifest
         }
     }
 
+    /// <summary>
+    /// The start of the manifest as text (up to <see cref="TextLength"/> bytes), or null when it is missing, empty, unreadable or only zero
+    /// bytes. Only <see cref="ClipBounds"/> uses it, for saved clips.
+    /// </summary>
+    public static async ValueTask<string?> ReadTextAsync(string path, CancellationToken ct)
+    {
+        try
+        {
+            var (buf, read) = await ReadStartAsync(path, TextLength, ct).ConfigureAwait(false);
+            var span = buf.AsSpan(0, read);
+            return span.IsEmpty || span.IndexOfAnyExcept((byte)0) < 0 ? null : Encoding.UTF8.GetString(span);
+        }
+        catch (OperationCanceledException) { throw; }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException) { return null; }
+    }
+
+    /// <summary>A clip's manifest is about 1.7 KB; its <c>Period</c> element comes after the <c>MPD</c> one.</summary>
+    public const int TextLength = 8192;
+
+    private static async ValueTask<(byte[] Buffer, int Read)> ReadStartAsync(string path, int length, CancellationToken ct)
+    {
+        using var h = File.OpenHandle(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete, FileOptions.Asynchronous);
+        var buf = new byte[length];
+        var read = 0;
+        while (read < buf.Length)
+        {
+            var n = await RandomAccess.ReadAsync(h, buf.AsMemory(read), read, ct).ConfigureAwait(false);
+            if (n == 0) break;
+            read += n;
+        }
+        return (buf, read);
+    }
+
     public static async ValueTask<ManifestKind> ReadAsync(string path, CancellationToken ct)
     {
         try
         {
-            using var h = File.OpenHandle(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete, FileOptions.Asynchronous);
-            var buf = new byte[ReadLength];
-            var read = 0;
-            while (read < buf.Length)
-            {
-                var n = await RandomAccess.ReadAsync(h, buf.AsMemory(read), read, ct).ConfigureAwait(false);
-                if (n == 0) break;
-                read += n;
-            }
+            var (buf, read) = await ReadStartAsync(path, ReadLength, ct).ConfigureAwait(false);
             return Classify(buf.AsSpan(0, read));
         }
         catch (FileNotFoundException) { return ManifestKind.Missing; }

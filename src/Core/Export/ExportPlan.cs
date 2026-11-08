@@ -6,7 +6,9 @@ namespace SteamPoweredPlayer.Core.Export;
 /// <summary>
 /// The chunks an export reads for a range on the media (tfdt) axis. A lossless export reads from <see cref="SnappedStart"/> (only a chunk
 /// start is a keyframe) but plays from <see cref="Start"/>: the frames before it are hidden by an MP4 edit list. Both lossless and
-/// re-encoded exports end at <see cref="End"/>; a re-encode trims to <see cref="Start"/>..<see cref="End"/>.
+/// re-encoded exports end at <see cref="End"/>; a re-encode trims to <see cref="Start"/>..<see cref="End"/>. <see cref="Start"/> and
+/// <see cref="End"/> stay inside <see cref="SessionMedia.StartSeconds"/>..<see cref="SessionMedia.EndSeconds"/>, so what a saved clip
+/// holds beyond the part Steam meant is never shown; <see cref="SnappedEnd"/> is still the last chunk's end, because that chunk has to be read.
 /// </summary>
 /// <param name="GapSeconds">Chunks missing on disk inside the range: the output holds the picture over them.</param>
 public sealed record ExportPlan(int FirstChunk, int LastChunk, double Start, double End, double SnappedStart, double SnappedEnd, double GapSeconds)
@@ -17,7 +19,10 @@ public sealed record ExportPlan(int FirstChunk, int LastChunk, double Start, dou
     /// </summary>
     public static ExportPlan? For(SessionMedia media, double start, double end)
     {
-        if (!double.IsFinite(start) || !double.IsFinite(end) || end <= start) return null;
+        if (!double.IsFinite(start) || !double.IsFinite(end)) return null;
+        start = Math.Max(start, media.StartSeconds);        // a saved clip is the part Steam meant: its first and last chunks run past that
+        end = Math.Min(end, media.EndSeconds);
+        if (end <= start) return null;
         int? first = null, last = null;
         var count = 0;
         foreach (var chunk in media.Chunks())
@@ -48,7 +53,7 @@ public sealed record ExportPlan(int FirstChunk, int LastChunk, double Start, dou
 
     /// <summary>The whole recording, or null when it has no chunks.</summary>
     public static ExportPlan? Whole(SessionMedia media) =>
-        media.FirstChunk is { } a && media.LastChunk is { } b ? For(media, media.ChunkStartSeconds(a), media.ChunkEndSeconds(b)) : null;
+        media.ChunkCount > 0 ? For(media, media.StartSeconds, media.EndSeconds) : null;
 }
 
 /// <summary>Pure file-name and folder rules for exports.</summary>

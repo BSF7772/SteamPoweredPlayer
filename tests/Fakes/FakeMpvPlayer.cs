@@ -6,7 +6,7 @@ namespace SteamPoweredPlayer.Tests.Fakes;
 /// <summary>An <see cref="IMpvPlayer"/> that records loads. Loads complete at once unless <see cref="Gate"/> is set.</summary>
 public sealed class FakeMpvPlayer : IMpvPlayer
 {
-    public sealed record Load(string Edl, double Start, bool Play);
+    public sealed record Load(string Edl, double Start, bool Play, double? End = null);
 
     public List<Load> Loads { get; } = [];
     public bool Paused { get; private set; } = true;
@@ -22,9 +22,9 @@ public sealed class FakeMpvPlayer : IMpvPlayer
     public event Action<bool>? EofReachedChanged;
     public event Action<MpvEndFile>? EndFile;
 
-    public async Task<bool> LoadAsync(string edl, double startSeconds, bool play, CancellationToken cancellationToken = default)
+    public async Task<bool> LoadAsync(string edl, double startSeconds, bool play, double? endSeconds = null, CancellationToken cancellationToken = default)
     {
-        lock (Loads) Loads.Add(new Load(edl, startSeconds, play));
+        lock (Loads) Loads.Add(new Load(edl, startSeconds, play, endSeconds));
         Paused = !play;
         var gate = Gate;
         if (gate is not null) await gate.Task.WaitAsync(cancellationToken);

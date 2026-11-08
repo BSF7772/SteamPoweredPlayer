@@ -312,13 +312,13 @@ public sealed class MpvPlayer : IMpvPlayer
     /// 95 ms pre-warmed). Loads paused; the next <see cref="LoadAsync"/> replaces it.
     /// </summary>
     public Task<bool> PreWarmAsync(string tinyEdl, double startSeconds = 0, CancellationToken cancellationToken = default) =>
-        LoadAsync(tinyEdl, startSeconds, play: false, cancellationToken);
+        LoadAsync(tinyEdl, startSeconds, play: false, cancellationToken: cancellationToken);
 
-    public Task<bool> LoadAsync(string edl, double startSeconds, bool play, CancellationToken cancellationToken = default) =>
-        LoadAsync(edl, startSeconds, play, DefaultLoadTimeout, cancellationToken);
+    public Task<bool> LoadAsync(string edl, double startSeconds, bool play, double? endSeconds = null, CancellationToken cancellationToken = default) =>
+        LoadAsync(edl, startSeconds, play, DefaultLoadTimeout, cancellationToken, endSeconds);
 
     /// <inheritdoc cref="IMpvPlayer.LoadAsync"/>
-    public async Task<bool> LoadAsync(string edl, double startSeconds, bool play, TimeSpan timeout, CancellationToken cancellationToken = default)
+    public async Task<bool> LoadAsync(string edl, double startSeconds, bool play, TimeSpan timeout, CancellationToken cancellationToken = default, double? endSeconds = null)
     {
         ArgumentException.ThrowIfNullOrEmpty(edl);
         cancellationToken.ThrowIfCancellationRequested();
@@ -332,6 +332,7 @@ public sealed class MpvPlayer : IMpvPlayer
         {
             SetFlag("pause", !play);                   // `pause` survives loadfile (S1): always explicit
             var start = "start=" + startSeconds.ToString("R", CultureInfo.InvariantCulture);
+            if (endSeconds is { } end && double.IsFinite(end) && end > startSeconds) start += ",end=" + end.ToString("R", CultureInfo.InvariantCulture);
             var rc = await CommandAsync("loadfile", EdlSource(edl), "replace", "-1", start).ConfigureAwait(false);
             if (rc < 0) throw new MpvException($"loadfile: {MpvNative.ErrorString(rc)}", rc);
             var restarted = await wait.Tcs.Task.WaitAsync(timeout, cancellationToken).ConfigureAwait(false);

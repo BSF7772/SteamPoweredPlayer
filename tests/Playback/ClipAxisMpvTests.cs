@@ -145,7 +145,7 @@ public sealed class ClipAxisMpvTests
         var fps = p.GetDouble("container-fps") is var f && f > 0 ? f : 60;
         var frame = 1 / fps;
         Assert.InRange(s.UiPosition, 0, 0.1);                      // real chunks start up to ~0.07 s after the grid
-        Assert.Equal(media.ChunkCount * 3.0, s.UiDuration);
+        Assert.Equal(media.DurationSeconds, s.UiDuration, 6);       // the chunks' length, less the tail past Steam's intended end
 
         await s.SeekUiAsync(5);
         Assert.InRange(s.MediaToUi(p.GetDouble("time-pos")), 5 - frame - 0.005, 5 + frame + 0.005);

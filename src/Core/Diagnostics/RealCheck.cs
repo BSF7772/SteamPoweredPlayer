@@ -245,7 +245,7 @@ public static class RealCheck
         {
             report.AddHeader(string.Create(CultureInfo.InvariantCulture,
                 $"{char.ToUpperInvariant(label[0])}{label[1..]}: {media.ChunkCount} chunks ({F(media.DurationSeconds)} s), {media.Runs.Count} run(s), axis shift {(media.AxisShiftSeconds == 0 ? "0" : "> 0")}, live {media.Live}"));
-            var mediaStart = media.TfdtOriginSeconds;
+            var mediaStart = media.StartSeconds;
             var start = tail ? PlaybackSession.Snap(media, media.ChunkEndSeconds(media.LastChunk!.Value) - RealCheckRules.CacheTailSeconds) : mediaStart;
 
             await using var rig = CreateRig();
@@ -378,7 +378,7 @@ public static class RealCheck
             var fps = ChunkFrameRate.Measure(media) ?? mpvFps;   // what the Player uses: mpv's rate can flip between reloads
             var frame = 1 / fps;
             var mpvRates = new HashSet<string> { mpvFps.ToString("0.##", CultureInfo.InvariantCulture) };
-            var mediaStart = media.TfdtOriginSeconds;
+            var mediaStart = media.StartSeconds;
             // 4 frames after the first chunk boundary inside the opened range: 10 steps cross it
             var from = PlaybackSession.Snap(media, start + media.SegmentSeconds + 4 * frame);
             s.SetPause(true);
@@ -468,7 +468,7 @@ public static class RealCheck
         {
             var set = await _svc!.LoadMarkersAsync(entry.RelativeFolder, ct).ConfigureAwait(false);
             var place = Markers.Place(set.Markers, media);
-            double lo = media.TfdtOriginSeconds, hi = media.LastChunk is { } l ? media.ChunkEndSeconds(l) : lo;
+            double lo = media.StartSeconds, hi = media.LastChunk is { } l ? media.ChunkEndSeconds(l) : lo;
             var outside = place.Visible.Count(m => (m.EndSeconds ?? m.StartSeconds) < lo || m.StartSeconds >= hi);
             var trimmed = place.TrimmedAway.GroupBy(t => t.Reason).ToDictionary(g => g.Key, g => g.Count());
             int T(TrimReason r) => trimmed.GetValueOrDefault(r);
@@ -512,7 +512,7 @@ public static class RealCheck
             var gapStart = media.ChunkEndSeconds(media.Runs[0].Last);
             var next = media.ChunkStartSeconds(media.Runs[1].First);
             await using var rig = CreateRig();
-            await rig.Session.OpenAsync(media, media.TfdtOriginSeconds, play: false, ct).ConfigureAwait(false);
+            await rig.Session.OpenAsync(media, media.StartSeconds, play: false, ct).ConfigureAwait(false);
             await rig.Session.SeekAsync((gapStart + next) / 2, ct).ConfigureAwait(false);
             var fps = Fps(rig);
             Add(CheckResult.From(RealCheckRules.WithinFrames(next, rig.TimePos, fps), "gap", "Seek into a gap lands on the next run",

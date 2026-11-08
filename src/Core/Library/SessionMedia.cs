@@ -24,8 +24,12 @@ public sealed record SegmentRun(int First, int Last)
 /// when the head is trimmed, so <c>media with { Runs = … }</c> stays correct.</param>
 /// <param name="BitsPerSecond">Measured average bitrate of the complete chunks (both streams), or null when unknown; sizes mpv's demuxer
 /// cache (<see cref="Playback.DemuxerCache"/>).</param>
+/// <param name="EndLimitSeconds">Saved clips only: where Steam meant the clip to end (media time), from <see cref="ClipBounds"/>. A clip keeps
+/// whole chunks, so its last chunk runs 0 to 3 s past it (picture and sound alike). Null for a cache session, for a clip whose manifest
+/// can't say, and whenever it isn't before the last chunk's end.</param>
+/// <param name="StartLimitSeconds">Saved clips only: where Steam meant the clip to start, the same way. Its first chunk starts 0 to 3 s before it.</param>
 public sealed record SessionMedia(string Folder, IReadOnlyList<SegmentRun> Runs, double SegmentSeconds, bool Live, bool Temporary,
-    double AxisShiftSeconds = 0, double? BitsPerSecond = null)
+    double AxisShiftSeconds = 0, double? BitsPerSecond = null, double? EndLimitSeconds = null, double? StartLimitSeconds = null)
 {
     public const double DefaultSegmentSeconds = 3.0;
 
@@ -33,8 +37,29 @@ public sealed record SessionMedia(string Folder, IReadOnlyList<SegmentRun> Runs,
     public int? FirstChunk => Runs.Count > 0 ? Runs[0].First : null;
     public int? LastChunk => Runs.Count > 0 ? Runs[^1].Last : null;
 
-    /// <summary>Playable length (chunks × segment length); gaps are not counted. mpv's own duration is unreliable with an EDL.</summary>
-    public double DurationSeconds => ChunkCount * SegmentSeconds;
+    /// <summary>
+    /// Playable length (chunks × segment length, less what a saved clip's limits cut off its first and last chunks); gaps are
+    /// not counted. mpv's own duration is unreliable with an EDL.
+    /// </summary>
+    public double DurationSeconds => ChunkCount * SegmentSeconds - TrimmedHeadSeconds - TrimmedTailSeconds;
+
+    /// <summary>
+    /// The start of the playable media on the media axis: the first chunk's start, or the clip's intended start when that is later. 0
+    /// without chunks. Playback, the timeline, seeking, markers and every export start here.
+    /// </summary>
+    public double StartSeconds => FirstChunk is { } f ? Math.Max(ChunkStartSeconds(f), StartLimitSeconds ?? double.NegativeInfinity) : 0;
+
+    /// <summary>How much of the first chunk lies before <see cref="StartSeconds"/> (0 without a limit).</summary>
+    public double TrimmedHeadSeconds => FirstChunk is { } f ? Math.Max(0, StartSeconds - ChunkStartSeconds(f)) : 0;
+
+    /// <summary>
+    /// The end of the playable media on the media axis: the last chunk's end, or the clip's intended end when that is earlier. 0 without
+    /// chunks. Playback, the timeline, seeking, markers and every export stop here.
+    /// </summary>
+    public double EndSeconds => LastChunk is { } l ? Math.Min(ChunkEndSeconds(l), EndLimitSeconds ?? double.PositiveInfinity) : 0;
+
+    /// <summary>How much of the last chunk lies past <see cref="EndSeconds"/> (0 without a limit).</summary>
+    public double TrimmedTailSeconds => LastChunk is { } l ? Math.Max(0, ChunkEndSeconds(l) - EndSeconds) : 0;
 
     /// <summary>Media (tfdt) time of the first chunk on disk; 0 when there is none.</summary>
     public double TfdtOriginSeconds => FirstChunk is { } f ? ChunkStartSeconds(f) : 0;

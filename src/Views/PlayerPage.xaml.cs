@@ -256,8 +256,8 @@ public sealed partial class PlayerPage : Page
             return;
         }
 
-        var first = media.ChunkStartSeconds(media.FirstChunk!.Value);
-        var last = media.ChunkEndSeconds(media.LastChunk!.Value);          // clips: on the tfdt axis (AxisShiftSeconds)
+        var first = media.StartSeconds;                                    // clips: on the tfdt axis (AxisShiftSeconds), the part Steam meant
+        var last = media.EndSeconds;
         double? startMedia = null;
         var resumed = false;
         if (startUi is { } s) startMedia = first + s;
