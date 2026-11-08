@@ -14,6 +14,13 @@ import org.codelibs.jcifs.smb.impl.SmbFile
 class SmbRemoteFiles(private val profile: ServerProfile, password: String) : RemoteFiles {
     private val context: CIFSContext = SmbClient.context(profile, password)
 
+    override fun list(relativeFolder: String): List<String> = guarded(relativeFolder) {
+        SmbFile(profile.url(relativeFolder.trimEnd('/') + "/"), context).use { folder ->
+            if (!folder.exists()) throw RemoteFileGone(relativeFolder)
+            folder.list().toList()
+        }
+    }
+
     override fun size(relativePath: String): Long = guarded(relativePath) {
         SmbFile(profile.url(relativePath), context).use { f ->
             if (!f.exists()) throw RemoteFileGone(relativePath)

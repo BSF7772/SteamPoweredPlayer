@@ -29,4 +29,12 @@
     <string name="field_domain">Domain (optional)</string>
     <string name="field_password">Password</string>
     <string name="field_require_encryption">Require encryption</string>
+    <string name="download_channel">Downloads</string>
+    <string name="download_title">Downloading a recording</string>
+    <string name="download_progress">%1$d of %2$d files · %3$s so far</string>
+    <string name="download_reconnecting">Reconnecting…</string>
+    <string name="download_cannot_reach">Can\'t reach %1$s</string>
+    <string name="metered_notice">Downloading on a metered connection or with Data Saver on.</string>
+    <string name="dont_show_again">Don\'t show again</string>
+    <string name="ok">OK</string>
 </resources>

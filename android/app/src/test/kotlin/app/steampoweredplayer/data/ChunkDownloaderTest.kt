@@ -37,6 +37,8 @@ class ChunkDownloaderTest {
         val opened = ArrayList<Pair<String, Long>>()
         private val dropped = HashSet<String>()
 
+        override fun list(relativeFolder: String): List<String> = emptyList()
+
         override fun size(relativePath: String): Long {
             if (down) throw IOException("down")
             if (relativePath.substringAfterLast('/') in gone) throw RemoteFileGone(relativePath)

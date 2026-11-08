@@ -36,6 +36,7 @@ cd android; .\gradlew testItestUnitTest assembleDebug   # phone app (unit tests 
 tools\bootstrap.ps1 -Android -Emulator   # adds the emulator and its system image (about 2.4 GB download); needs Windows Hypervisor Platform
 tools\emu.ps1 start                      # create the AVD when missing, boot headless (-Window for a window); also: check, stop, delete
 cd android; .\gradlew connectedItestAndroidTest         # instrumented tests on the running emulator, as app.steampoweredplayer.itest
+tools\emu-download.ps1 -Folder <media folder in the share> -ShareRoot <share's folder> -Cut network   # real download with the saved credentials, compared by SHA-256; also -Cut kill, unreachable, none
 ```
 Never uninstall `app.steampoweredplayer` from the emulator or wipe its AVD: its data holds server passwords the maintainer typed, which can't be exported. Update it with `adb install -r`.
 The emulator can't prove real-phone decode and encode speed, codec quirks, heat, Wi-Fi roaming or a hardware-backed Keystore: never report those as verified from it. It reaches the host's SMB server at `10.0.2.2`.

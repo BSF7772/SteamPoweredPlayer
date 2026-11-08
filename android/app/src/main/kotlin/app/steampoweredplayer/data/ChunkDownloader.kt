@@ -20,6 +20,8 @@ class RemoteFileGone(path: String) : IOException("gone: $path")
 
 /** One way to read the library, read-only. Blocking calls; a failure is an [IOException]. */
 interface RemoteFiles {
+    /** The file names in a folder. Throws [RemoteFileGone] when the folder isn't there. */
+    fun list(relativeFolder: String): List<String>
     fun size(relativePath: String): Long
     fun open(relativePath: String, offset: Long): InputStream
 }

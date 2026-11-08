@@ -32,6 +32,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
@@ -41,6 +42,7 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import app.steampoweredplayer.R
 import app.steampoweredplayer.data.ProfileProblem
 import app.steampoweredplayer.data.ServerProfile
+import app.steampoweredplayer.net.Downloads
 import app.steampoweredplayer.smb.ConnectionInfo
 import app.steampoweredplayer.smb.ConnectionResult
 import app.steampoweredplayer.smb.RefusedReason
@@ -56,6 +58,17 @@ fun HomeScreen(vm: ServersViewModel = viewModel()) {
         ) {
             Column(Modifier.fillMaxWidth().background(Brand.Gradient, MaterialTheme.shapes.large).padding(20.dp)) {
                 Text(stringResource(R.string.app_name), color = Color.White, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
+            }
+            val context = LocalContext.current
+            val meteredNotice by Downloads.meteredNotice.collectAsState()
+            if (meteredNotice) {
+                SppCard {
+                    Text(stringResource(R.string.metered_notice), style = MaterialTheme.typography.bodyMedium)
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        TextButton({ Downloads.closeMeteredNotice(context, forever = false) }) { Text(stringResource(R.string.ok)) }
+                        TextButton({ Downloads.closeMeteredNotice(context, forever = true) }) { Text(stringResource(R.string.dont_show_again)) }
+                    }
+                }
             }
             val editing = state.editing
             if (editing != null) {
