@@ -73,6 +73,18 @@ public sealed class PlaybackSessionFrameBackTests
     }
 
     [Fact]
+    public async Task One_slow_step_does_not_disable_exact_backs()
+    {
+        var (s, p, pts) = await OpenAtAsync(100);
+        s.FrameProbeTimeout = TimeSpan.FromMilliseconds(30);
+        p.SilentSteps = 1;                                   // a frame step that reports nothing in time (a slow decode)
+        await s.StepBackAsync(1 / 59.094);
+        await s.SeekAsync(pts[200] - 0.0003);
+        await s.StepBackAsync(1 / 59.094);
+        Assert.Equal(pts[199], p.TimePos);
+    }
+
+    [Fact]
     public async Task Without_readable_frame_times_a_back_falls_back_to_one_nominal_frame()
     {
         var p = new FakeMpvPlayer();

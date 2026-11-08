@@ -44,6 +44,9 @@ public sealed class FakeMpvPlayer : IMpvPlayer
     public double[]? FramePts { get; set; }
     private int _index;
 
+    /// <summary>This many coming frame steps report no new time (a decode too slow for the probe's timeout).</summary>
+    public int SilentSteps { get; set; }
+
     public int LoadCount { get { lock (Loads) return Loads.Count; } }
 
     public void Tick(double t) { TimePos = t; TimePosChanged?.Invoke(t); }
@@ -68,6 +71,7 @@ public sealed class FakeMpvPlayer : IMpvPlayer
         FrameSteps++;
         Paused = true;
         if (FramePts is not { Length: > 0 } pts || _index + 1 >= pts.Length) return;
+        if (SilentSteps > 0) { SilentSteps--; return; }
         _index++;
         Tick(pts[_index]);
     }

@@ -58,6 +58,7 @@ public sealed class PlaybackSession : IAsyncDisposable
     private string _edl = "";
     private bool _userPaused;
     private double? _loopA, _loopB;
+    private bool _loopEngaged;                           // the playhead was put inside A-B: reaching B wraps. A seek outside lets it play on.
     private double _position = double.NaN, _lastTick, _playedSinceLoad;
     private bool _reloading, _pumping, _atEnd, _disposed;
     private PendingReload? _pending;
@@ -66,7 +67,9 @@ public sealed class PlaybackSession : IAsyncDisposable
     private sealed record PendingReload(double Position, ReloadCause Cause, bool Force, bool? Play, int Back = 0, double Origin = 0, double Frame = 0);
 
     private List<double>? _frames;                       // consecutive frame pts found by the last probe (a lookup by value, so it never goes stale by seeking)
-    private bool _probeBroken;                           // the player did not report a time per frame step: back-steps fall back to one nominal frame
+    private int _probeTimeouts;                          // probes in a row whose frame step reported no time; at the limit, back-steps stay one nominal frame
+    private const int ProbeTimeoutLimit = 3;             // one slow decode must not give up exact back-steps for the whole recording
+    private const double LoopEdgeSeconds = 0.02;         // a seek this close before A counts as inside the zone
 
     /// <summary>How long a probe waits for the player to report the frame it stepped to before giving up on exact back-steps.</summary>
     public TimeSpan FrameProbeTimeout { get; set; } = TimeSpan.FromMilliseconds(500);
@@ -141,7 +144,7 @@ public sealed class PlaybackSession : IAsyncDisposable
             _window = [];
             _userPaused = !play;
             _frames = null;
-            _probeBroken = false;
+            _probeTimeouts = 0;
         }
         try { _player.SetDemuxerCache(DemuxerCache.For(media)); }
         catch (Exception e) when (e is MpvException or ObjectDisposedException) { /* keep the start-up cache size */ }
@@ -193,17 +196,23 @@ public sealed class PlaybackSession : IAsyncDisposable
     /// <summary>
     /// The A-B loop, driven by the session: when the position reaches B it reloads at A (the seek-by-reload rule). mpv's own ab-loop
     /// seeks inside the EDL, revisits a chunk and then wraps early (P1: every lap after the first was a fraction of A→B), so it stays off.
-    /// Both ends in media seconds; null or B ≤ A clears it.
+    /// Both ends in media seconds; null or B ≤ A clears it. A new loop starts active; a seek then decides (<see cref="LoopEngaged"/>).
     /// </summary>
     public void SetLoop(double? a, double? b)
     {
         lock (_gate)
         {
-            if (a is { } x && b is { } y && double.IsFinite(x) && double.IsFinite(y) && y > x) { _loopA = x; _loopB = y; }
-            else { _loopA = null; _loopB = null; }
+            if (a is { } x && b is { } y && double.IsFinite(x) && double.IsFinite(y) && y > x) { _loopA = x; _loopB = y; _loopEngaged = true; }
+            else { _loopA = null; _loopB = null; _loopEngaged = false; }
         }
         _player.SetAbLoop(null, null);
     }
+
+    /// <summary>
+    /// The loop is active: a seek landed inside A-B (or it was just set). A seek outside it leaves the marks in place but plays on normally,
+    /// on both sides, also through the zone; a seek back into the zone activates it again.
+    /// </summary>
+    public bool LoopEngaged { get { lock (_gate) return _loopEngaged; } }
 
     /// <summary>Swap in a new index (Steam trimmed or the session grew) without reloading. <see cref="CacheFollower"/> decides what follows.</summary>
     public void ReplaceMedia(SessionMedia media)
@@ -271,6 +280,7 @@ public sealed class PlaybackSession : IAsyncDisposable
             _waiters.Add(tcs);
             _reloading = true;
             _position = Snap(_media, req.Position);
+            if (req.Cause == ReloadCause.Seek && _loopA is { } la && _loopB is { } lb) _loopEngaged = _position >= la - LoopEdgeSeconds && _position < lb;
             _atEnd = false;
             if (!_pumping) { _pumping = true; startPump = true; }
         }
@@ -386,7 +396,7 @@ public sealed class PlaybackSession : IAsyncDisposable
         SessionMedia media;
         double t;
         List<double>? known;
-        lock (_gate) { media = _media!; known = _frames; if (_probeBroken) return null; }
+        lock (_gate) { media = _media!; known = _frames; if (_probeTimeouts >= ProbeTimeoutLimit) return null; }
         t = _player.TimePos;
         var frame = req.Frame;
         if (!(Math.Abs(t - req.Origin) <= 2.5 * frame)) return null;            // NaN fails too: nothing is on screen where we think
@@ -411,9 +421,10 @@ public sealed class PlaybackSession : IAsyncDisposable
                 while (list[^1] < t - tol && list.Count < cap)
                 {
                     var next = await StepAsync(list[^1], ct).ConfigureAwait(false);
-                    if (next is null) { lock (_gate) _probeBroken = true; return null; }
+                    if (next is null) { lock (_gate) _probeTimeouts++; return null; }
                     list.Add(next.Value);
                 }
+                lock (_gate) _probeTimeouts = 0;
                 known = list;
                 at = Nearest(list, t, tol);
                 if (at < 0) return null;
@@ -475,7 +486,7 @@ public sealed class PlaybackSession : IAsyncDisposable
             if (d is > 0 and < 2) _playedSinceLoad += d;      // sequential play; a jump is not "played"
             _position = t;
             reason = EdlWindow.ShouldReload(_window, _media, t, _playedSinceLoad);
-            if (_loopA is { } la && _loopB is { } lb && t >= lb) auto = new PendingReload(la, ReloadCause.Loop, false, null);
+            if (_loopEngaged && _loopA is { } la && _loopB is { } lb && t >= lb) auto = new PendingReload(la, ReloadCause.Loop, false, null);
             else if (reason != ReloadReason.None && Worthwhile(reason, _media, t))
                 auto = new PendingReload(t, ReloadCause.Policy, true, null);
         }
@@ -504,7 +515,7 @@ public sealed class PlaybackSession : IAsyncDisposable
         lock (_gate)
         {
             if (_reloading || _disposed) return;
-            if (_loopA is { } la && _loopB is not null) loopA = la;       // the end came before B: still a lap
+            if (_loopEngaged && _loopA is { } la && _loopB is not null) loopA = la;       // the end came before B: still a lap
             else
             {
                 _atEnd = true;

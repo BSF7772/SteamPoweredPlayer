@@ -129,6 +129,12 @@ public sealed partial class TimelineControl : UserControl
         UpdateVisuals();
     }
 
+    /// <summary>A loop the playhead is outside of is drawn faded: it won't wrap until a click lands inside it.</summary>
+    public bool LoopEngaged
+    {
+        set => LoopRect.Opacity = value ? 1 : 0.35;
+    }
+
     public void ZoomIn() => ZoomBy(TimelineView.StepFactor, _position);
 
     public void ZoomOut() => ZoomBy(1 / TimelineView.StepFactor, _position);

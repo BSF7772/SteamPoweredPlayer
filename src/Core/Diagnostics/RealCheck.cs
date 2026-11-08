@@ -372,10 +372,12 @@ public static class RealCheck
         }
 
         /// <summary>P2: ten consecutive frame-backs, the first across a chunk boundary, each exactly one frame, timecodes agreeing.</summary>
-        private async Task FrameBackCheck(string id, string label, PlaybackRig rig, SessionMedia media, double start, double fps, CancellationToken ct)
+        private async Task FrameBackCheck(string id, string label, PlaybackRig rig, SessionMedia media, double start, double mpvFps, CancellationToken ct)
         {
             var s = rig.Session;
+            var fps = ChunkFrameRate.Measure(media) ?? mpvFps;   // what the Player uses: mpv's rate can flip between reloads
             var frame = 1 / fps;
+            var mpvRates = new HashSet<string> { mpvFps.ToString("0.##", CultureInfo.InvariantCulture) };
             var mediaStart = media.TfdtOriginSeconds;
             // 4 frames after the first chunk boundary inside the opened range: 10 steps cross it
             var from = PlaybackSession.Snap(media, start + media.SegmentSeconds + 4 * frame);
@@ -388,7 +390,23 @@ public static class RealCheck
                 await s.StepBackAsync(frame, ct).ConfigureAwait(false);
                 await Task.Delay(250, ct).ConfigureAwait(false);
                 positions.Add(rig.TimePos);
+                mpvRates.Add(Fps(rig).ToString("0.##", CultureInfo.InvariantCulture));
             }
+
+            // A person's presses: not waiting for each step to finish. 6 presses, 6 frames, never moving forward.
+            var before = rig.TimePos;
+            var presses = new List<Task>();
+            for (var i = 0; i < 6; i++)
+            {
+                presses.Add(s.StepBackAsync(frame, ct));
+                await Task.Delay(90, ct).ConfigureAwait(false);
+            }
+            await Task.WhenAll(presses).ConfigureAwait(false);
+            await Task.Delay(250, ct).ConfigureAwait(false);
+            var moved = (before - rig.TimePos) * fps;
+            Add(CheckResult.From(moved is > 4.5 and < 7.5, $"{id}.frame-back-burst", $"{label}: 6 frame-back presses without waiting move 6 frames",
+                $"moved {moved.ToString("0.00", CultureInfo.InvariantCulture)} frames"));
+
             var r = RealCheckRules.EvaluateFrameBacks(positions, fps);
             var perSecond = (int)Math.Round(fps);
             var tcOk = true;
@@ -419,7 +437,7 @@ public static class RealCheck
                 tcNote = (tcOk ? "; timecodes agree with the shown frames (steps of 0-2 FF, 10 FF +-1 in total)" : "; timecodes do NOT agree with the shown frames") + " [" + string.Join(" ", tcs.Select(t => t.Length >= 11 ? t[^11..] : t)) + "] fps " + fps.ToString("0.###", CultureInfo.InvariantCulture);
             }
             Add(CheckResult.From(r.Ok && tcOk, $"{id}.frame-back", $"{label}: 10 frame-backs, each exactly one frame (across a chunk boundary)",
-                r.Describe() + tcNote + "; deltas (ms) " + string.Join(", ", positions.Zip(positions.Skip(1), (x, y) => Ms(x - y))),
+                r.Describe() + tcNote + "; mpv reported fps " + string.Join("/", mpvRates) + "; deltas (ms) " + string.Join(", ", positions.Zip(positions.Skip(1), (x, y) => Ms(x - y))),
                 number: r.MaxErrorFrames, unit: "frames"));
         }
 

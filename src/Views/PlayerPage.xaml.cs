@@ -64,6 +64,7 @@ public sealed partial class PlayerPage : Page
     private int _gen, _posQueued, _speedIndex = 3;
     private double _latestTimePos = double.NaN;
     private double _fps = FrameTimecode.FallbackFps;
+    private double? _chunkFps;
     private string? _playlistGame;
     private int _playlistVersion;
     private bool _started, _attached, _cleaned, _subscribed, _fullscreen, _trickPaused, _overLower, _syncingVolume, _debug;
@@ -263,6 +264,7 @@ public sealed partial class PlayerPage : Page
         else if (media.Live) startMedia = Math.Max(first, last - LiveStartBehindSeconds);
 
         _media = media;
+        _chunkFps = null;
         if (!_trickPaused && AppServices.Trickplay is { } trick) { trick.Pause(); _trickPaused = true; }
         Task open;
         try { open = host.OpenAsync(media, startMedia, play: true); }
@@ -290,6 +292,9 @@ public sealed partial class PlayerPage : Page
         ResumeTrickplay();
         if (gen != _gen) return;
         ClearStatus();
+        var measured = await Task.Run(() => ChunkFrameRate.Measure(media));
+        if (gen != _gen) return;
+        _chunkFps = measured is { } rate ? FrameTimecode.Nominal(rate) : null;
         ReadFps();
         UpdatePlayGlyph();
         ApplyPosition();
@@ -616,6 +621,7 @@ public sealed partial class PlayerPage : Page
 
         var ui = session.MediaToUi(media);
         Timeline.Position = ui;
+        Timeline.LoopEngaged = session.LoopEngaged;
         UpdateTime(ui);
         UpdateLiveUi(media);
 
@@ -643,12 +649,16 @@ public sealed partial class PlayerPage : Page
     private void UpdateTime(double ui) =>
         TimeText.Text = FrameTimecode.PositionOfLength(ui, _session?.UiDuration ?? 0, _fps);
 
-    /// <summary>The stream's frame rate from mpv (<c>container-fps</c>, else <c>estimated-vf-fps</c>); kept when mpv has none yet.</summary>
+    /// <summary>
+    /// The stream's frame rate: measured from its chunks. mpv's <c>container-fps</c> (else <c>estimated-vf-fps</c>) is only the fallback when no
+    /// chunk is readable: it flips between 60 and 120 across reloads of a 60 fps session, which doubled FF and halved the frame-back step.
+    /// </summary>
     private double ReadFps()
     {
         try
         {
-            if (_host?.Mpv is { } mpv)
+            if (_chunkFps is { } known) _fps = known;
+            else if (_host?.Mpv is { } mpv)
             {
                 var fps = mpv.GetDouble("container-fps");
                 if (!(fps is > 1 and < 1000)) fps = mpv.GetDouble("estimated-vf-fps");

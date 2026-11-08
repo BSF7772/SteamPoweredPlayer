@@ -93,6 +93,59 @@ public sealed class PlaybackSessionLoopTests
     }
 
     [Fact]
+    public async Task Seeking_past_B_plays_on_normally()
+    {
+        var (s, p) = await Open(12);
+        s.SetLoop(12, 15);
+        await s.SeekAsync(40);
+        Assert.False(s.LoopEngaged);
+        var loads = p.LoadCount;
+        p.Tick(40.5);
+        await Task.Delay(30);
+        Assert.Equal(loads, p.LoadCount);
+    }
+
+    [Fact]
+    public async Task Seeking_before_A_plays_through_the_zone_without_looping()
+    {
+        var (s, p) = await Open(12);
+        s.SetLoop(12, 15);
+        await s.SeekAsync(5);
+        var loads = p.LoadCount;
+        p.Tick(13);
+        p.Tick(15.5);
+        await Task.Delay(30);
+        Assert.Equal(loads, p.LoadCount);
+    }
+
+    [Fact]
+    public async Task Seeking_into_the_zone_activates_the_loop_again()
+    {
+        var (s, p) = await Open(12);
+        s.SetLoop(12, 15);
+        await s.SeekAsync(40);
+        await s.SeekAsync(13);
+        Assert.True(s.LoopEngaged);
+        var loads = p.LoadCount;
+        p.Tick(15);
+        await PlaybackSessionTests.WaitUntil(() => p.LoadCount == loads + 1 && !s.IsReloading);
+        Assert.Equal(12, p.Loads[^1].Start);
+        Assert.True(s.LoopEngaged);                            // and it stays active lap after lap
+    }
+
+    [Fact]
+    public async Task End_of_file_after_leaving_the_zone_does_not_jump_to_A()
+    {
+        var (s, p) = await Open(12);
+        s.SetLoop(12, 15);
+        await s.SeekAsync(40);
+        var loads = p.LoadCount;
+        p.Eof(299);
+        await Task.Delay(30);
+        Assert.Equal(loads, p.LoadCount);
+    }
+
+    [Fact]
     public async Task EndOfFile_inside_a_loop_jumps_to_A()
     {
         var (s, p) = await Open(10);

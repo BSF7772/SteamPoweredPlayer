@@ -204,6 +204,8 @@ internal static partial class UiCheck
             Environment.Exit(code);
         }
 
+        private int _defaultWidth, _defaultHeight;
+
         // ---- the journey -------------------------------------------------------------------------------------------
 
         private async Task JourneyAsync()
@@ -217,8 +219,17 @@ internal static partial class UiCheck
             if (!libraryOk) return;
             _chips.Start(window);
             await Capture("library");
-
+            (_defaultWidth, _defaultHeight) = (window.AppWindow.Size.Width, window.AppWindow.Size.Height);
+            await ResizeStress("library");
             var all = AppServices.Library!.Current!.Recordings;
+            // the cache strip with its marker lane (only a capture: nothing to compute that the eye doesn't judge better)
+            if (all.FirstOrDefault(r => r.Kind == Core.Steam.RecordingKind.CacheSession && AppServices.Library!.MarkersFor(r).Count > 0) is { } marked)
+            {
+                SelectGame(marked.GameId);
+                await Task.Delay(400);
+                await Capture("library-markers");
+            }
+
             var clip = RealCheckRules.ShortestClip(all);
             var cache = RealCheckRules.ActiveCache(all);
 
@@ -249,7 +260,12 @@ internal static partial class UiCheck
             {
                 Step("open-cache");
                 await OpenFromLibrary("cache", cache, tile: false);
-                if (await PlayerReady("cache", cache)) await Capture("cache");
+                if (await PlayerReady("cache", cache))
+                {
+                    await Capture("cache");
+                    await FrameBackButton("cache");
+                    await ResizeStress("cache");
+                }
                 Step("back-from-cache");
                 await Back("cache");
             }
@@ -371,12 +387,83 @@ internal static partial class UiCheck
                 await Task.Delay(500);
                 await TransportBoundsAt(id, "minimum", minW, minH);
                 await Capture(id + "-min");
+                await ResizeStress(id);
             }
             finally
             {
                 aw.Resize(original);
                 await Task.Delay(300);
             }
+        }
+
+        /// <summary>
+        /// The frame-back button as a person presses it, read from the screen: each press moves one frame, FF stays a frame number of the
+        /// stream's real rate, and the duration field never changes (a wrong rate doubled FF and changed the duration's frames).
+        /// </summary>
+        private async Task FrameBackButton(string id)
+        {
+            var s = Session()!;
+            var mpv = PlayerHost.Instance!.Mpv!;
+            var fps = ChunkFrameRate.Measure(s.Media!) ?? 60;
+            var back = Find("PlayerFrameBack");
+            if (back is null) { Add(CheckResult.Fail($"{id}.frame-back-button", "Frame-back button moves one frame per press", "no PlayerFrameBack element")); return; }
+            await WaitFor(() => mpv.TimePos > s.MediaStartSeconds + 2 || s.UiDuration <= 2, 4);
+            // the first press pauses the playing video, so the count starts after it
+            Invoke(back);
+            await WaitFor(() => s.UserPaused && !s.IsReloading, 3);
+            await Task.Delay(250);
+            var before = mpv.TimePos;
+            const int presses = 8;
+            var texts = new List<string>();
+            for (var i = 0; i < presses; i++)
+            {
+                Invoke(back);
+                await Task.Delay(180);
+                texts.Add((Find("PlayerTimecode") as TextBlock)?.Text ?? "");
+            }
+            await WaitFor(() => !s.IsReloading, 3);
+            await Task.Delay(250);
+            texts.Add((Find("PlayerTimecode") as TextBlock)?.Text ?? "");
+            var moved = (before - mpv.TimePos) * fps;
+            var parts = texts.Select(t => t.Split(" / ")).Where(p => p.Length == 2).ToList();
+            var durations = parts.Select(p => p[1]).Distinct().Count();
+            var maxFf = parts.Max(p => int.Parse(p[0][^2..], CultureInfo.InvariantCulture));
+            Add(CheckResult.From(parts.Count == texts.Count && durations == 1 && maxFf <= Math.Ceiling(fps) && moved is > presses - 1.5 and < presses + 1.5,
+                $"{id}.frame-back-button", "Frame-back button: one frame per press, stable timecode",
+                $"moved {F(moved, "0.0")} frames in {presses} presses, highest FF {maxFf} at {F(fps, "0.##")} fps, {durations} duration value(s)"));
+        }
+
+        /// <summary>
+        /// A border drag while the video plays: the width sweeps back and forth across the layout thresholds in irregular steps, one layout
+        /// pass apart. A XAML fail-fast ends the process, and the parent reports it as a crash.
+        /// </summary>
+        private async Task ResizeStress(string id)
+        {
+            var s = Page() is PlayerPage ? Session() : null;
+            var wasPaused = s?.UserPaused ?? false;
+            s?.SetPause(false);
+            var aw = window.AppWindow;
+            var original = aw.Size;
+            var op = aw.Presenter as Microsoft.UI.Windowing.OverlappedPresenter;
+            var minW = Math.Max(op?.PreferredMinimumWidth ?? 0, 1);
+            var minH = Math.Max(op?.PreferredMinimumHeight ?? 0, 1);
+            var maxW = Math.Max(Math.Max(original.Width, _defaultWidth), minW * 3 / 2);
+            var h = Math.Max(minH, _defaultHeight > 0 ? _defaultHeight : original.Height);
+            var random = new Random(7);
+            var (w, direction, steps) = (maxW, -1, 0);
+            var sw = Stopwatch.StartNew();
+            while (sw.Elapsed < TimeSpan.FromSeconds(8))
+            {
+                w = Math.Clamp(w + direction * random.Next(4, 90), minW, maxW);
+                if (w == minW || w == maxW || random.Next(12) == 0) direction = -direction;
+                aw.Resize(new Windows.Graphics.SizeInt32(w, h));
+                steps++;
+                await Task.Delay(random.Next(0, 24));
+            }
+            s?.SetPause(wasPaused);
+            aw.Resize(original);
+            await Task.Delay(300);
+            Add(CheckResult.Pass($"{id}.resize-stress", "Sweeping the window width does not crash", $"{steps} resizes between {minW} and {maxW} px"));
         }
 
         /// <summary>
