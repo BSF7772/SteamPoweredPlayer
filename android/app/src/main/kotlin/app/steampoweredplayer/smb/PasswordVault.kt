@@ -34,6 +34,8 @@ class PasswordVault(private val folder: File) {
             null
         } catch (_: IndexOutOfBoundsException) {
             null
+        } catch (_: IllegalArgumentException) {   // a damaged file's iv length
+            null
         }
     }
 

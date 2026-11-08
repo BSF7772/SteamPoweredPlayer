@@ -18,7 +18,7 @@ Requirements every change must serve:
 7. Cuts, auto sync and speed-up, exactly like FastEncoder.
 8. Android companion: secure SMB (3.1.1, encryption), read-only access to the library, editing and exporting on the device.
 
-**Status: Phase 3 fixed after the maintainer's second test (`phase3.feedback`), waiting for a re-test. Phase 4 started on the maintainer's word (2026-11-08): steps 1 to 3 in `android/`, the device parts not tested yet (plan §5 "Phase 4 progress").** The approved plan lives in `.hermes/plans/`; don't start a phase the maintainer hasn't
+**Status: Phase 3 fixed after the maintainer's second test (`phase3.feedback`), waiting for a re-test. Phase 4 started on the maintainer's word (2026-11-08): steps 1 to 3 in `android/`, tested on the development emulator except real SMB (plan §5 "Phase 4 progress").** The approved plan lives in `.hermes/plans/`; don't start a phase the maintainer hasn't
 approved. Spikes (`spikes/NNN-name/`) are throwaway and must end with a `Verdict:` line.
 
 ## Commands
@@ -33,7 +33,11 @@ SteamPoweredPlayer.exe --selftest out.txt   # synthetic end-to-end check, exit c
 SteamPoweredPlayer.exe --bench out.txt      # performance budgets on a real library
 tools\e2e.ps1                            # the whole automated check on the real library, 5 minute budget
 cd android; .\gradlew testDebugUnitTest assembleDebug   # phone app
+tools\bootstrap.ps1 -Android -Emulator   # adds the emulator and its system image (about 2.4 GB download); needs Windows Hypervisor Platform
+tools\emu.ps1 start                      # create the AVD when missing, boot headless (-Window for a window); also: check, stop, delete
+cd android; .\gradlew connectedDebugAndroidTest         # instrumented tests on the running emulator
 ```
+The emulator can't prove real-phone decode and encode speed, codec quirks, heat, Wi-Fi roaming or a hardware-backed Keystore: never report those as verified from it. It reaches the host's SMB server at `10.0.2.2`.
 Opt-in tests against a real library are read-only and need `SPP_REAL_LIBRARY=<path to a BackgroundRecordPath>`.
 
 ## Tech stack

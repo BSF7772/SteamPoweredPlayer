@@ -31,6 +31,11 @@ if ($jdk) { $env:JAVA_HOME = $jdk }
 $sdk = Join-Path $script:SppTools 'android\sdk'
 if (Test-Path -LiteralPath $sdk -PathType Container) { $env:ANDROID_HOME = $sdk; $env:ANDROID_SDK_ROOT = $sdk }
 
+# Emulator state stays under .tools\ (the defaults are in the user profile). tools\emu.ps1 creates the folders.
+$env:ANDROID_USER_HOME = Join-Path $script:SppTools 'android\user-home'
+$env:ANDROID_EMULATOR_HOME = $env:ANDROID_USER_HOME
+$env:ANDROID_AVD_HOME = Join-Path $script:SppTools 'android\avd'
+
 # Gradle cache inside the workspace
 $gh = Join-Path $script:SppTools 'gradle-home'
 if (Test-Path -LiteralPath $gh -PathType Container) { $env:GRADLE_USER_HOME = $gh }

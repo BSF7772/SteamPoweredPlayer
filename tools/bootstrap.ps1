@@ -10,11 +10,16 @@
   Idempotent: an entry that is already installed and verified is skipped. PowerShell 5.1 compatible.
 
   Default selection: group 'desktop' without optional entries (libmpv). -IncludeOptional adds ffmpeg, -Android adds the
-  Android toolchain, -All adds everything, -Only <id,...> selects exactly those ids.
+  Android toolchain, -Emulator adds the Android emulator and its system image (about 2.4 GB to download, not needed to
+  build), -All adds everything, -Only <id,...> selects exactly those ids.
+
+  An entry with 'sdkPath' goes into the Android SDK folder (.tools\android\sdk\<sdkPath>) instead of .tools\<id>\<version>\,
+  because the emulator finds itself and its images relative to the SDK root.
 
 .PARAMETER Only         Entry ids to install (overrides the group selection).
 .PARAMETER IncludeOptional  Also install optional desktop entries (ffmpeg).
 .PARAMETER Android      Also install the Android group (jdk, gradle, cmdline-tools, platform-tools).
+.PARAMETER Emulator     Also install the emulator group (emulator, system image).
 .PARAMETER All          Everything, optional entries included.
 .PARAMETER Offline      Never download; fail when an archive is missing.
 .PARAMETER SeedFrom     Directory with already downloaded archives; a file whose size and SHA-256 match is copied into .tools\dl\.
@@ -27,6 +32,7 @@ param(
     [string[]]$Only,
     [switch]$IncludeOptional,
     [switch]$Android,
+    [switch]$Emulator,
     [switch]$All,
     [switch]$Offline,
     [string]$SeedFrom,
@@ -123,7 +129,8 @@ function Test-Installed($entry, [string]$dest) {
 }
 
 function Install-Entry($entry) {
-    $dest = Join-Path (Join-Path $ToolsDir $entry.id) $entry.version
+    $dest = if ($entry.PSObject.Properties['sdkPath']) { Join-Path (Join-Path $ToolsDir 'android\sdk') $entry.sdkPath }
+            else { Join-Path (Join-Path $ToolsDir $entry.id) $entry.version }
     Write-Step "[$($entry.id) $($entry.version)]"
 
     if (-not $Force -and (Test-Installed $entry $dest)) { Write-Step "  already installed: $dest"; return }
@@ -191,7 +198,8 @@ if ($Only) {
         $isOpt = [bool]$_.optional
         ($All) -or
         ($_.group -eq 'desktop' -and (-not $isOpt -or $IncludeOptional)) -or
-        ($Android -and $_.group -eq 'android')
+        ($Android -and $_.group -eq 'android') -or
+        ($Emulator -and $_.group -eq 'emulator')
     })
 }
 

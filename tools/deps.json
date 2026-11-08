@@ -119,9 +119,47 @@
       "licenseUrl": "https://developer.android.com/studio/terms",
       "sourceUrl": "https://android.googlesource.com/platform/packages/modules/adb/",
       "verifiedBy": "Downloaded once to compute the SHA-256; its SHA-1 (e03e78b1d80b396f1c3358e31251cb31740e1110) and size equal the entry in Google's repository2-3.xml."
+    },
+    {
+      "id": "android-emulator",
+      "version": "37.2.13",
+      "description": "Android Emulator 37.2.13 (stable channel), Windows x64. Development testing of the phone app; needs Windows Hypervisor Platform.",
+      "group": "emulator",
+      "optional": true,
+      "url": "https://dl.google.com/android/repository/emulator-windows_x64-16740729.zip",
+      "fileName": "emulator-windows_x64-16740729.zip",
+      "sha256": "625276a1d3ac6b15d00f8aad5e233e7dc3a7cb71435f97d64e3be298399e171d",
+      "size": 455344678,
+      "archive": "zip",
+      "stripRoot": true,
+      "sdkPath": "emulator",
+      "extract": [],
+      "license": "Android Software Development Kit License",
+      "licenseUrl": "https://developer.android.com/studio/terms",
+      "sourceUrl": "https://android.googlesource.com/platform/external/qemu/",
+      "verifiedBy": "Downloaded once to compute the SHA-256; its SHA-1 (4d7268aa7787c640ad892844e6c9a5f159e91ad3) and size equal the entry in Google's repository2-3.xml."
+    },
+    {
+      "id": "android-system-image",
+      "version": "36-google_apis-x86_64-r07",
+      "description": "Android 16 (API 36) Google APIs x86_64 system image, revision 7, for the development emulator.",
+      "group": "emulator",
+      "optional": true,
+      "url": "https://dl.google.com/android/repository/sys-img/google_apis/x86_64-36_r07.zip",
+      "fileName": "x86_64-36_r07.zip",
+      "sha256": "b1bb0769d0bed7698e61f203d7dc9bf6e7c37cd01a39d0d8788a11186bc78160",
+      "size": 1895447397,
+      "archive": "zip",
+      "stripRoot": true,
+      "sdkPath": "system-images/android-36/google_apis/x86_64",
+      "extract": [],
+      "license": "Android Software Development Kit License",
+      "licenseUrl": "https://developer.android.com/studio/terms",
+      "sourceUrl": "https://source.android.com/",
+      "verifiedBy": "Downloaded once to compute the SHA-256; its SHA-1 (c6bf44bdcd885bb902b4ba752d111a073ad7a817) and size equal the entry in Google's sys-img2-3.xml."
     }
   ],
   "todo": [
-    "Phase 4: the Android SDK packages (platforms;android-36, build-tools;36.1.0) are installed by sdkmanager from android-cmdline-tools into an SDK folder; compose and pin that step (and the libmpv AAR) when the phone app starts. The current spikes use .tools/android/sdk."
+    "Phase 4: the Android SDK packages (platforms;android-36, build-tools;36.1.0) are installed by sdkmanager from android-cmdline-tools into an SDK folder; compose and pin that step (and the libmpv AAR, with arm64-v8a and x86_64) when the phone app starts. The current spikes use .tools/android/sdk."
   ]
 }
