@@ -13,13 +13,13 @@ namespace SteamPoweredPlayer.Tests.Playback;
 /// </summary>
 public sealed class ClipAxisMpvTests
 {
-    private const double Origin = 585;
+    internal const double Origin = 585;
     private static readonly Lazy<string> ClipFolder = new(GenerateClip);
 
     private static MpvPlayer NewPlayer() => new(new MpvPlayerOptions { Output = MpvOutput.Headless, Decode = DecodeMode.Cpu, InitialVolume = 0 });
 
     /// <summary>12 s H.264 30 fps + AAC, Steam naming, every timestamp shifted by <see cref="Origin"/> (tfdt of chunk 1 = 585 s).</summary>
-    private static string GenerateClip()
+    internal static string GenerateClip()
     {
         var dir = Path.Combine(Path.GetTempPath(), "spp-clip-axis-" + Guid.NewGuid().ToString("N")[..8]);
         Directory.CreateDirectory(dir);

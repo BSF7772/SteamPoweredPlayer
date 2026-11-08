@@ -508,6 +508,18 @@ decided for S1? (2) Seek: the bench gates on p90 < 150 ms; the budget says "< 15
 real-library click-through is the first thing to do next), device-lost recovery (logged, renderer not recreated), non-100 % DPI,
 GPU trickplay on real 1440p HEVC inside the app, a 60 fps gap session.
 
+**Phase 3 progress (started 2026-11-08 on the maintainer's word).** Done: `ExportPlan`/`ExportPaths`/`ExportService` (chunks are copied
+through `RangeSource` first, then muxed on their real timestamps; lossless snaps to the 3 s grid, a re-encode trims frame-exact through
+FastEncoder's `Pipeline`) and the Player's Export card (A–B range or whole recording, FastEncoder presets, folder picked on first export,
+progress, cancel). Checked on a real library by `RealExportTests` (`SPP_REAL_LIBRARY=auto`): shortest clip and cache ranges, lossless and
+encoded. Measured: Steam's newest chunks can hold about 0.8 s less video than audio, so an export touching the live tail can have a
+shorter picture than its range; mid-session ranges are exact.
+Not done: cuts, speed/volume/mute, sync + Detect, size estimate, real queue + taskbar progress, Save clip with chapters, Open in
+FastEncoder, highlight reel, screenshots, colour-range check, "Fit to size" (needs a size box), `later.presets` in `--selftest`, network
+libraries. Clicking Export in the app itself isn't automated yet (the folder picker blocks UI Automation).
+Known limits: an export keeps running when the user leaves the player but can't be cancelled from elsewhere; killing the app mid-export
+leaves a hidden `.spp-export-*` working folder in the export folder.
+
 Open: one writer per chunk key in the download queue (Phase 3).
 
 Resolved in rev 3.1: FastEncoder is published and used as a submodule (D5); Linux is out of scope; licence GPL-3.0-or-later (D19).

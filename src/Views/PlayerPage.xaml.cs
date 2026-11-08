@@ -264,6 +264,8 @@ public sealed partial class PlayerPage : Page
         else if (media.Live) startMedia = Math.Max(first, last - LiveStartBehindSeconds);
 
         _media = media;
+        InitExportUi();
+        UpdateExportUi();
         _chunkFps = null;
         if (!_trickPaused && AppServices.Trickplay is { } trick) { trick.Pause(); _trickPaused = true; }
         Task open;
@@ -434,6 +436,7 @@ public sealed partial class PlayerPage : Page
         }
         var lib = AppServices.Library;
         _media = args.Media;
+        UpdateExportUi();
         Task follow = Task.CompletedTask;
         try { follow = _host.Follower!.OnMediaChangedAsync(args.Media); }     // ReplaceMedia runs synchronously; a reload may follow
         catch (ObjectDisposedException) { return; }
@@ -712,6 +715,7 @@ public sealed partial class PlayerPage : Page
         LoopText.Text = a is null ? "" : b is null
             ? $"A {FrameTimecode.Position(a.Value, _fps)}  ·  set B"
             : $"A {FrameTimecode.Position(a.Value, _fps)}  ·  B {FrameTimecode.Position(b.Value, _fps)}";
+        UpdateExportUi();
     }
 
     /// <summary>

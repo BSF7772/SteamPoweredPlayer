@@ -31,6 +31,12 @@ public sealed class AppSettings
     [JsonConverter(typeof(DecodeModeJsonConverter))]
     public DecodeMode Decoding { get; set; } = DecodeMode.Gpu;
 
+    /// <summary>Null until the user picks it on the first export (plan: no default folder).</summary>
+    public string? ExportFolder { get; set; }
+
+    /// <summary>FastEncoder preset id of the last export.</summary>
+    public string? ExportPreset { get; set; }
+
     public static string FilePath => Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "SteamPoweredPlayer", "settings.json");
 

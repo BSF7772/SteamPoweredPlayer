@@ -18,7 +18,7 @@ Requirements every change must serve:
 7. Cuts, auto sync and speed-up, exactly like FastEncoder.
 8. Android companion: secure SMB (3.1.1, encryption), read-only access to the library, editing and exporting on the device.
 
-**Status: Phase 2.1 re-tested by the maintainer: some edits needed; Phase 2.2 fixes and its re-test's fixes done (`.hermes/plans/2026-11-08_phase2.2-fix-plan.md` §5), waiting for the maintainer's re-test. Phase 3 not approved yet.** The approved plan lives in `.hermes/plans/`; don't start a phase the maintainer hasn't
+**Status: Phase 3 approved by the maintainer and in progress: range export with presets is in (plan §5 "Phase 3 progress"); the rest of Phase 3 is open.** The approved plan lives in `.hermes/plans/`; don't start a phase the maintainer hasn't
 approved. Spikes (`spikes/NNN-name/`) are throwaway and must end with a `Verdict:` line.
 
 ## Commands

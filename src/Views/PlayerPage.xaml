@@ -261,19 +261,17 @@
                             <FontIcon Glyph="&#xE898;" FontSize="14" />
                             <TextBlock Text="Export" Style="{StaticResource BodyStrongTextBlockStyle}" />
                         </StackPanel>
-                        <Border Style="{StaticResource Pill}" HorizontalAlignment="Right" Background="{StaticResource BrandGradient}">
-                            <TextBlock Text="PHASE 3" Foreground="White" FontSize="10" FontWeight="SemiBold" CharacterSpacing="60" />
-                        </Border>
+                        <HyperlinkButton x:Name="ExportFolderButton" AutomationProperties.AutomationId="PlayerExportFolder" HorizontalAlignment="Right" Padding="4,0" FontSize="12"
+                                         Content="Folder…" Click="ExportFolder_Click" IsTabStop="False" />
                     </Grid>
-                    <Grid MinHeight="64">
-                        <Rectangle RadiusX="8" RadiusY="8" StrokeThickness="1.5" StrokeDashArray="4,3" Stroke="{ThemeResource ControlStrongStrokeColorDefaultBrush}" />
-                        <TextBlock Text="Cuts, speed, sync and FastEncoder presets arrive with the editor." Style="{StaticResource Caption}"
-                                   TextWrapping="Wrap" TextAlignment="Center" VerticalAlignment="Center" Margin="16,8" />
-                    </Grid>
-                    <Button IsEnabled="False" HorizontalAlignment="Stretch" IsTabStop="False">
+                    <ComboBox x:Name="ExportPresetBox" AutomationProperties.AutomationId="PlayerExportPreset" HorizontalAlignment="Stretch" IsTabStop="False"
+                              SelectionChanged="ExportPreset_SelectionChanged" />
+                    <TextBlock x:Name="ExportRangeText" Style="{StaticResource Caption}" TextWrapping="Wrap" />
+                    <ProgressBar x:Name="ExportProgressBar" Maximum="1" Visibility="Collapsed" />
+                    <Button x:Name="ExportButton" AutomationProperties.AutomationId="PlayerExport" HorizontalAlignment="Stretch" IsTabStop="False" Click="Export_Click">
                         <StackPanel Orientation="Horizontal" Spacing="8" HorizontalAlignment="Center">
                             <FontIcon Glyph="&#xE8C6;" FontSize="13" />
-                            <TextBlock Text="Export cut" />
+                            <TextBlock x:Name="ExportButtonText" Text="Export" />
                         </StackPanel>
                     </Button>
                 </StackPanel>
