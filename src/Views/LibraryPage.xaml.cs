@@ -366,8 +366,8 @@ public sealed partial class LibraryPage : Page
         StripCanvas.Width = w;
 
         var spans = _sessions.Select(SpanOf).ToList();
-        var layout = CacheStripLayout.Build(spans, w, TimeZoneInfo.Local);
-        const double top = 6, barH = 36;
+        var layout = CacheStripLayout.Build(spans, w, TimeZoneInfo.Local, DateTimeOffset.UtcNow);
+        const double top = 18, barH = 36;
         var dim = new SolidColorBrush(Windows.UI.Color.FromArgb(0x33, 0x80, 0x80, 0x80));
         var caption = (Style)Application.Current.Resources["Caption"];
 
@@ -379,6 +379,52 @@ public sealed partial class LibraryPage : Page
         };
         Place(track, 0, top);
         StripCanvas.Children.Add(track);
+
+        // L1: everything older than 24 h is squeezed into the left quarter; the break says so
+        if (layout.Cutoff is { } cut)
+        {
+            var brk = new Rectangle { Width = cut.X1 - cut.X0, Height = barH + 12, Fill = dim, RadiusX = 3, RadiusY = 3 };
+            ToolTipService.SetToolTip(brk, "Older recordings (more than 24 hours ago) are squeezed into this part; the last 24 hours are on the right");
+            Place(brk, cut.X0, top - 6);
+            StripCanvas.Children.Add(brk);
+            var older = new TextBlock { Text = "older", Style = caption, FontSize = 10, Opacity = 0.7 };
+            Place(older, Math.Max(0, cut.X0 - 30), 0);
+            StripCanvas.Children.Add(older);
+            var last = new TextBlock { Text = "last 24 h", Style = caption, FontSize = 10, Opacity = 0.7 };
+            Place(last, cut.X1 + 4, 0);
+            StripCanvas.Children.Add(last);
+        }
+        if (layout.RecentEmpty)
+        {
+            var x0 = layout.Cutoff?.X1 ?? 0;
+            var note = new TextBlock
+            {
+                Text = "Nothing recorded in the last 24 h", Style = caption, Width = Math.Max(0, w - x0), TextAlignment = TextAlignment.Center,
+                IsHitTestVisible = false,
+            };
+            Place(note, x0, top + barH / 2 - 8);
+            StripCanvas.Children.Add(note);
+        }
+
+        // midnights: a dashed line with the new day's name, so "yesterday 23:00" and "today 07:00" are never confused
+        foreach (var m in layout.Midnights)
+        {
+            var line = new Microsoft.UI.Xaml.Shapes.Line
+            {
+                X1 = 0, X2 = 0, Y1 = 0, Y2 = barH + 10, Stroke = dim, StrokeThickness = 1, StrokeDashArray = [3, 3], IsHitTestVisible = false,
+            };
+            Place(line, Math.Clamp(m.X, 0, w - 1), top - 4);
+            StripCanvas.Children.Add(line);
+            var ml = new TextBlock { Text = m.Label, Style = caption, FontSize = 10, Opacity = 0.8, IsHitTestVisible = false };
+            ml.Measure(new Windows.Foundation.Size(double.PositiveInfinity, double.PositiveInfinity));
+            Place(ml, Math.Clamp(m.X + 3, 0, Math.Max(0, w - ml.DesiredSize.Width)), 0);
+            StripCanvas.Children.Add(ml);
+        }
+
+        // the axis ends at NOW
+        var nowEdge = new Rectangle { Width = 2, Height = barH + 10, Fill = (Brush)Application.Current.Resources["BrandGradientH"], IsHitTestVisible = false };
+        Place(nowEdge, Math.Clamp(layout.NowX - 2, 0, w - 2), top - 4);
+        StripCanvas.Children.Add(nowEdge);
 
         foreach (var g in layout.Gaps.Where(g => g.Compressed))
         {
@@ -462,11 +508,21 @@ public sealed partial class LibraryPage : Page
             Place(tick, Math.Clamp(t.X, 0, w - 1), top + barH);
             StripCanvas.Children.Add(tick);
             var label = new TextBlock { Text = t.Label, Style = caption, FontSize = 11 };
+            if (t.Label == "Now") label.FontWeight = Microsoft.UI.Text.FontWeights.SemiBold;
             Microsoft.UI.Xaml.Documents.Typography.SetNumeralAlignment(label, FontNumeralAlignment.Tabular);
             label.Measure(new Windows.Foundation.Size(double.PositiveInfinity, double.PositiveInfinity));
             var lw = label.DesiredSize.Width;
-            Place(label, Math.Clamp(t.X - lw / 2, 0, Math.Max(0, w - lw)), 66);
+            var rel = t.Relative is null ? null : new TextBlock { Text = t.Relative, Style = caption, FontSize = 10, Opacity = 0.65 };
+            rel?.Measure(new Windows.Foundation.Size(double.PositiveInfinity, double.PositiveInfinity));
+            var cw = Math.Max(lw, rel?.DesiredSize.Width ?? 0);              // the two lines share one centre
+            var cx = Math.Clamp(t.X - cw / 2, 0, Math.Max(0, w - cw));
+            Place(label, cx + (cw - lw) / 2, top + barH + 12);
             StripCanvas.Children.Add(label);
+            if (rel is not null)
+            {
+                Place(rel, cx + (cw - rel.DesiredSize.Width) / 2, top + barH + 26);
+                StripCanvas.Children.Add(rel);
+            }
         }
     }
 
