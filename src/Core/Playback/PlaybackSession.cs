@@ -63,7 +63,15 @@ public sealed class PlaybackSession : IAsyncDisposable
     private PendingReload? _pending;
     private readonly List<TaskCompletionSource> _waiters = [];
 
-    private sealed record PendingReload(double Position, ReloadCause Cause, bool Force, bool? Play);
+    private sealed record PendingReload(double Position, ReloadCause Cause, bool Force, bool? Play, int Back = 0, double Origin = 0, double Frame = 0);
+
+    private List<double>? _frames;                       // consecutive frame pts found by the last probe (a lookup by value, so it never goes stale by seeking)
+    private bool _probeBroken;                           // the player did not report a time per frame step: back-steps fall back to one nominal frame
+
+    /// <summary>How long a probe waits for the player to report the frame it stepped to before giving up on exact back-steps.</summary>
+    public TimeSpan FrameProbeTimeout { get; set; } = TimeSpan.FromMilliseconds(500);
+
+    private const int ProbeMarginFrames = 12;
 
     public PlaybackSession(IMpvPlayer player, Func<string, string>? url = null, int windowCount = EdlWindow.DefaultCount)
     {
@@ -132,6 +140,8 @@ public sealed class PlaybackSession : IAsyncDisposable
             _media = media;
             _window = [];
             _userPaused = !play;
+            _frames = null;
+            _probeBroken = false;
         }
         try { _player.SetDemuxerCache(DemuxerCache.For(media)); }
         catch (Exception e) when (e is MpvException or ObjectDisposedException) { /* keep the start-up cache size */ }
@@ -147,8 +157,17 @@ public sealed class PlaybackSession : IAsyncDisposable
     /// <summary>Seek relative to the latest position or pending target.</summary>
     public Task SeekRelativeAsync(double deltaSeconds, CancellationToken cancellationToken = default) => SeekAsync(Position + deltaSeconds, cancellationToken);
 
-    /// <summary>Back-step by one frame (<paramref name="frameSeconds"/>, e.g. 1/60): a reload, since mpv can't step back across a chunk.</summary>
-    public Task StepBackAsync(double frameSeconds, CancellationToken cancellationToken = default) => SeekRelativeAsync(-frameSeconds, cancellationToken);
+    /// <summary>
+    /// Back-step by one frame: a reload, since mpv can't step back across a chunk. Steam's pts are irregular, so "position − 1/fps" misses
+    /// frame boundaries (P2): the session finds the previous frame's real pts by stepping forward from a few frames earlier, then loads
+    /// between that frame and the next. <paramref name="frameSeconds"/> (e.g. 1/60) is only the estimate used to find where to look, and
+    /// the whole step when the player reports no frame times. Rapid calls accumulate: three calls move three frames.
+    /// </summary>
+    public Task StepBackAsync(double frameSeconds, CancellationToken cancellationToken = default)
+    {
+        if (!(frameSeconds > 0) || !double.IsFinite(frameSeconds)) return SeekRelativeAsync(-frameSeconds, cancellationToken);
+        return Enqueue(new PendingReload(double.NaN, ReloadCause.Seek, false, null, 1, double.NaN, frameSeconds), cancellationToken);
+    }
 
     /// <summary>Forward single-frame step: pauses (user intent too) and lets mpv step.</summary>
     public void FrameStep()
@@ -190,7 +209,7 @@ public sealed class PlaybackSession : IAsyncDisposable
     public void ReplaceMedia(SessionMedia media)
     {
         ArgumentNullException.ThrowIfNull(media);
-        lock (_gate) _media = media;
+        lock (_gate) { _media = media; _frames = null; }
     }
 
     /// <summary>Reload at a media position, keeping the pause intent. <paramref name="forceRebuild"/> rebuilds the window even if it looks fine.</summary>
@@ -239,6 +258,14 @@ public sealed class PlaybackSession : IAsyncDisposable
         {
             ObjectDisposedException.ThrowIf(_disposed, this);
             if (_media is null || _media.ChunkCount == 0) throw new InvalidOperationException("No media is open.");
+            if (req.Back > 0)
+            {
+                // Back-steps accumulate against the origin of the burst; after another kind of pending request they are a nominal seek.
+                if (_pending is { Back: > 0 } b) req = req with { Back = b.Back + req.Back, Origin = b.Origin };
+                else if (_pending is { } other) req = new PendingReload(other.Position - req.Frame, ReloadCause.Seek, false, null);
+                else req = req with { Origin = _position };
+                if (req.Back > 0) req = req with { Position = req.Origin - req.Back * req.Frame };
+            }
             // Latest wins; a forced rebuild requested earlier is not lost.
             _pending = _pending is { Force: true } && !req.Force ? req with { Force = true } : req;
             _waiters.Add(tcs);
@@ -297,23 +324,28 @@ public sealed class PlaybackSession : IAsyncDisposable
 
     private async Task DoReloadAsync(PendingReload req)
     {
-        SessionMedia media;
-        bool rebuild;
+        double? shown = null;
+        if (req.Back > 0)
+        {
+            var exact = await TryExactBackAsync(req).ConfigureAwait(false);
+            if (exact is { } e)
+            {
+                shown = e.Shown;
+                req = req with { Position = e.LoadAt, Play = false };
+                lock (_gate) _userPaused = true;                // like the forward step, a frame step is a paused operation
+            }
+            else req = req with { Position = req.Origin - req.Back * req.Frame };
+        }
+
         double target;
         bool play;
+        bool rebuild;
         lock (_gate)
         {
-            media = _media!;
-            target = Snap(media, req.Position);
+            target = Snap(_media!, req.Position);
             play = req.Play ?? !_userPaused;
-            rebuild = req.Force || _window.Count == 0
-                      || EdlWindow.ShouldReload(_window, media, target, 0) != ReloadReason.None;
-            if (rebuild)
-            {
-                _window = EdlWindow.Window(media, target, _windowCount);
-                _edl = Edl.Build(media, _window, _url);
-            }
-            _position = target;
+            rebuild = EnsureWindow(target, req.Force);
+            _position = shown is not null && target == req.Position ? shown.Value : target;
         }
 
         var ok = await _player.LoadAsync(_edl, target, play, _cts.Token).ConfigureAwait(false);
@@ -322,12 +354,110 @@ public sealed class PlaybackSession : IAsyncDisposable
         IReadOnlyList<int> window;
         lock (_gate)
         {
-            _lastTick = target;
+            _lastTick = shown is not null && target == req.Position ? shown.Value : target;
             _playedSinceLoad = 0;
-            _position = target;
+            _position = _lastTick;
             window = _window;
         }
         SafeInvoke(Reloaded, new SessionReload(req.Cause, target, window[0], window[^1], rebuild));
+    }
+
+    /// <summary>Rebuilds the window around <paramref name="target"/> when it is forced, empty or no longer suitable. (Caller holds the lock.)</summary>
+    private bool EnsureWindow(double target, bool force)
+    {
+        var media = _media!;
+        var rebuild = force || _window.Count == 0 || EdlWindow.ShouldReload(_window, media, target, 0) != ReloadReason.None;
+        if (rebuild)
+        {
+            _window = EdlWindow.Window(media, target, _windowCount);
+            _edl = Edl.Build(media, _window, _url);
+        }
+        return rebuild;
+    }
+
+    /// <summary>
+    /// The frame <paramref name="req"/>.Back frames before the one on screen, by its real pts: load paused a few frames earlier and
+    /// step forward, reading the player's time-pos after every step, until the shown frame is reached. Null when the player doesn't
+    /// report a time per step, the shown frame isn't where the session thinks it is, or the head is too close; the caller then steps one nominal frame.
+    /// The result is the frame's pts and a load position inside that frame's interval (halfway to the next frame).
+    /// </summary>
+    private async Task<(double LoadAt, double Shown)?> TryExactBackAsync(PendingReload req)
+    {
+        SessionMedia media;
+        double t;
+        List<double>? known;
+        lock (_gate) { media = _media!; known = _frames; if (_probeBroken) return null; }
+        t = _player.TimePos;
+        var frame = req.Frame;
+        if (!(Math.Abs(t - req.Origin) <= 2.5 * frame)) return null;            // NaN fails too: nothing is on screen where we think
+
+        var ct = _cts.Token;
+        try
+        {
+            var tol = 0.25 * frame;
+            var at = known is null ? -1 : Nearest(known, t, tol);
+            if (at < req.Back || known is null)
+            {
+                var start = StartOf(media);
+                var wanted = t - (req.Back + ProbeMarginFrames) * frame;
+                var atHead = wanted <= start;
+                var from = Snap(media, wanted);
+                lock (_gate) EnsureWindow(from, false);
+                if (!await _player.LoadAsync(_edl, from, false, ct).ConfigureAwait(false)) return null;
+                var first = _player.TimePos;
+                if (!double.IsFinite(first)) return null;
+                var list = new List<double> { first };
+                var cap = req.Back + ProbeMarginFrames + 24;
+                while (list[^1] < t - tol && list.Count < cap)
+                {
+                    var next = await StepAsync(list[^1], ct).ConfigureAwait(false);
+                    if (next is null) { lock (_gate) _probeBroken = true; return null; }
+                    list.Add(next.Value);
+                }
+                known = list;
+                at = Nearest(list, t, tol);
+                if (at < 0) return null;
+                if (at < req.Back && !atHead) return null;
+                lock (_gate) _frames = list;
+            }
+            var k = Math.Max(0, at - req.Back);
+            if (k >= known!.Count) return null;
+            // mpv's start seek drops the frames before the start and shows the first one at/after it: load a quarter of the
+            // previous gap before the frame's pts, which still lies after the frame before.
+            var gap = k > 0 ? known[k] - known[k - 1] : frame;
+            return (known[k] - 0.25 * gap, known[k]);
+        }
+        catch (Exception e) when (e is not OperationCanceledException) { return null; }
+    }
+
+    /// <summary>Frame-steps the player and returns the time it reports for the new frame, or null on a timeout.</summary>
+    private async Task<double?> StepAsync(double last, CancellationToken ct)
+    {
+        var tcs = new TaskCompletionSource<double>(TaskCreationOptions.RunContinuationsAsynchronously);
+        void Handler(double v) { if (double.IsFinite(v) && v > last + 1e-6) tcs.TrySetResult(v); }
+        _player.TimePosChanged += Handler;
+        try
+        {
+            _player.FrameStep();
+            return await tcs.Task.WaitAsync(FrameProbeTimeout, ct).ConfigureAwait(false);
+        }
+        catch (TimeoutException) { return null; }
+        finally { _player.TimePosChanged -= Handler; }
+    }
+
+    /// <summary>Index of the frame in <paramref name="frames"/> nearest to <paramref name="t"/> within <paramref name="tolerance"/>, else -1.</summary>
+    private static int Nearest(List<double> frames, double t, double tolerance)
+    {
+        var i = frames.BinarySearch(t);
+        if (i < 0) i = ~i;
+        var best = -1;
+        var bestD = double.MaxValue;
+        for (var j = Math.Max(0, i - 1); j <= Math.Min(frames.Count - 1, i); j++)
+        {
+            var d = Math.Abs(frames[j] - t);
+            if (d < bestD) { bestD = d; best = j; }
+        }
+        return bestD <= tolerance ? best : -1;
     }
 
     // ---- mpv events ----------------------------------------------------------------------------------------------

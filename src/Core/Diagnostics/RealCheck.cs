@@ -312,15 +312,28 @@ public static class RealCheck
             string tcNote = "";
             if (formatter is { } f)
             {
-                var prev = -1;
-                foreach (var p in positions)
+                // Steam's pts are irregular (a real clip: 15-21 ms gaps at 59.094 fps), so a fixed-fps FF grid can repeat or skip one
+                // number for a genuine one-frame step. The timecode must agree with the shown frame within that rounding: it never rises,
+                // each step drops 0..2 FF, and the ten steps together drop 10 FF +-1.
+                var tcs = positions.Select(p => f.Format(p - mediaStart, fps)).ToList();
+                long Index(string tc) =>
+                    tc.Length >= 11 && int.TryParse(tc[0..2], NumberStyles.None, CultureInfo.InvariantCulture, out var h)
+                    && int.TryParse(tc[3..5], NumberStyles.None, CultureInfo.InvariantCulture, out var m)
+                    && int.TryParse(tc[6..8], NumberStyles.None, CultureInfo.InvariantCulture, out var s)
+                    && int.TryParse(tc[9..11], NumberStyles.None, CultureInfo.InvariantCulture, out var ff)
+                        ? ((h * 60L + m) * 60 + s) * perSecond + ff - 1 : long.MinValue;
+                var idx = tcs.Select(Index).ToList();
+                if (idx.Any(i => i == long.MinValue)) tcOk = false;
+                else
                 {
-                    var tc = f.Format(p - mediaStart, fps);
-                    var ff = tc.Length >= 2 && int.TryParse(tc[^2..], NumberStyles.None, CultureInfo.InvariantCulture, out var n) ? n : -1;
-                    if (prev > 0 && ((prev - ff + perSecond) % perSecond != 1)) tcOk = false;
-                    prev = ff;
+                    for (var i = 1; i < idx.Count; i++)
+                    {
+                        var d = idx[i - 1] - idx[i];
+                        if (d < 0 || d > 2) tcOk = false;
+                    }
+                    if (Math.Abs(idx[0] - idx[^1] - (idx.Count - 1)) > 1) tcOk = false;
                 }
-                tcNote = (tcOk ? "; timecodes step down by one frame each" : "; timecodes do NOT step down by one frame each") + " [" + string.Join(" ", positions.Select(p => f.Format(p - mediaStart, fps)[^11..])) + "] fps " + fps.ToString("0.###", CultureInfo.InvariantCulture);
+                tcNote = (tcOk ? "; timecodes agree with the shown frames (steps of 0-2 FF, 10 FF +-1 in total)" : "; timecodes do NOT agree with the shown frames") + " [" + string.Join(" ", tcs.Select(t => t.Length >= 11 ? t[^11..] : t)) + "] fps " + fps.ToString("0.###", CultureInfo.InvariantCulture);
             }
             Add(CheckResult.From(r.Ok && tcOk, $"{id}.frame-back", $"{label}: 10 frame-backs, each exactly one frame (across a chunk boundary)",
                 r.Describe() + tcNote + "; deltas (ms) " + string.Join(", ", positions.Zip(positions.Skip(1), (x, y) => Ms(x - y))),

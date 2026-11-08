@@ -240,11 +240,13 @@ public sealed class PlaybackSessionTests
     public async Task Back_step_and_frame_step()
     {
         var (s, p) = Create();
+        s.FrameProbeTimeout = TimeSpan.FromMilliseconds(30);   // the fake reports no frame times: the back falls back to one nominal frame
         await s.OpenAsync(Media(false, (1, 300)), 60);
         await s.StepBackAsync(1.0 / 60);
-        Assert.Equal(60 - 1.0 / 60, p.Loads[1].Start, 9);
+        Assert.Equal(60 - 1.0 / 60, p.Loads[^1].Start, 9);
+        var steps = p.FrameSteps;
         s.FrameStep();
-        Assert.Equal(1, p.FrameSteps);
+        Assert.Equal(steps + 1, p.FrameSteps);
         Assert.True(s.UserPaused);
     }
 
