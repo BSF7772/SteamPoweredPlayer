@@ -30,7 +30,7 @@ The temp directory is removed at the end; nothing outside it is touched.
 | Session behaviour | pause kept across reloads and frame-steps; speed 2x and 4x across chunk boundaries; Steam-style head trim (three head chunks deleted under playback, one every 0.6 s: no stall, no failed reload); trim past a paused playhead (jump to the new head, still paused); EOF on a live session that grows (a chunk every 1.2 s) continues playing |
 | Export | `RangeSource` lossless 30 s (`ffmpeg -c copy`): video and audio duration within 0.1 s, A/V start offset within 0.1 s |
 | Trickplay | one tile per chunk, one valid 1600x900 sheet, index loads |
-| Later phases | listed as `SKIP (Phase 3/6)` so the gap stays visible: presets, audio-sync detect and fix, interrupted download, delete path guard, colour range per encoder |
+| Later phases | listed as `SKIP (Phase 6)` so the gap stays visible: delete path guard |
 
 Development aid: `SPP_SELFTEST_ONLY=play.live,scan` runs only the checks whose id starts with one of the prefixes (the report then lacks the rest).
 The last INFO line lists every step's time, slowest first. To stay under 30 s (D-TEST) the scanner cases are built and scanned in

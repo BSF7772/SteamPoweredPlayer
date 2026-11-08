@@ -10,7 +10,7 @@ same library read-only over encrypted SMB, works **download-first** on unreliabl
 **Architecture:** One engine idea everywhere: **libmpv** plays an **mpv EDL** built from the chunk files actually present; Steam's
 manifest is never trusted. On Windows, libmpv's **D3D11 render API** draws into a WinUI 3 `SwapChainPanel`, so FastEncoder-style
 XAML overlays the video. Exports first cut the chunk range losslessly, then run FastEncoder's `Pipeline` when a re-encode is
-needed. Remote clients pick by link type: **wired → stream; wireless → download chunks first, play local files**.
+needed. The Android app, which has no Steam, reads the library through file-share protocols: **download-first is its default**, playing local files. The desktop has no download feature (D21).
 
 **Tech stack:** see `AGENTS.md` → Tech stack. Format facts: `docs/steam-recording-format.md`. SMB setup: `docs/smb-security.md`.
 
@@ -66,6 +66,8 @@ Measured on a development machine (NVMe SSD, desktop NVIDIA GPU) against a real 
 | D16 | Secrets | Android Keystore (AES-GCM key, TEE-backed where available); Windows Credential Manager/DPAPI; never logged | Plain prefs | Common-sense security |
 | D17 | Tooling | Portable in `.tools/` via `tools/bootstrap.ps1` (pinned + SHA-256); `tools/env.ps1` sets env for the current shell only | System installs | Nothing system-wide |
 | D18 | Public-safety | No developer-machine data in the repo: placeholders in docs, synthetic fixtures, maintainers keep local pre-commit checks | — | The repo is shared |
+| D20 | Export presets | Approved ladder (2026-11-06): **Ultra quality (CPU only) / Quality / Medium / Performance / Ultra performance**, engine **Auto (GPU if present) / CPU / GPU**, plus Archive, Compact 720p, Universal H.264, Fit to size, Trim only. Default = best performance per quality: **Medium, Auto** (GPU p4 lookahead 8: 1.9× faster than p7 for −0.09 VMAF) | FastEncoder's old flat preset list | Pick by how much time to spend |
+| D21 | Downloads | **Android only**, where download-first is the default. The desktop has no Downloads view, chunk downloader or network-library feature (maintainer, 2026-11-08): Windows and Linux already mount file shares, so a share is just a path to the OS | Download-first on the desktop too (built, then removed) | The OS already handles it, and only the phone lacks Steam |
 | D19 | Licence | **GPL-3.0-or-later** for this repo; SPDX headers (`// SPDX-License-Identifier: GPL-3.0-or-later`) in every source file; `docs/third-party.md` lists bundled components and their licences when binaries ship | MIT/Apache with LGPL-only builds of libmpv + FFmpeg | The libmpv builds we ship are GPL: Windows builds (shinchiro) compile FFmpeg with `--enable-gpl --enable-version3` (x264/x265 linked), and the Android libmpv AAR builds FFmpeg with `--enable-gpl --enable-version3`, so the distributed app is GPLv3 regardless. GPLv3 (not v2) is needed for Apache-2.0 deps (Media3) and FFmpeg "version3" builds. Every other dependency (MIT, BSD, Apache-2.0, LGPL-2.1 JCIFS) is compatible. FastEncoder (MIT) can be compiled in. A permissive licence would only be honest with self-built LGPL libmpv/FFmpeg on both platforms, which costs maintenance for no user benefit |
 
 ## 3. Architecture
@@ -79,8 +81,7 @@ Measured on a development machine (NVMe SSD, desktop NVIDIA GPU) against a real 
  │ Core/Library  Scanner (FSW, cache-aware) → Index → IndexStore ───────────┘  Artwork · Trickplay · Proxies (opt.)   │
  │ Core/Playback Mpv (LibraryImport) · MpvD3D11Renderer → SwapChainPanel · Edl.Build · CacheFollower                  │
  │ Core/Export   RangeSource (share-delete opens) → ffmpeg -c copy → [FastEncoder Pipeline] · DeleteService           │
- │ Core/Net      LinkDetector (wired/wireless) · ChunkDownloader (resumable, prioritised) · LocalChunkCache (LRU)     │
- │ UI            Library (games · Cache strip · Clips · Recordings · Exports) │ Player (3-column) │ Downloads │ Settings│
+ │ UI            Library (games · Cache strip · Clips · Recordings · Exports) │ Player (3-column) │ Settings            │
  └────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘
           ▲ SMB 3.1.1, encrypted, read-only · server profiles (LAN, VPN, …)
  ┌────────┴──────── Android companion ──────────────────────────────────────────────────────────────────────────────────┐
@@ -155,20 +156,18 @@ Transformer re-encode → MediaStore.
 │ PLAYER (FastEncoder 3 columns 310 | * | 392): Up next │ video + markers lane + filmstrip/trim + transport   │
 │                                                 + edits card (speed · volume · mute · sync + Detect)        │
 │                                                 │ Events list (filters) + Export card (preset tiles)        │
-│ status: Ready · indexing ▁▁▁                                  [Downloads 2]  [Stop]  [✂ Export cut]       │
+│ status: Ready · indexing ▁▁▁                                  [Stop]  [✂ Export cut]       │
 └─────────────────────────────────────────────────────────────────────────────────────────────────────────────┘
 ```
 
-### 4.3 Network libraries: download-first on wireless, stream on wired
-Applies to the Android app and to the desktop app when the library is on another machine (UNC path or mapped network drive).
+### 4.3 Android network access: download-first by default
+Applies to the Android app only (D21). The desktop has no download feature: a library on a file share is a path that the OS mounts.
 
 **Link detection (no polling):**
 - Android: `ConnectivityManager.registerDefaultNetworkCallback`. `TRANSPORT_ETHERNET` = wired; `TRANSPORT_WIFI` / `CELLULAR` = wireless.
   When a VPN (e.g. Tailscale) is the default, classify by the underlying transport (verify in S9). S3 measured that on the test
   phone the VPN's capabilities carry the underlying transport (`wifi+vpn`, `cell+vpn`), but the VPN *network* never reports Wi-Fi
   coming or going. So also register a callback on a non-VPN `NetworkRequest`; it reports the real networks (S3, verified).
-- Windows: `GetBestInterfaceEx` to the server address → `NetworkInterfaceType` (Ethernet vs Wireless80211). VPN adapters are
-  classified by the route of their underlying interface (S9). `NetworkChange.NetworkAddressChanged` re-evaluates.
 - The user can override per server profile: **Auto / Always stream / Always download**.
 
 **Mobile data, metered networks, Data Saver (maintainer 2026-11-07: a toast, nothing else):**
@@ -206,8 +205,8 @@ Applies to the Android app and to the desktop app when the library is on another
   inside the downloaded part is instant.
 - **Download only what's needed:** a whole recording, an A–B range, or "the ±30 s around each marker". Edits and exports
   always use original chunks, only those in range.
-- **Smaller downloads (optional):** the desktop can create **viewing proxies** (e.g. 720p HEVC ≈ 3 Mbps with NVENC, about 7× smaller,
-  same chunk timing) in the data folder. Remote clients prefer a proxy for watching and switch to the originals for export.
+- **Smaller downloads (optional, with Phase 4):** the desktop can create **viewing proxies** (e.g. 720p HEVC ≈ 3 Mbps with NVENC, about 7× smaller,
+  same chunk timing) in the data folder. The phone prefers a proxy for watching and switch to the originals for export.
 - **Local cache:** a size cap with LRU eviction, "Keep offline" pins, and a clear view of what's on the device.
 
 ### 4.4 Android
@@ -263,7 +262,7 @@ silently downgraded.
 ## 5. Roadmap
 
 ### Performance budgets (`--bench` / instrumented tests fail if missed)
-| Metric | Desktop, local | Wired network client | Wireless client (download-first) |
+| Metric | Desktop, local | Phone, wired | Phone, wireless (download-first) |
 |---|---|---|---|
 | Library visible from index | < 400 ms | < 800 ms | < 2 s (index cached locally after the first time) |
 | Open → first frame | < 250 ms | < 500 ms | < 3 s on a healthy link (first 2 chunks), < 250 ms once downloaded |
@@ -382,12 +381,11 @@ trickplay filmstrip, transport, keys, resume, A-B loop, fullscreen overlay; ever
 generator (S4: first fragment of each chunk, 160 px JPEG q10 every 3 s, zero-filled chunks skipped) → FSW index → first-run card →
 `--selftest`, `--bench`. Markers are placed from Steam's exact millisecond offset (field 1.5.10); the folder-name rule is the fallback.
 
-### Phase 3: Desktop edits, export, delete, network libraries
+### Phase 3: Desktop edits, export
 Cuts, speed/volume/mute, live sync + nudges, **Detect** (FastEncoder `AudioSync`; S6: `Low` confidence on real gameplay, so the UI
 shows "Low confidence: not applied" instead of a number, and a fix is `AudioDelay = −AudioLate` through one tested helper), apply to
-game, fix timing drift, preset grid (default export preset: TBD, FastEncoder preset ladder under review) + size estimate, export queue with taskbar progress, **Save clip** (markers as chapters), "Open in FastEncoder", highlight reel,
-screenshots, colour-range check per encoder, **export folder picker on first export**,
-**network libraries** (LinkDetector, ChunkDownloader, Downloads view, optional viewing proxies; download-first everywhere until S3b/S9).
+game, fix timing drift, the approved preset ladder (D20) + size estimate, export queue with taskbar progress, **Save clip** (markers as chapters), "Open in FastEncoder", highlight reel,
+screenshots, colour-range check per encoder, **export folder picker on first export**. No network libraries or downloads on the desktop (D21).
 
 ### Phase 4: Android
 1. Toolchain + Compose skeleton + brand theme. 2. Server profiles, Keystore, endpoint chooser, encryption switch, connection
@@ -411,8 +409,9 @@ names, case variants, non-clip folders and cache sessions are all refused) → D
 - xUnit for all of Core. Real-library tests are opt-in (`SPP_REAL_LIBRARY`) and strictly read-only.
 - Golden fixtures shared by the C# and Kotlin parsers and EDL builders.
 - `--selftest`: synthetic sessions for every case above, headless libmpv seek accuracy ±1 frame, every preset, sync (300 ms
-  injected must be detected and fixed), colour range, a Steam-style head trim during playback, **an interrupted download**
-  (connection killed mid-chunk) that must resume without corruption, and the **delete path guard**.
+  injected must be detected and fixed), colour range, a Steam-style head trim during playback, and the **delete path guard**.
+  An interrupted download (connection killed mid-chunk, must resume without corruption) is an Android test.
+- `tools\e2e.ps1`: the whole automated check in one command on the real library, at most 5 minutes.
 - `--bench` against §5, results in `docs/bench.md` (hardware class only, no machine names).
 - Android: JUnit (parsers, EDL, ChunkPlan, endpoint chooser, Keystore wrapper); instrumented tests on a real phone for playback,
   download-under-loss, export and Detect.
@@ -508,23 +507,18 @@ decided for S1? (2) Seek: the bench gates on p90 < 150 ms; the budget says "< 15
 real-library click-through is the first thing to do next), device-lost recovery (logged, renderer not recreated), non-100 % DPI,
 GPU trickplay on real 1440p HEVC inside the app, a 60 fps gap session.
 
-**Phase 3 progress (started 2026-11-08 on the maintainer's word).** In: export core and queue (`ExportService`, `ExportQueue`: chunks are
-copied through `RangeSource`, muxed on their real timestamps, lossless snaps to the 3 s grid, re-encodes trim frame-exact through FastEncoder's
-`Pipeline`, several kept spans join without re-encoding); the Player's Export card (presets incl. Fit to size, cuts as kept parts, highlight
-reel from markers, speed/volume/mute, fix timing drift, audio nudges with live preview, Detect with "Low confidence: not applied", apply to
-game, size estimate, markers as chapters, Save clip, screenshots `S`, Open in FastEncoder, taskbar progress, `Ctrl+E`); network libraries
-(`LinkDetector`, `ChunkDownloader`, `DownloadQueue`, `RemoteLibrary`, Downloads page, Keep offline, play and export from the cache).
-Checks: `--selftest` runs every preset with its colour range, a 300 ms sync error (measured +277 ms, +7 ms after the fix) and an interrupted
-download; `--uicheck` presses Estimate, Detect, Save clip, Export, Keep A-B and Screenshot on the real shortest clip and opens Downloads on the
-real library; `RealExportTests` and `RealDownloadTests` (`SPP_REAL_LIBRARY=auto`) do it headless.
+**Phase 3 progress (started 2026-11-08 on the maintainer's word; Phase 2.2 re-tested by the maintainer).** Code complete on the desktop,
+waiting for the maintainer's test. In: export core and queue (`ExportService`, `ExportQueue`: chunks are copied through `RangeSource`, muxed
+on their real timestamps, lossless snaps to the 3 s grid, re-encodes trim frame-exact through FastEncoder's `Pipeline`, several kept spans join
+without re-encoding); `ExportLadder` (D20) with special presets incl. Fit to size; the edits card under the video (speed 0.25-4×, volume,
+mute, fix timing drift, sync slider heard live, nudges, Detect with "Low confidence: not applied", apply to game); on the Export card: cuts as
+kept parts drawn on the timeline, highlight reel from markers, size estimate, markers as chapters, Save clip, screenshots `S`, Open in
+FastEncoder, taskbar progress, `Ctrl+E`; in the Library: the Exports list per game and the Cache strip's Save clip.
+Automated: `tools\e2e.ps1` runs build, unit tests, `--selftest` and `--uicheck` on the real shortest clip and active cache, with a 5 minute budget.
 Measured: Steam's newest chunks can hold about 0.8 s less video than audio, so an export touching the live tail can have a shorter picture
 than its range; mid-session ranges are exact. MP4 forces the first chapter to 0, so a "Start" chapter precedes a later first marker.
-Not done: the Library's Exports list; viewing proxies (optional); a size-cap setting in the UI
-(`DownloadCacheGb` in settings.json, default 50); playing while a download catches up with the playhead (Play uses what has arrived);
-`Seek` isn't wired to the player, because Play only opens after the download started. Not verified: a real SMB share over a real wired or
-wireless link (the real-library runs used a local path), trickplay for downloaded recordings and their markers while offline (markers come from the library when it answers within 4 s), the
-folder picker and Open in FastEncoder in the UI (automation can't drive pickers).
-
-Resolved in Phase 3: one writer per chunk key (`DownloadQueue` runs one recording at a time).
+Not verified by automation: the folder picker and Open in FastEncoder (automation can't drive pickers), how things look and sound.
+Not moved upstream: FastEncoder's own app still shows its old presets; the ladder lives in this repo (`src/Core/Export/ExportLadder.cs`) until the
+maintainer asks for it there, since preset definitions in FastEncoder are ask-first.
 
 Resolved in rev 3.1: FastEncoder is published and used as a submodule (D5); Linux is out of scope; licence GPL-3.0-or-later (D19).

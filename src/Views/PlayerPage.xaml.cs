@@ -242,13 +242,12 @@ public sealed partial class PlayerPage : Page
         UpdateLoopUi();
         _entry = lib?.Current?.Recordings.FirstOrDefault(r => r.RelativeFolder == key);
         BuildPlaylist();
-        if (Request is { Title: { } title } request && request.RecordingKey == key) GameText.Text = title;
         ResetExportEdits();
         Timeline.ResetZoom();
         ClearEvents();
         ShowStatus("Opening…", null, busy: true);
 
-        var media = Request is { Media: { } requested } asked && asked.RecordingKey == key ? requested : lib?.GetMedia(key);
+        var media = lib?.GetMedia(key);
         if (media is null || media.ChunkCount == 0)
         {
             ShowStatus("This recording isn't available", "Steam may have removed it, or its files are not readable.", icon: true);
@@ -340,7 +339,7 @@ public sealed partial class PlayerPage : Page
     private void RefreshMarkers(bool resetFilter)
     {
         if (_session is null || _media is null || _key is null) return;
-        var all = Request is { Markers: { } requested } asked && asked.RecordingKey == _key ? requested : AppServices.Library?.FullMarkersFor(_key) ?? [];
+        var all = AppServices.Library?.FullMarkersFor(_key) ?? [];
         var visible = Markers.Place(all, _media).Visible;
         _lane = [.. visible.Select(m =>
         {

@@ -80,7 +80,7 @@ public sealed partial class PlayerPage
                 Text = text, FontSize = size, TextAlignment = TextAlignment.Center, TextWrapping = TextWrapping.Wrap,
                 FontWeight = strong ? Microsoft.UI.Text.FontWeights.SemiBold : Microsoft.UI.Text.FontWeights.Normal,
             });
-        var tile = new ToggleButton { Content = panel, Padding = new Thickness(3, 6, 3, 6), HorizontalAlignment = HorizontalAlignment.Stretch, VerticalAlignment = VerticalAlignment.Stretch, IsTabStop = false };
+        var tile = new ToggleButton { Content = panel, Padding = new Thickness(1, 6, 1, 6), HorizontalAlignment = HorizontalAlignment.Stretch, VerticalAlignment = VerticalAlignment.Stretch, IsTabStop = false };
         Microsoft.UI.Xaml.Automation.AutomationProperties.SetAutomationId(tile, automationId);
         return tile;
     }
@@ -92,11 +92,11 @@ public sealed partial class PlayerPage
         {
             var tier = ExportLadder.Tiers[i];
             TierGrid.ColumnDefinitions.Add(new ColumnDefinition());
-            var lines = new List<(string, double, bool)> { (tier.Name, 11, true), (tier.Tagline, 10, false) };
-            if (tier.CpuOnly) lines.Add(("CPU only", 10, false));
-            if (tier.Id == ExportLadder.DefaultId) lines.Add(("default", 10, true));
+            var lines = new List<(string, double, bool)> { (tier.Name, 10, true), (tier.Tagline, 9, false) };
+            if (tier.CpuOnly) lines.Add(("CPU only", 9, false));
+            if (tier.Id == ExportLadder.DefaultId) lines.Add(("default", 9, true));
             var tile = ChoiceTile("ExportTier-" + tier.Id, [.. lines]);
-            tile.Click += (_, _) => SelectExportChoice(tier.Id);
+            WireTile(tile, () => _exportChoice == tier.Id, () => SelectExportChoice(tier.Id));
             Grid.SetColumn(tile, i);
             TierGrid.Children.Add(tile);
             _choiceButtons[tier.Id] = tile;
@@ -109,7 +109,7 @@ public sealed partial class PlayerPage
         {
             var engine = engines[i].Engine;
             var tile = ChoiceTile("ExportEngine-" + engine, (engines[i].Label, 11, false));
-            tile.Click += (_, _) => { _engine = engine; AppServices.Settings.ExportEngine = engine.ToString(); AppServices.Settings.Save(); OptionChanged(); };
+            WireTile(tile, () => _engine == engine, () => { _engine = engine; AppServices.Settings.ExportEngine = engine.ToString(); AppServices.Settings.Save(); OptionChanged(); });
             Grid.SetColumn(tile, i);
             EngineGrid.Children.Add(tile);
             _engineButtons[engine] = tile;
@@ -125,12 +125,19 @@ public sealed partial class PlayerPage
             if (Presets.Get(id) is not { } preset) continue;
             var tile = ChoiceTile("ExportSpecial-" + id, ($"{preset.Emoji} {preset.Name}", 11, false));
             ToolTipService.SetToolTip(tile, preset.Tagline);
-            tile.Click += (_, _) => SelectExportChoice(id);
+            WireTile(tile, () => _exportChoice == id, () => SelectExportChoice(id));
             Grid.SetColumn(tile, i % 3);
             Grid.SetRow(tile, i / 3);
             SpecialGrid.Children.Add(tile);
             _choiceButtons[id] = tile;
         }
+    }
+
+    /// <summary>Radio behaviour on a toggle: checking selects; unchecking the selected tile puts its check back.</summary>
+    private static void WireTile(ToggleButton tile, Func<bool> isSelected, Action select)
+    {
+        tile.Checked += (_, _) => { if (!isSelected()) select(); };
+        tile.Unchecked += (_, _) => { if (isSelected()) tile.IsChecked = true; };
     }
 
     private void SelectExportChoice(string id)
@@ -341,12 +348,17 @@ public sealed partial class PlayerPage
 
     private void NudgeLater_Click(object sender, RoutedEventArgs e) => SetAudioDelay(_audioDelay + NudgeSeconds);
 
+    /// <summary>For <c>--uicheck</c>.</summary>
+    internal string? CurrentGameId => _entry?.GameId;
+
     private void NudgeReset_Click(object sender, RoutedEventArgs e) => SetAudioDelay(0);
 
     private void ApplyToGame_Toggled(object sender, RoutedEventArgs e)
     {
         if (_entry?.GameId is not { } game) return;
         var delays = AppServices.Settings.GameAudioDelays;
+        var saved = delays.TryGetValue(game, out var old) && Math.Abs(old - _audioDelay) < 0.0005;
+        if ((ApplyToGameToggle.IsChecked == true) == saved) return;     // SetAudioDelay moved the toggle: nothing to store
         if (ApplyToGameToggle.IsChecked == true) delays[game] = _audioDelay;
         else delays.Remove(game);
         AppServices.Settings.Save();

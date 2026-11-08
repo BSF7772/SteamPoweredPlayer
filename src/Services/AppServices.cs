@@ -4,7 +4,6 @@ using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using SteamPoweredPlayer.Core.Export;
 using SteamPoweredPlayer.Core.Library;
-using SteamPoweredPlayer.Core.Net;
 using SteamPoweredPlayer.Core.Steam;
 
 namespace SteamPoweredPlayer.Services;
@@ -31,10 +30,7 @@ public sealed record AppOptions(bool Sample, bool FirstRun, ElementTheme Theme, 
 public sealed record SteamInfo(bool SteamFound, string? RecordingsPath, TimeSpan? MaxKeep, SteamPaths? Paths = null, uint? AccountId = null);
 
 /// <summary>The Player page receives this as its navigation parameter. <see cref="RecordingKey"/> is <c>RecordingEntry.RelativeFolder</c>.</summary>
-/// <param name="Media">The media to play when the recording is not in the library, e.g. a download.</param>
-/// <param name="Title">The heading for such a recording.</param>
-/// <param name="Markers">Its markers, when known.</param>
-public sealed record PlayerRequest(string RecordingKey, double? StartSeconds = null, SessionMedia? Media = null, string? Title = null, IReadOnlyList<Marker>? Markers = null);
+public sealed record PlayerRequest(string RecordingKey, double? StartSeconds = null);
 
 /// <summary>Small service locator: the shell is tiny, and pages need the same few objects.</summary>
 public static class AppServices
@@ -144,46 +140,6 @@ public static class AppServices
 
     public static void Toast(string title, string? message = null, InfoBarSeverity severity = InfoBarSeverity.Informational, int seconds = 6) =>
         Window?.ShowToast(title, message, severity, seconds);
-
-    // ---- downloads --------------------------------------------------------------------------------------------------------
-
-    private static readonly SemaphoreSlim s_downloadsGate = new(1, 1);
-    private static LocalChunkCache? s_cache;
-    private static DownloadQueue? s_downloads;
-
-    /// <summary>Where downloaded chunks live, per Windows user; never in Steam's folder. Null until <see cref="DownloadsAsync"/> ran.</summary>
-    public static string? DownloadsFolder { get; private set; }
-
-    /// <summary>The app's one chunk cache and download queue, opened on first use. They outlive pages.</summary>
-    public static async Task<(LocalChunkCache Cache, DownloadQueue Queue)> DownloadsAsync()
-    {
-        await s_downloadsGate.WaitAsync();
-        try
-        {
-            if (s_cache is null || s_downloads is null)
-            {
-                var dir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "SteamPoweredPlayer", "downloads");
-                Directory.CreateDirectory(dir);
-                s_cache = await LocalChunkCache.OpenAsync(dir, Math.Max(1, Settings.DownloadCacheGb) * (1L << 30));
-                s_downloads = new DownloadQueue(s_cache, new SharedFolderFiles());
-                s_downloads.Changed += OnDownloadChanged;
-                System.Net.NetworkInformation.NetworkChange.NetworkAddressChanged += (_, _) => s_downloads.NetworkChanged();
-                DownloadsFolder = dir;
-            }
-            return (s_cache, s_downloads);
-        }
-        finally { s_downloadsGate.Release(); }
-    }
-
-    private static void OnDownloadChanged(DownloadItem item)
-    {
-        if (item.State is DownloadItemState.Done or DownloadItemState.Failed)
-            Window?.DispatcherQueue.TryEnqueue(() =>
-            {
-                if (item.State == DownloadItemState.Done) Toast("Download finished", "It plays from this PC now.", InfoBarSeverity.Success);
-                else Toast("Download failed", item.Error, InfoBarSeverity.Error);
-            });
-    }
 
     // ---- exports --------------------------------------------------------------------------------------------------------
 

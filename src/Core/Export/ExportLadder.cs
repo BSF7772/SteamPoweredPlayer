@@ -28,7 +28,7 @@ public static class ExportLadder
             "SVT-AV1 crf 24, preset 5. Slowest, for footage you care about.", null),
         new("quality", "Quality", "Archival look", false,
             "SVT-AV1 crf 28, preset 5.", "NVENC p7 two-pass. About 2× realtime, same look as Medium for twice the time."),
-        new("medium", "Medium", "Recommended", false,
+        new("medium", "Medium", "Best ratio", false,
             "SVT-AV1 crf 32, preset 6.", "NVENC p4, lookahead 8. About 4× realtime, within 0.1 VMAF of the slowest GPU tier."),
         new("performance", "Performance", "Long clips", false,
             "SVT-AV1 crf 33, preset 10.", "NVENC p2. About 5× realtime, 0.4 VMAF below Medium."),

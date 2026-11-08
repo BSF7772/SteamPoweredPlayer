@@ -36,11 +36,10 @@ FastEncoder is a git submodule (`external/FastEncoder`), and its `src/Core` file
   next/previous event, filmstrip preview when hovering the timeline. Search events across the whole library.
 - **Edits, like FastEncoder**: several cuts per recording, speed, volume, remove audio, an audio-sync slider you hear live while
   dragging, **Detect** (automatic sync), fix timing drift.
-- **Export with FastEncoder's presets**: Balanced / Archive / Pristine (SVT-AV1), GPU Turbo (NVENC/QSV/AMF), Compact 720p,
-  Universal (H.264), Fit to size, and Trim only (lossless, on Steam's 3-second keyframes). "Open in FastEncoder" hands a cut to the full app.
+- **Export by how much time to spend**: Ultra quality (CPU only), Quality, Medium (the default, best quality for the time), Performance,
+  Ultra performance, each on Auto, CPU or GPU (NVENC/QSV/AMF). Special presets: Archive, Compact 720p, Universal (H.264), Fit to size, and
+  Trim only (lossless, on Steam's 3-second keyframes). "Open in FastEncoder" hands a cut to the full app.
 - **Highlight reel**: chosen events (±N seconds) stitched into one video.
-- **Network libraries**: open a library on another PC. Wired connections stream in real time. Wi-Fi downloads first, so dropped
-  packets never stall playback.
 - **Delete with care**: off until you enable it, clips only (never Steam's cache), Recycle Bin by default, and every delete confirmed.
 
 Keys: `Space` play/pause · `I` / `O` set start/end · `R` reset trim · `← →` ±5 s · `, .` frame step · `[ ]` previous/next event ·
@@ -59,14 +58,14 @@ Keys: `Space` play/pause · `I` / `O` set start/end · `R` reset trim · `← �
 
 ## Layout
 - `src/Core/` has no UI code: `Steam/` format + config readers, `Library/` index + thumbnails, `Playback/` libmpv binding + D3D11
-  renderer, `Export/` lossless range + export + delete service, `Net/` remote libraries + downloads
+  renderer, `Export/` lossless range + export + delete service, `Net/` reference logic for the Android port
 - `src/FastEncoder/` (linked): `Ff.cs`, `Encoders.cs`, `Presets.cs`, `Pipeline.cs`, `AudioSync.cs`
 - `src/MainWindow.xaml(.cs)`: UI · `android/`: phone app · `tests/`: xUnit + shared golden fixtures · `docs/` · `tools/`
 - Settings: `%LOCALAPPDATA%\SteamPoweredPlayer\settings.json`. Saved passwords go to Windows Credential Manager.
 
 ## Self-test
 `SteamPoweredPlayer.exe --selftest report.txt` builds Steam-style recordings with ffmpeg (normal, trimmed, broken manifest, gaps,
-still recording, crashed) and checks scanning, playback, seeking, a Steam-style trim during playback, interrupted downloads, every
+still recording, crashed) and checks scanning, playback, seeking, a Steam-style trim during playback, every
 export preset, and audio sync (a clip with sound 300 ms late must be detected and come out in sync). Exit code 0 means everything passed.
 
 `SteamPoweredPlayer.exe --bench report.txt` measures open, first-frame and seek times against your library.

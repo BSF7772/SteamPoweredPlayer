@@ -18,7 +18,7 @@ Requirements every change must serve:
 7. Cuts, auto sync and speed-up, exactly like FastEncoder.
 8. Android companion: secure SMB (3.1.1, encryption), read-only access to the library, editing and exporting on the device.
 
-**Status: Phase 2.2 re-tested by the maintainer; Phase 3 approved and code complete on the desktop except the items in plan §5 "Phase 3 progress", waiting for the maintainer's test. Phase 4 not approved yet.** The approved plan lives in `.hermes/plans/`; don't start a phase the maintainer hasn't
+**Status: Phase 2.2 re-tested by the maintainer; Phase 3 approved and code complete on the desktop (plan §5 "Phase 3 progress"), waiting for the maintainer's test. Phase 4 not approved yet.** The approved plan lives in `.hermes/plans/`; don't start a phase the maintainer hasn't
 approved. Spikes (`spikes/NNN-name/`) are throwaway and must end with a `Verdict:` line.
 
 ## Commands
@@ -31,6 +31,7 @@ dotnet test tests                        # unit tests (fast, no real library nee
 SteamPoweredPlayer.bat --rebuild         # build + run
 SteamPoweredPlayer.exe --selftest out.txt   # synthetic end-to-end check, exit code 0 = pass
 SteamPoweredPlayer.exe --bench out.txt      # performance budgets on a real library
+tools\e2e.ps1                            # the whole automated check on the real library, 5 minute budget
 cd android; .\gradlew testDebugUnitTest assembleDebug   # phone app
 ```
 Opt-in tests against a real library are read-only and need `SPP_REAL_LIBRARY=<path to a BackgroundRecordPath>`.
@@ -51,7 +52,7 @@ src/Core/Steam/      Steam config, folder names, game ids, VDF, protobuf (.pb), 
 src/Core/Library/    scanner (event-driven), index, data folder, artwork, trickplay
 src/Core/Playback/   libmpv binding, D3D11 renderer, EDL builder, cache follower
 src/Core/Export/     lossless range source, export queue, delete service (the only code allowed to delete)
-src/Core/Net/        remote-library access, link-type detection, chunk downloader
+src/Core/Net/        reference logic for the Android port (fetch order, chunk cache, reconnect); the desktop has no downloads
 src/Core/Diagnostics/ --selftest and --bench (reports carry no personal data)
 external/FastEncoder/ git submodule (never edit it from this repo; change FastEncoder upstream, then bump the pin)
 src/                 SteamPoweredPlayer.csproj (WinUI app): MainWindow, Views/, Services/, Themes/
@@ -69,7 +70,7 @@ spikes/              throwaway experiments (Phase 0)
   sharing so Steam's cleanup never fails, and survive files vanishing mid-read.
 - Folder and timeline timestamps are **UTC**.
 - Lossless cuts snap to the 3 s keyframe grid; frame-exact cuts re-encode.
-- Wireless links are unreliable: **download-first** on wireless, stream only on wired links (auto-detected, user override).
+- Android reads the library through file-share protocols and is **download-first by default**, because wireless links are unreliable. The desktop has no download feature: the OS mounts shares, so a share is just a path.
 - No polling: use FileSystemWatcher, SMB change notify, libmpv events and Android network callbacks.
 
 ## Code style

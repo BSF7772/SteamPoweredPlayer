@@ -209,8 +209,8 @@
                                 <TextBlock Grid.Column="2" Text="Volume" Style="{StaticResource Caption}" VerticalAlignment="Center" />
                                 <Slider x:Name="VolumeEditSlider" Grid.Column="3" AutomationProperties.AutomationId="PlayerExportVolume" Minimum="0" Maximum="200" Value="100" StepFrequency="5"
                                         VerticalAlignment="Center" MinWidth="80" ValueChanged="VolumeEdit_ValueChanged" IsTabStop="False" ToolTipService.ToolTip="Volume of the exported file, in %" />
-                                <ToggleButton x:Name="MuteEditToggle" Grid.Column="4" AutomationProperties.AutomationId="PlayerExportMute" Content="No sound" Click="ExportOption_Changed" IsTabStop="False" />
-                                <ToggleButton x:Name="FixDriftToggle" Grid.Column="5" AutomationProperties.AutomationId="PlayerExportFixDrift" Content="Fix timing drift" IsChecked="True" Click="ExportOption_Changed" IsTabStop="False"
+                                <ToggleButton x:Name="MuteEditToggle" Grid.Column="4" AutomationProperties.AutomationId="PlayerExportMute" Content="No sound" Checked="ExportOption_Changed" Unchecked="ExportOption_Changed" IsTabStop="False" />
+                                <ToggleButton x:Name="FixDriftToggle" Grid.Column="5" AutomationProperties.AutomationId="PlayerExportFixDrift" Content="Fix timing drift" IsChecked="True" Checked="ExportOption_Changed" Unchecked="ExportOption_Changed" IsTabStop="False"
                                               ToolTipService.ToolTip="Even out capture jitter so the sound stays with the picture" />
                             </Grid>
                             <Grid ColumnSpacing="8">
@@ -228,9 +228,9 @@
                                         MinWidth="80" ValueChanged="SyncSlider_ValueChanged" IsTabStop="False" ToolTipService.ToolTip="Audio delay, heard live while you play" />
                                 <Button Grid.Column="2" AutomationProperties.AutomationId="PlayerSyncEarlier" Content="−20" Click="NudgeEarlier_Click" IsTabStop="False" ToolTipService.ToolTip="Sound 20 ms earlier" />
                                 <Button Grid.Column="3" AutomationProperties.AutomationId="PlayerSyncLater" Content="+20" Click="NudgeLater_Click" IsTabStop="False" ToolTipService.ToolTip="Sound 20 ms later" />
-                                <Button Grid.Column="4" Content="Reset" Click="NudgeReset_Click" IsTabStop="False" />
+                                <Button Grid.Column="4" AutomationProperties.AutomationId="PlayerSyncReset" Content="Reset" Click="NudgeReset_Click" IsTabStop="False" />
                                 <Button x:Name="DetectButton" Grid.Column="5" AutomationProperties.AutomationId="PlayerDetectSync" Content="Detect" Click="Detect_Click" IsTabStop="False" />
-                                <ToggleButton x:Name="ApplyToGameToggle" Grid.Column="6" AutomationProperties.AutomationId="PlayerApplySyncToGame" Content="Apply to game" Click="ApplyToGame_Toggled" IsTabStop="False"
+                                <ToggleButton x:Name="ApplyToGameToggle" Grid.Column="6" AutomationProperties.AutomationId="PlayerApplySyncToGame" Content="Apply to game" Checked="ApplyToGame_Toggled" Unchecked="ApplyToGame_Toggled" IsTabStop="False"
                                               ToolTipService.ToolTip="Use this delay for every recording of this game" />
                             </Grid>
                             <TextBlock x:Name="SyncStatusText" AutomationProperties.AutomationId="PlayerSyncStatus" Style="{StaticResource Caption}" TextWrapping="Wrap" Visibility="Collapsed" />

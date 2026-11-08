@@ -46,12 +46,6 @@ public sealed class AppSettings
     /// <summary>Audio delay in seconds applied to every recording of a game, by game id.</summary>
     public Dictionary<string, double> GameAudioDelays { get; set; } = [];
 
-    /// <summary>Other PCs' recording folders, as the user chose them.</summary>
-    public List<string> NetworkLibraries { get; set; } = [];
-
-    /// <summary>Cap of the download cache; the least recently used chunks of unpinned recordings go first.</summary>
-    public int DownloadCacheGb { get; set; } = 50;
-
     public static string FilePath => Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "SteamPoweredPlayer", "settings.json");
 
@@ -66,8 +60,12 @@ public sealed class AppSettings
         return new AppSettings();
     }
 
+    /// <summary>Set by <c>--uicheck</c>: its clicks change settings in memory and never reach the user's file.</summary>
+    public static bool Frozen { get; set; }
+
     public void Save()
     {
+        if (Frozen) return;
         if (AppServices.Options.Sample || AppServices.Options.DataDir is not null) return;   // design and test modes never touch the real settings file
         try
         {

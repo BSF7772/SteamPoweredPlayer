@@ -142,8 +142,6 @@ public static class SelfTest
                 await Step("export.presets", "Every export preset encodes", async () =>
                     await ExportSelfChecks.PresetsAsync(await NormalMedia(ct).ConfigureAwait(false), _s.Scratch("presets"), ct).ConfigureAwait(false)).ConfigureAwait(false);
                 await Step("export.sync", "Audio-sync detect and fix", () => ExportSelfChecks.SyncAsync(_s.Scratch("sync"), ct)).ConfigureAwait(false);
-                await Step("net.download", "Interrupted download", async () =>
-                    await ExportSelfChecks.InterruptedDownloadAsync(await NormalMedia(ct).ConfigureAwait(false), _s.Scratch("download"), ct).ConfigureAwait(false)).ConfigureAwait(false);
                 LaterPhases();
             }
         }
@@ -643,7 +641,7 @@ public static class SelfTest
 
         private void LaterPhases()
         {
-            Add(CheckResult.Skip("later.delete-guard", "Delete path guard", "Phase 3/6"));
+            Add(CheckResult.Skip("later.delete-guard", "Delete path guard", "Phase 6"));
         }
     }
 }

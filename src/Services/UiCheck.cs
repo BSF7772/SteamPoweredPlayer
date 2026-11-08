@@ -208,8 +208,11 @@ internal static partial class UiCheck
 
         // ---- the journey -------------------------------------------------------------------------------------------
 
+        private string? _exportDir, _savedExportFolder;
+
         private async Task JourneyAsync()
         {
+            AppSettings.Frozen = true;                  // nothing this check clicks may reach the user's settings.json
             _report.AddHeader("Hardware: " + HardwareClass.Detect().Describe());
             bool Runs(string s) => _segment is null || string.Equals(_segment, s, StringComparison.OrdinalIgnoreCase);
             Step("library");
@@ -240,6 +243,8 @@ internal static partial class UiCheck
                 if (await PlayerReady("clip", clip)) await PlayerChecks("clip", clip);
                 Step("back-from-clip");
                 await Back("clip");
+                Step("library-exports");
+                await LibraryExportsCheck("clip");
             }
             else if (Runs("clip")) Add(CheckResult.Skip("clip.open", "Open the shortest saved clip", "no saved clip of at least 6 s"));
 
@@ -254,21 +259,6 @@ internal static partial class UiCheck
                     await Nav("NavLibrary", typeof(LibraryPage), $"nav.library.{round}", $"Settings -> Library ({round}/3)");
                 }
                 await Capture("library-again");
-
-                // Downloads, listing the real library as if it were remote. In memory only: settings.json is not written.
-                Step("downloads");
-                var root = AppServices.Steam.RecordingsPath;
-                if (root is not null) AppServices.Settings.NetworkLibraries.Insert(0, root);
-                await Nav("NavDownloads", typeof(DownloadsPage), "nav.downloads", "Downloads page opens from the title bar");
-                if (root is not null)
-                {
-                    var listed = await WaitFor(() => Find("DownloadsStatus") is TextBlock { Text: var t } && t.Contains("recording", StringComparison.Ordinal), 120);
-                    Add(CheckResult.From(listed, "downloads.list", "Downloads lists a library read-only", listed ? "recordings listed" : "no list within 120 s"));
-                    await Capture("downloads");
-                    AppServices.Settings.NetworkLibraries.Remove(root);
-                }
-                Step("downloads-to-library");
-                await Nav("NavLibrary", typeof(LibraryPage), "nav.library.downloads", "Downloads -> Library");
             }
 
             if (Runs("cache") && cache is not null)
@@ -283,6 +273,13 @@ internal static partial class UiCheck
                 }
                 Step("back-from-cache");
                 await Back("cache");
+                Step("cache-save-clip");
+                if (Find("LibrarySaveClip") is Control { IsEnabled: true } saveClip && Invoke(saveClip))
+                {
+                    var opened = await WaitFor(() => Page() is PlayerPage, 5);
+                    Add(CheckResult.From(opened, "cache.save-clip", "Save clip on the Cache strip opens the Player", opened ? "Player shown" : "still in the Library"));
+                    if (opened && await WaitFor(() => Find("PlayerBack") is not null, 5)) await Back("cache-save");
+                }
             }
             else if (Runs("cache")) Add(CheckResult.Skip("cache.open", "Open the active cache session", "no cache session"));
         }
@@ -377,52 +374,121 @@ internal static partial class UiCheck
         }
 
         /// <summary>
-        /// The Export card through its real controls, with the A-B range still set (1 s to 3 s): estimate, detect, Save clip, Export, a kept
-        /// span, a screenshot. Output goes to a temp folder set in memory only, so the user's settings and folders are untouched and the
-        /// folder picker (which automation can't drive) never opens.
+        /// The Export card through its real controls, with the A-B range still set (1 s to 3 s): ladder, edits, sync, estimate, detect, Save
+        /// clip, Export, Fit to size, a kept part, a screenshot. Output goes to a temp folder set in memory only: settings.json is frozen
+        /// for the whole check, and the folder picker (which automation can't drive) never opens. The folder lives until the Library
+        /// has listed the exports, see <see cref="LibraryExportsCheck"/>.
         /// </summary>
         private async Task ExportChecks(string id, FrameworkElement loop)
         {
             var dir = Path.Combine(Path.GetTempPath(), "spp-uicheck-export-" + Guid.NewGuid().ToString("N")[..8]);
             Directory.CreateDirectory(dir);
-            var savedFolder = AppServices.Settings.ExportFolder;
+            _exportDir = dir;
+            _savedExportFolder = AppServices.Settings.ExportFolder;
             AppServices.Settings.ExportFolder = dir;
-            try
+
+            await Task.Delay(300);
+            await WaitFor(() => Find("PlayerExport") is Button { IsEnabled: true }, 30);        // encoder detection may still be running
+
+            // ---- the ladder
+            var edits = Find("PlayerEdits") is { ActualHeight: > 0 };
+            Add(CheckResult.From(edits, $"{id}.edits-visible", "Edits card is on screen under the video", edits ? "visible" : "hidden"));
+            Press("ExportTier-medium");
+            Press("ExportEngine-Auto");
+            var expected = FastEncoder.Core.Encoders.BestGpu is null ? "Medium · CPU" : "Medium · GPU";
+            Add(CheckResult.From(Text("PlayerExportChoice").StartsWith(expected, StringComparison.Ordinal), $"{id}.ladder-medium", "Medium on Auto uses the GPU when there is one", expected));
+            Press("ExportTier-ultra-quality");
+            var cpuOnly = Text("PlayerExportChoice").StartsWith("Ultra quality · CPU", StringComparison.Ordinal) && Find("ExportEngine-Gpu") is Control { IsEnabled: false };
+            Add(CheckResult.From(cpuOnly, $"{id}.ladder-cpu-only", "Ultra quality is CPU only, its GPU switch is off", cpuOnly ? "CPU, switch off" : Text("PlayerExportChoice")));
+            Press("ExportSpecial-trim");
+            var trim = Find("PlayerExportSpeed") is Control { IsEnabled: false };
+            Add(CheckResult.From(trim, $"{id}.ladder-trim", "Trim only turns speed and sound off", trim ? "off" : "still on"));
+            Press("ExportTier-medium");
+            Press("ExportEngine-Auto");
+
+            // ---- estimate, detect
+            var estimate = Find("PlayerEstimate");
+            var estimated = estimate is not null && Invoke(estimate) && await WaitFor(() => Text("PlayerEstimateText") is { Length: > 0 } t && !t.StartsWith("Estimating", StringComparison.Ordinal), 60);
+            Add(CheckResult.From(estimated, $"{id}.export-estimate", "Estimate size button gives a size", estimated ? "a size is shown" : "no size within 60 s"));
+            var detect = Find("PlayerDetectSync");
+            var detected = detect is not null && Invoke(detect) && await WaitFor(() => Text("PlayerSyncStatus") is { Length: > 0 } t && !t.StartsWith("Analysing", StringComparison.Ordinal), 60);
+            Add(CheckResult.From(detected, $"{id}.export-detect", "Detect button reports a verdict", detected ? "a verdict is shown" : "no verdict within 60 s"));
+
+            // ---- sync: heard live, kept for the game
+            var delayBefore = Text("PlayerAudioDelay");
+            Press("PlayerSyncLater");
+            Press("PlayerSyncLater");
+            await Task.Delay(150);
+            var mpvDelay = Session() is not null && PlayerHost.Instance?.Mpv is { } m ? m.AudioDelay : double.NaN;
+            var nudged = Text("PlayerAudioDelay") != delayBefore;
+            Add(CheckResult.From(nudged && Math.Abs(mpvDelay - ParseDelay(Text("PlayerAudioDelay"))) < 0.005, $"{id}.sync-nudge", "Sync nudges reach the player live", $"{Text("PlayerAudioDelay")}, mpv {F(mpvDelay, "0.000")} s"));
+            var game = (Page() as PlayerPage)?.CurrentGameId;
+            if (game is not null)
             {
-                foreach (var e in Descendants(window.Content).OfType<Expander>()) e.IsExpanded = true;
-                await Task.Delay(300);
-                await WaitFor(() => Find("PlayerExport") is Button { IsEnabled: true }, 30);        // encoder detection may still be running
-
-                var estimate = Find("PlayerEstimate");
-                var estimated = estimate is not null && Invoke(estimate) && await WaitFor(() => Find("PlayerEstimateText") is TextBlock { Text: var t } && t.Length > 0 && !t.StartsWith("Estimating", StringComparison.Ordinal), 60);
-                Add(CheckResult.From(estimated, $"{id}.export-estimate", "Estimate size button gives a size", estimated ? "a size is shown" : "no size within 60 s"));
-
-                var detect = Find("PlayerDetectSync");
-                var detected = detect is not null && Invoke(detect) && await WaitFor(() => Find("PlayerSyncStatus") is TextBlock { Text: var t } && t.Length > 0 && !t.StartsWith("Analysing", StringComparison.Ordinal), 60);
-                Add(CheckResult.From(detected, $"{id}.export-detect", "Detect button reports a verdict", detected ? "a verdict is shown" : "no verdict within 60 s"));
-
-                await ExportButtonCheck(id, "save-clip", "PlayerSaveClip", "Save clip (lossless, snapped to chunks)", dir, 2, 6.5);
-                await ExportButtonCheck(id, "export", "PlayerExport", "Export with the selected preset (A = 1 s, B = 3 s)", dir, 1.7, 2.3);
-
-                var keep = Find("PlayerKeepAb");
-                var kept = keep is not null && Invoke(keep) && await WaitFor(() => Find("PlayerExportRange") is TextBlock { Text: var t } && t.StartsWith("1 kept part", StringComparison.Ordinal), 3);
-                Add(CheckResult.From(kept, $"{id}.export-keep", "Keep A-B adds a kept part and clears the loop", kept ? "1 kept part" : "the range text did not change"));
-                await Capture(id + "-kept");
-                await ExportButtonCheck(id, "export-kept", "PlayerExport", "Export the kept part", dir, 1.7, 2.3);
-                if (!kept) Invoke(loop);                                    // Keep A-B clears the loop; otherwise clear it here
-
-                var shot = Find("PlayerScreenshot");
-                var shotTaken = shot is not null && Invoke(shot) && await WaitFor(() => Directory.EnumerateFiles(dir, "*.png").Any(f => new FileInfo(f).Length > 0), 5);
-                Add(CheckResult.From(shotTaken, $"{id}.screenshot", "Screenshot button saves a frame", shotTaken ? "a PNG was written" : "no PNG within 5 s"));
+                Press("PlayerApplySyncToGame");
+                Add(CheckResult.From(AppServices.Settings.GameAudioDelays.ContainsKey(game), $"{id}.sync-game", "Apply to game stores the delay", "in memory only during this check"));
+                Press("PlayerApplySyncToGame");
+                AppServices.Settings.GameAudioDelays.Remove(game);
             }
-            finally
+            if (Find("PlayerSyncReset") is { } reset) Invoke(reset);
+
+            // ---- exports through the buttons
+            await ExportButtonCheck(id, "save-clip", "PlayerSaveClip", "Save clip (lossless, snapped to chunks)", dir, 2, 6.5);
+            await ExportButtonCheck(id, "export", "PlayerExport", "Export Medium (A = 1 s, B = 3 s)", dir, 1.7, 2.3);
+
+            if (Find("PlayerExportSpeed") is ComboBox speed && Find("PlayerExportMute") is { } mute)
             {
-                AppServices.Settings.ExportFolder = savedFolder;
-                try { Directory.Delete(dir, true); } catch (Exception e) when (e is IOException or UnauthorizedAccessException) { }
+                var one = speed.SelectedIndex;
+                speed.SelectedIndex = speed.Items.IndexOf("2×");
+                Invoke(mute);
+                await ExportButtonCheck(id, "export-speed", "PlayerExport", "Export at 2× with no sound", dir, 0.8, 1.2, audio: false);
+                speed.SelectedIndex = one;
+                Invoke(mute);
             }
+
+            Press("ExportSpecial-target");
+            if (Find("PlayerExportTargetMb") is NumberBox target) target.Value = 1;
+            await ExportButtonCheck(id, "export-fit", "PlayerExport", "Fit to size stays under 1 MB", dir, 1.7, 2.3, maxBytes: 1024 * 1024);
+            Press("ExportTier-medium");
+
+            var keep = Find("PlayerKeepAb");
+            var kept = keep is not null && Invoke(keep) && await WaitFor(() => Text("PlayerExportRange").StartsWith("1 kept part", StringComparison.Ordinal), 3);
+            Add(CheckResult.From(kept, $"{id}.export-keep", "Keep A-B adds a kept part and clears the loop", kept ? "1 kept part" : "the range text did not change"));
+            await Capture(id + "-kept");
+            await ExportButtonCheck(id, "export-kept", "PlayerExport", "Export the kept part", dir, 1.7, 2.3);
+            if (!kept) Invoke(loop);                                    // Keep A-B clears the loop; otherwise clear it here
+
+            var shot = Find("PlayerScreenshot");
+            var shotTaken = shot is not null && Invoke(shot) && await WaitFor(() => Directory.EnumerateFiles(dir, "*.png").Any(f => new FileInfo(f).Length > 0), 5);
+            Add(CheckResult.From(shotTaken, $"{id}.screenshot", "Screenshot button saves a frame", shotTaken ? "a PNG was written" : "no PNG within 5 s"));
         }
 
-        private async Task ExportButtonCheck(string id, string name, string automationId, string title, string dir, double minSeconds, double maxSeconds)
+        /// <summary>Back in the Library: the exports just made are listed for the game. Then the temp folder goes.</summary>
+        private async Task LibraryExportsCheck(string id)
+        {
+            if (_exportDir is not { } dir) return;
+            var made = Directory.EnumerateFiles(dir, "*.mp4").Count();
+            var listed = await WaitFor(() => Find("LibraryExportList") is { ActualHeight: > 0 }, 5);
+            Add(CheckResult.From(listed && made > 0, $"{id}.library-exports", "Library lists the exports of this game", $"{made} files made, list {(listed ? "shown" : "not shown")}"));
+            AppServices.Settings.ExportFolder = _savedExportFolder;
+            _exportDir = null;
+            try { Directory.Delete(dir, true); } catch (Exception e) when (e is IOException or UnauthorizedAccessException) { }
+        }
+
+        private void Press(string automationId)
+        {
+            if (Find(automationId) is { } e and not Control { IsEnabled: false }) Invoke(e);
+        }
+
+        private string Text(string automationId) => Find(automationId) is TextBlock t ? t.Text : "";
+
+        private static double ParseDelay(string text)
+        {
+            var digits = new string([.. text.Where(c => char.IsDigit(c) || c == '-' || c == '+')]);
+            return double.TryParse(digits, System.Globalization.NumberStyles.AllowLeadingSign, System.Globalization.CultureInfo.InvariantCulture, out var ms) ? ms / 1000 : double.NaN;
+        }
+
+        private async Task ExportButtonCheck(string id, string name, string automationId, string title, string dir, double minSeconds, double maxSeconds, bool audio = true, long? maxBytes = null)
         {
             var before = Directory.EnumerateFiles(dir, "*.mp4").ToHashSet();
             var button = Find(automationId);
@@ -431,12 +497,13 @@ internal static partial class UiCheck
                 Add(CheckResult.Fail($"{id}.{name}", title, $"no {automationId} element"));
                 return;
             }
-            await WaitFor(() => AppServices.Exports.Pending == 0 && Directory.EnumerateFiles(dir, "*.mp4").Any(f => !before.Contains(f)), 120);
+            await WaitFor(() => AppServices.Exports.Pending == 0 && Directory.EnumerateFiles(dir, "*.mp4").Any(f => !before.Contains(f)), 60);
             var output = Directory.EnumerateFiles(dir, "*.mp4").FirstOrDefault(f => !before.Contains(f));
             var info = output is null ? null : await FastEncoder.Core.Ff.ProbeAsync(output);
-            var ok = info is { HasAudio: true } && info.Duration >= minSeconds && info.Duration <= maxSeconds;
+            var bytes = output is null ? 0 : new FileInfo(output).Length;
+            var ok = info is not null && info.HasAudio == audio && info.Duration >= minSeconds && info.Duration <= maxSeconds && (maxBytes is null || bytes <= maxBytes);
             var state = AppServices.Exports.Items.LastOrDefault()?.State.ToString() ?? "none";
-            Add(CheckResult.From(ok, $"{id}.{name}", title, info is null ? $"no output (queue item: {state})" : $"{F(info.Duration, "0.00")} s, audio {info.HasAudio}"));
+            Add(CheckResult.From(ok, $"{id}.{name}", title, info is null ? $"no output (queue item: {state})" : $"{F(info.Duration, "0.00")} s, audio {info.HasAudio}, {bytes / 1024} KiB"));
         }
 
         /// <summary>The transport controls (the volume slider or, when narrow, its button) and the timeline's zoom group.</summary>
