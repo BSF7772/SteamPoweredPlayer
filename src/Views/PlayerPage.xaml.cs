@@ -50,7 +50,7 @@ public sealed partial class PlayerPage : Page
     private PlayerHost? _host;
     private PlaybackSession? _session;
     private DispatcherQueueTimer? _idleTimer, _pulseTimer, _focusTimer;
-    private bool _compact, _transportNarrow;
+    private bool _compact;
     private AppWindow? _appWindow;
     private Window? _window;
     private string? _key;
@@ -954,16 +954,61 @@ public sealed partial class PlayerPage : Page
         if (!_fullscreen) ApplyLayout(false);
     }
 
-    /// <summary>Narrow video column: the right cluster of the transport moves to a second row.</summary>
+    /// <summary>
+    /// Transport widths: every control stays visible on one row. Below <see cref="SliderInlineFrom"/> the volume slider moves into the
+    /// volume button's flyout; below <see cref="LabelsFrom"/> the A–B and speed labels shrink to their icons / value.
+    /// </summary>
+    private const double SliderInlineFrom = 790, LabelsFrom = 700;
+    private int _transportTier = -1;   // 0 = full, 1 = slider in flyout, 2 = slider in flyout + short labels
+
     private void Transport_SizeChanged(object sender, SizeChangedEventArgs e)
     {
-        var narrow = e.NewSize.Width < 700 && !_fullscreen;
-        if (narrow == _transportNarrow) return;
-        _transportNarrow = narrow;
-        Grid.SetRow(TransportRight, narrow ? 1 : 0);
-        Grid.SetColumn(TransportRight, narrow ? 0 : 3);
-        Grid.SetColumnSpan(TransportRight, narrow ? 4 : 1);
-        TransportRight.HorizontalAlignment = narrow ? HorizontalAlignment.Right : HorizontalAlignment.Left;
+        var w = e.NewSize.Width;
+        var tier = w >= SliderInlineFrom ? 0 : w >= LabelsFrom ? 1 : 2;
+        if (tier == _transportTier) return;
+        // Not inside the layout pass that reported the size: re-parenting the slider there is a layout re-entrancy.
+        DispatcherQueue.TryEnqueue(() => ApplyTransportTier(tier));
+    }
+
+    private void ApplyTransportTier(int tier)
+    {
+        if (tier == _transportTier) return;
+        _transportTier = tier;
+        var inFlyout = tier > 0;
+        if (inFlyout)
+        {
+            VolumeFlyoutButton.Visibility = Visibility.Visible;
+            if (TransportRight.Children.Remove(VolumeSlider))
+            {
+                VolumeSlider.Width = 140;
+                VolumeFlyoutButton.Flyout = new Flyout
+                {
+                    Placement = Microsoft.UI.Xaml.Controls.Primitives.FlyoutPlacementMode.TopEdgeAlignedRight,
+                    Content = new Grid { Padding = new Thickness(4, 2, 4, 2), Children = { VolumeSlider } },
+                };
+            }
+        }
+        else
+        {
+            VolumeFlyoutButton.Visibility = Visibility.Collapsed;
+            if (VolumeFlyoutButton.Flyout is Flyout { Content: Grid host } f)
+            {
+                f.Hide();
+                host.Children.Remove(VolumeSlider);
+                f.Content = null;
+                VolumeFlyoutButton.Flyout = null;
+                VolumeSlider.Width = 92;
+                TransportRight.Children.Insert(TransportRight.Children.IndexOf(FullscreenButton), VolumeSlider);
+            }
+        }
+        LoopLabel.Visibility = tier >= 2 ? Visibility.Collapsed : Visibility.Visible;
+        SpeedIcon.Visibility = tier >= 2 ? Visibility.Collapsed : Visibility.Visible;
+        // the tightest tier also trims gaps and padding (the video column is ~620 px at the minimum window)
+        TransportRight.Spacing = tier >= 2 ? 2 : 4;
+        TimeStack.Margin = new Thickness(tier >= 2 ? 6 : 10, 0, 0, 0);
+        var pad = tier >= 2 ? new Thickness(6, 6, 6, 6) : new Thickness(8, 6, 8, 6);
+        LoopButton.Padding = pad;
+        MuteButton.Padding = pad;
     }
 
     private void ApplyLayout(bool fs)
