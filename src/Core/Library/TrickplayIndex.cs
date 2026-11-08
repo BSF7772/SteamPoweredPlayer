@@ -6,7 +6,9 @@ public sealed record TrickplayTile(int Chunk, string SheetPath, int X, int Y, in
 
 /// <summary>
 /// Reader for the trickplay of one recording (what the filmstrip and the scrub preview use). Time is on the media (tfdt) axis:
-/// chunk N covers [(N − 1) · interval, N · interval). No I/O after construction.
+/// chunk N covers [(N − 1) · interval + shift, N · interval + shift), shift = <see cref="SessionMedia.AxisShiftSeconds"/> (0 for a cache
+/// session; a saved clip restarts chunk numbers at 1 but keeps the session's tfdt). The manifest itself is keyed by chunk number only.
+/// No I/O after construction.
 /// </summary>
 public sealed class TrickplayIndex
 {
@@ -15,10 +17,12 @@ public sealed class TrickplayIndex
     private readonly Dictionary<int, (int Sheet, int Tile)> _byChunk = [];
     private readonly int[] _sorted;
 
-    public TrickplayIndex(TrickplayManifest manifest, string recordingTrickDir)
+    /// <param name="axisShiftSeconds">The recording's <see cref="SessionMedia.AxisShiftSeconds"/>, so lookups by media time hit the right chunk.</param>
+    public TrickplayIndex(TrickplayManifest manifest, string recordingTrickDir, double axisShiftSeconds = 0)
     {
         _manifest = manifest;
         _dir = recordingTrickDir;
+        AxisShiftSeconds = double.IsFinite(axisShiftSeconds) ? axisShiftSeconds : 0;
         for (var s = 0; s < manifest.Sheets.Count; s++)
         {
             var chunks = manifest.Sheets[s].Chunks;
@@ -29,13 +33,16 @@ public sealed class TrickplayIndex
     }
 
     /// <summary>Null when the recording has no (readable, current-version) trickplay yet.</summary>
-    public static TrickplayIndex? TryLoad(DataFolder data, string recordingKey)
+    /// <param name="axisShiftSeconds">The recording's <see cref="SessionMedia.AxisShiftSeconds"/>.</param>
+    public static TrickplayIndex? TryLoad(DataFolder data, string recordingKey, double axisShiftSeconds = 0)
     {
         var dir = Trickplay.DirFor(data, recordingKey);
         var m = TrickplayManifest.TryRead(dir);
-        return m is null ? null : new TrickplayIndex(m, dir);
+        return m is null ? null : new TrickplayIndex(m, dir, axisShiftSeconds);
     }
 
+    /// <summary>Chunk N starts at (N − 1) · interval + this, as in the recording's <see cref="SessionMedia"/>.</summary>
+    public double AxisShiftSeconds { get; }
     public double IntervalSeconds => _manifest.IntervalSeconds;
     public int TileWidth => _manifest.TileWidth;
     public int TileHeight => _manifest.TileHeight;
@@ -43,7 +50,10 @@ public sealed class TrickplayIndex
     /// <summary>Chunk numbers that have a thumbnail, ascending.</summary>
     public IReadOnlyList<int> Chunks => _sorted;
 
-    public int ChunkAt(double seconds) => (int)Math.Floor(Math.Max(0, seconds) / _manifest.IntervalSeconds) + 1;
+    /// <summary>The chunk that contains media time <paramref name="seconds"/> (the formula of <see cref="SessionMedia.ChunkAt"/>), never below 1.</summary>
+    public int ChunkAt(double seconds) => double.IsNaN(seconds)
+        ? 1
+        : (int)Math.Min(int.MaxValue, Math.Floor(Math.Max(0, seconds - AxisShiftSeconds) / _manifest.IntervalSeconds) + 1);
 
     public TrickplayTile? FindChunk(int chunk) =>
         _byChunk.TryGetValue(chunk, out var p) ? MakeTile(chunk, p.Sheet, p.Tile) : null;

@@ -413,4 +413,15 @@ public sealed class LibraryServiceTests
         var c = await seen.Task.WaitAsync(TimeSpan.FromSeconds(15));
         Assert.StartsWith(s.Root, c.FullPath, StringComparison.OrdinalIgnoreCase);
     }
+
+    [Fact]
+    public void SameMedia_sees_a_new_axis_shift_but_not_a_bitrate_drift()
+    {
+        var a = new SessionMedia("C:/m", [new SegmentRun(1, 4)], 3.0, Live: false, Temporary: false, AxisShiftSeconds: 0, BitsPerSecond: 20e6);
+        // the first scan of an old scan-cache entry reads the clip's real tfdt: playback must re-place the clip on its axis
+        Assert.False(LibraryService.SameMedia(a, a with { AxisShiftSeconds = 585 }));
+        // the bitrate only sizes mpv's cache at open; a few bytes more in a chunk are no reason to reload anything
+        Assert.True(LibraryService.SameMedia(a, a with { BitsPerSecond = 21e6 }));
+        Assert.True(LibraryService.SameMedia(a, a with { Runs = [new SegmentRun(1, 4)] }));
+    }
 }

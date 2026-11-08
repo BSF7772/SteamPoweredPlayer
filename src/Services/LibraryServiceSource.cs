@@ -233,15 +233,17 @@ public sealed class LibraryServiceSource : ILibrarySource, IDisposable
 
     public TrickplayIndex? TrickplayFor(string relativeFolder)
     {
+        // The index maps media time through the recording's axis shift (a saved clip's chunk 1 is at its real tfdt, not at 0).
+        var shift = GetMedia(relativeFolder)?.AxisShiftSeconds ?? 0;
         DataFolder? data;
         lock (_lock)
         {
-            if (_trick.TryGetValue(relativeFolder, out var hit)) return hit;
+            if (_trick.TryGetValue(relativeFolder, out var hit) && hit.AxisShiftSeconds == shift) return hit;
             data = _data;
         }
         var key = TrickplayQueue.KeyOf(relativeFolder);
         if (data is null || !Trickplay.IsSafeKey(key)) return null;
-        var idx = TrickplayIndex.TryLoad(data, key);
+        var idx = TrickplayIndex.TryLoad(data, key, shift);
         if (idx is not null) lock (_lock) _trick[relativeFolder] = idx;
         return idx;
     }

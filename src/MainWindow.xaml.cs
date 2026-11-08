@@ -39,7 +39,11 @@ public sealed partial class MainWindow : Window
         AppWindow.SetIcon(System.IO.Path.Combine(AppContext.BaseDirectory, "Assets", "SteamPoweredPlayer.ico"));
         PlaceWindow();
 
-        ContentFrame.Navigated += (_, e) => SyncNav(e.SourcePageType);
+        ContentFrame.Navigated += (_, e) =>
+        {
+            SyncNav(e.SourcePageType);
+            if (e.SourcePageType == typeof(PlayerPage)) CloseToasts(keepErrors: true);
+        };
         Root.Loaded += Root_Loaded;
         AppServices.LibraryCreated += WireSource;
         Closed += (_, _) =>
@@ -168,39 +172,63 @@ public sealed partial class MainWindow : Window
     //  title bar chips
     // =====================================================================================
 
+    // F10: three chips built once; an update changes only their text. Digits are tabular and a chip's width only ever grows (never
+    // shrinks back between updates), so nothing in the title bar moves while a recording grows or a scan reports progress.
+    private Chip? _statusChip, _libraryChip, _gpuChip;
+
+    private sealed record Chip(Border Root, TextBlock Text);
+
     public void RefreshChips(string? status = null)
     {
-        TitleChips.Children.Clear();
-        if (status is not null) AddChip(status, Windows.UI.Color.FromArgb(255, 37, 99, 235));
-
-        var index = AppServices.Library?.Current;
-        if (index is not null)
+        if (_statusChip is null)
         {
-            var bytes = index.Recordings.Sum(r => r.SizeBytes);
-            AddChip($"{index.Recordings.Count} recordings · {FormatBytes(bytes)}", Windows.UI.Color.FromArgb(255, 34, 197, 94));
+            _statusChip = AddChip(Windows.UI.Color.FromArgb(255, 37, 99, 235));
+            _libraryChip = AddChip(Windows.UI.Color.FromArgb(255, 34, 197, 94));
+            _gpuChip = AddChip(Windows.UI.Color.FromArgb(255, 156, 163, 175));
         }
-        else AddChip("No library yet", Windows.UI.Color.FromArgb(255, 156, 163, 175));
 
+        SetChip(_statusChip, status);
+        var index = AppServices.Library?.Current;
+        SetChip(_libraryChip!, index is null
+            ? "No library yet"
+            : $"{index.Recordings.Count.ToString(System.Globalization.CultureInfo.InvariantCulture)} recordings · {FormatBytes(index.Recordings.Sum(r => r.SizeBytes))}");
         // The adapter DXGI hands to D3D11 by default; "CPU decoding" when the setting says so.
-        AddChip(AppServices.Settings.Decoding == Core.DecodeMode.Cpu ? "CPU decoding" : GpuInfo.Name ?? "GPU decoding", Windows.UI.Color.FromArgb(255, 156, 163, 175));
+        SetChip(_gpuChip!, AppServices.Settings.Decoding == Core.DecodeMode.Cpu ? "CPU decoding" : GpuInfo.Name ?? "GPU decoding");
     }
 
-    private void AddChip(string text, Windows.UI.Color dotColor)
+    private static void SetChip(Chip chip, string? text)
+    {
+        if (text is null)
+        {
+            chip.Root.Visibility = Visibility.Collapsed;
+            chip.Text.MinWidth = 0;                       // a new scan starts narrow again
+            return;
+        }
+        if (chip.Text.Text != text) chip.Text.Text = text;
+        chip.Root.Visibility = Visibility.Visible;
+        // Ratchet: measure the new text and keep the widest width seen, so a shorter text does not pull the chips around.
+        chip.Text.Measure(new Windows.Foundation.Size(double.PositiveInfinity, double.PositiveInfinity));
+        var w = Math.Ceiling(chip.Text.DesiredSize.Width);
+        if (w > chip.Text.MinWidth) chip.Text.MinWidth = w;
+    }
+
+    private Chip AddChip(Windows.UI.Color dotColor)
     {
         var dot = new Ellipse { Width = 7, Height = 7, Fill = new SolidColorBrush(dotColor), VerticalAlignment = VerticalAlignment.Center };
-        TitleChips.Children.Add(new Border
+        var text = new TextBlock { FontSize = 12, VerticalAlignment = VerticalAlignment.Center };
+        Microsoft.UI.Xaml.Documents.Typography.SetNumeralAlignment(text, FontNumeralAlignment.Tabular);
+        var root = new Border
         {
             CornerRadius = new CornerRadius(11),
             Padding = new Thickness(10, 3, 10, 4),
             Background = new SolidColorBrush(Windows.UI.Color.FromArgb(0x1A, 0x80, 0x80, 0x80)),
             BorderBrush = new SolidColorBrush(Windows.UI.Color.FromArgb(0x33, 0x80, 0x80, 0x80)),
             BorderThickness = new Thickness(1),
-            Child = new StackPanel
-            {
-                Orientation = Orientation.Horizontal, Spacing = 6,
-                Children = { dot, new TextBlock { Text = text, FontSize = 12 } },
-            },
-        });
+            Visibility = Visibility.Collapsed,
+            Child = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6, Children = { dot, text } },
+        };
+        TitleChips.Children.Add(root);
+        return new(root, text);
     }
 
     public static string FormatBytes(long b) => b switch
@@ -214,8 +242,13 @@ public sealed partial class MainWindow : Window
     //  toasts
     // =====================================================================================
 
+    /// <summary>
+    /// F6: toasts sit bottom-left, away from the player controls; on the Player page only errors are shown (anything else would cover
+    /// the video), and opening the Player closes the toasts that are still up.
+    /// </summary>
     public void ShowToast(string title, string? message, InfoBarSeverity severity, int seconds = 6)
     {
+        if (severity != InfoBarSeverity.Error && ContentFrame.Content is PlayerPage) return;
         var bar = new InfoBar
         {
             Title = title,
@@ -238,6 +271,12 @@ public sealed partial class MainWindow : Window
             t.Tick += (_, _) => bar.IsOpen = false;
             t.Start();
         }
+    }
+
+    private void CloseToasts(bool keepErrors)
+    {
+        foreach (var bar in ToastHost.Children.OfType<InfoBar>().ToList())
+            if (!keepErrors || bar.Severity != InfoBarSeverity.Error) bar.IsOpen = false;
     }
 
     // =====================================================================================

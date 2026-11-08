@@ -64,9 +64,9 @@
         <!-- ================================================================ pages -->
         <Frame x:Name="ContentFrame" Grid.Row="1" IsNavigationStackEnabled="True" />
 
-        <!-- ================================================================ toasts -->
-        <StackPanel x:Name="ToastHost" Grid.RowSpan="2" VerticalAlignment="Bottom" HorizontalAlignment="Center"
-                    Margin="0,0,0,40" Spacing="8" Width="460">
+        <!-- ================================================================ toasts (F6: bottom-left, never over the player) -->
+        <StackPanel x:Name="ToastHost" Grid.Row="1" VerticalAlignment="Bottom" HorizontalAlignment="Left"
+                    Margin="16,0,0,16" Spacing="8" Width="400">
             <StackPanel.ChildrenTransitions>
                 <TransitionCollection>
                     <EntranceThemeTransition FromVerticalOffset="40" />
