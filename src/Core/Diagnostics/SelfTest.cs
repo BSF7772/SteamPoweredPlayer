@@ -138,6 +138,7 @@ public static class SelfTest
                 await Step("export.lossless", "Lossless 30 s export (RangeSource + ffmpeg -c copy)", () => Export(ct)).ConfigureAwait(false);
                 await Step("trickplay.sheets", "Trickplay sheets generated", () => TrickplayChecks(ct)).ConfigureAwait(false);
                 await Step("trickplay.live", "Trickplay follows a growing session", () => TrickplayLiveChecks(ct)).ConfigureAwait(false);
+                await Step("play.live-trickplay", "Playback is undisturbed while trickplay builds", () => PlayWhileTrickplayBuilds(ct)).ConfigureAwait(false);
                 LaterPhases();
             }
         }
@@ -574,6 +575,63 @@ public static class SelfTest
             return CheckResult.From(ok, "trickplay.live", "Trickplay follows a growing session",
                 $"{r0?.NewChunks ?? 0} tiles at start, then {grown}/4 new chunks each got one tile (worst latency {F(worst)} ms of {F(budgetMs)}, {F(tiles > 0 ? cpu / tiles : 0)} ms CPU per tile), index {index?.Count ?? 0} tiles",
                 number: worst, unit: "ms");
+        }
+
+        /// <summary>Playing a growing session while trickplay builds a tile per new chunk must not drop frames or stall (the builder runs beside the player as ffmpeg child processes).</summary>
+        private async Task<CheckResult> PlayWhileTrickplayBuilds(CancellationToken ct)
+        {
+            var folder = _s.Build(SyntheticVariant.Live);
+            var media = await MediaOf(folder, ct).ConfigureAwait(false);
+            var data = DataFolder.Open(_s.Scratch("data-live-play"), _s.RecordingRoot);
+            await using var rig = PlaybackRig.Create(DecodeMode.Cpu);
+            await rig.Session.OpenAsync(media, 0, play: true, ct).ConfigureAwait(false);
+            long Drops() => (rig.Player.GetInt64("frame-drop-count") ?? 0) + (rig.Player.GetInt64("decoder-frame-drop-count") ?? 0);
+
+            await WaitFor(() => rig.TimePos >= 0.5, TimeSpan.FromSeconds(5)).ConfigureAwait(false);
+            var quietFrom = Drops();
+            var quietT0 = rig.TimePos;
+            await Task.Delay(600, ct).ConfigureAwait(false);
+            var quietDrops = Drops() - quietFrom;
+            var quietSeconds = rig.TimePos - quietT0;
+
+            var busyFrom = Drops();
+            var busyT0 = rig.TimePos;
+            var builds = 0;
+            var tiles = 0;
+            var maxGap = 0.0;
+            var lastPos = rig.TimePos;
+            var lastAt = Stopwatch.GetTimestamp();
+            using var writer = _s.StartLive(folder, 13, TimeSpan.FromSeconds(0.9));
+            var gate = new SemaphoreSlim(1);
+            writer.Done += _ => Task.Run(async () =>
+            {
+                await gate.WaitAsync(CancellationToken.None).ConfigureAwait(false);
+                try
+                {
+                    var m = (await Scanner.ScanAsync(folder, null, CancellationToken.None).ConfigureAwait(false)).Media;
+                    var b = m is null ? null : TrickplayLive.Buildable(m);
+                    if (b is null) return;
+                    var r = await Trickplay.GenerateAsync(data, "live-play", b, new TrickplayOptions(DecodeMode.Cpu), null, CancellationToken.None).ConfigureAwait(false);
+                    Interlocked.Increment(ref builds);
+                    Interlocked.Add(ref tiles, r.NewChunks);
+                }
+                catch (Exception e) when (e is IOException or InvalidOperationException) { }
+                finally { gate.Release(); }
+            }, CancellationToken.None);
+            var sw = Stopwatch.StartNew();
+            while (sw.Elapsed < TimeSpan.FromSeconds(2.8))
+            {
+                await Task.Delay(20, ct).ConfigureAwait(false);
+                var pos = rig.TimePos;
+                if (pos > lastPos + 0.001) { lastPos = pos; lastAt = Stopwatch.GetTimestamp(); }
+                maxGap = Math.Max(maxGap, Stopwatch.GetElapsedTime(lastAt).TotalMilliseconds);
+            }
+            var busyDrops = Drops() - busyFrom;
+            var busySeconds = rig.TimePos - busyT0;
+            var ok = builds >= 2 && tiles >= 2 && busyDrops <= quietDrops && maxGap < 500 && busySeconds > 2.0;
+            return CheckResult.From(ok, "play.live-trickplay", "Playback is undisturbed while trickplay builds",
+                $"{builds} builds, {tiles} tiles during {F(busySeconds, "0.0")} s of playback; dropped frames {busyDrops} (quiet baseline {quietDrops} in {F(quietSeconds, "0.0")} s); longest position gap {F(maxGap)} ms",
+                number: busyDrops, unit: "frames");
         }
 
         // ---- later phases ---------------------------------------------------------------------------------------------
