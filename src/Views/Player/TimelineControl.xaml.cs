@@ -24,7 +24,7 @@ namespace SteamPoweredPlayer.Views.Player;
 /// </summary>
 public sealed partial class TimelineControl : UserControl
 {
-    private const double PreviewWidth = 232, PreviewGap = 12, StripHeight = 54;
+    private const double PreviewWidth = 328, PreviewGap = 12, StripHeight = 54;
 
     /// <summary>After the user moved or zoomed the window, following the playhead waits this long (so the view isn't yanked back).</summary>
     private static readonly TimeSpan FollowPause = TimeSpan.FromSeconds(4);
@@ -403,7 +403,7 @@ public sealed partial class TimelineControl : UserControl
         HoverLine.Visibility = Visibility.Visible;
         PreviewTime.Text = FrameTimecode.Position(t, Fps);
         Preview.HorizontalOffset = Math.Clamp(x - PreviewWidth / 2, 0, Math.Max(0, _width - PreviewWidth));
-        Preview.VerticalOffset = -(126 + 8 + 24 + PreviewGap);
+        Preview.VerticalOffset = -(180 + 8 + 24 + PreviewGap);
         Preview.IsOpen = true;
 
         var version = ++_previewVersion;

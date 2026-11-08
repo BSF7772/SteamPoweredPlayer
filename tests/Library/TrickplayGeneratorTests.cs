@@ -76,7 +76,7 @@ public sealed class TrickplayGeneratorTests(SyntheticSession session, ITestOutpu
 
     private static DataFolder NewData(TempDir t) => DataFolder.Open(t.Sub("data"), t.Sub("steam", "rec"));
 
-    private static readonly TrickplayOptions Cpu = new(DecodeMode.Cpu);
+    private static readonly TrickplayOptions Cpu = new(DecodeMode.Cpu, TileWidth: 160);   // the 320x180 synthetic source is never upscaled
 
     [Fact]
     public async Task Generates_one_sheet_per_hundred_tiles_with_all_chunks()
@@ -116,6 +116,19 @@ public sealed class TrickplayGeneratorTests(SyntheticSession session, ITestOutpu
         var tile = idx.Find(100 * 3.0 + 1)!; // chunk 101 -> second sheet, first tile
         Assert.EndsWith("sheet-0001.jpg", tile.SheetPath);
         Assert.Equal((0, 0), (tile.X, tile.Y));
+    }
+
+    [Fact]
+    public async Task Sheets_made_with_another_tile_width_are_regenerated()
+    {
+        if (!CanRun()) return;
+        using var t = new TempDir();
+        var data = NewData(t);
+        var media = Media(session.Folder, 1, 12);
+        await Trickplay.GenerateAsync(data, "k", media, Cpu with { TileWidth = 96 });
+        var r = await Trickplay.GenerateAsync(data, "k", media, Cpu);
+        Assert.Equal(12, r.NewChunks);
+        Assert.Equal(160, TrickplayManifest.TryRead(Trickplay.DirFor(data, "k"))!.TileWidth);
     }
 
     [Fact]

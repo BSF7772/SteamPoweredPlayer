@@ -55,7 +55,7 @@
         <Popup x:Name="Preview" IsLightDismissEnabled="False" HorizontalAlignment="Left" VerticalAlignment="Top">
             <Border CornerRadius="8" Background="#EE101018" BorderBrush="#33FFFFFF" BorderThickness="1" Padding="4" IsHitTestVisible="False">
                 <StackPanel Spacing="4">
-                    <Border x:Name="PreviewFrame" Width="224" Height="126" CornerRadius="5" Background="#FF1B1B24">
+                    <Border x:Name="PreviewFrame" Width="320" Height="180" CornerRadius="5" Background="#FF1B1B24">
                         <Image x:Name="PreviewImage" Stretch="UniformToFill" />
                     </Border>
                     <TextBlock x:Name="PreviewTime" Style="{StaticResource Timecode}" Foreground="White" HorizontalAlignment="Center" />

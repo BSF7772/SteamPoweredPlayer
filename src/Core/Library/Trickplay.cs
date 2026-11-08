@@ -8,12 +8,13 @@ using SteamPoweredPlayer.Core.Steam;
 
 namespace SteamPoweredPlayer.Core.Library;
 
-/// <param name="TileWidth">Thumbnail width in pixels (height follows the video's aspect ratio, 160 × 90 for 16:9).</param>
-/// <param name="JpegQuality">ffmpeg <c>-q:v</c> scale (2 best … 31 worst); spike S4: 10 at 160 px = 3.5 KB per thumbnail.</param>
+/// <param name="TileWidth">Thumbnail width in pixels (height follows the video's aspect ratio, 360 × 202 for 16:9). Maintainer 2026-11-08:
+/// 360 px (was 160 px, too blurry); sheets made with another width are regenerated.</param>
+/// <param name="JpegQuality">ffmpeg <c>-q:v</c> scale (2 best … 31 worst); spike S4: 10 at 160 px = 3.5 KB per thumbnail; 4 at 360 px.</param>
 /// <param name="FfmpegPath">Override; default is FastEncoder's <c>Ff</c> lookup (next to the exe, PATH, winget).</param>
 /// <param name="ReadAheadChunks">Fragments read ahead of the ffmpeg pipe (memory: about 0.3 MB each).</param>
 public sealed record TrickplayOptions(
-    DecodeMode Mode = DecodeMode.Gpu, int TileWidth = 160, int Columns = 10, int Rows = 10, int JpegQuality = 10,
+    DecodeMode Mode = DecodeMode.Gpu, int TileWidth = 360, int Columns = 10, int Rows = 10, int JpegQuality = 4,
     bool BelowNormalPriority = true, string? FfmpegPath = null, int ReadAheadChunks = 16);
 
 /// <param name="Total">Chunks this run works on.</param>
@@ -228,6 +229,8 @@ public static partial class Trickplay
         data.EnsureCreated();
         Directory.CreateDirectory(dir);
         var old = TrickplayManifest.TryRead(dir);
+        // Sheets made with another tile width (e.g. the old 160 px default) are regenerated from scratch; the new sheets overwrite them.
+        if (old is not null && (old.TileWidth != options.TileWidth || old.Columns != options.Columns || old.Rows != options.Rows)) old = null;
         // An existing manifest fixes the geometry: its sheets and the new ones must agree.
         var manifest = old ?? TrickplayManifest.Empty(options.TileWidth, options.Columns, options.Rows, media.SegmentSeconds);
         var plan = Plan(manifest, media.Chunks());
