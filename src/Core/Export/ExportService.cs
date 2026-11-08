@@ -22,7 +22,8 @@ public sealed record ExportResult(string Path, long Bytes, IReadOnlyList<ExportP
 /// <summary>
 /// Runs an export. Each kept span is handled alone: its chunks are copied through <see cref="RangeSource"/> first, so Steam can keep
 /// trimming its cache while ffmpeg works on private bytes. The audio takes extra chunks (<see cref="ExportPlan.AudioChunks"/>), so a
-/// sync shift or Steam's jitter never runs out of sound. A lossless span is then muxed on the real timestamps and cut to the picture;
+/// sync shift or Steam's jitter never runs out of sound. A lossless span is then muxed on the real timestamps, cut to the picture and
+/// played from A through an edit list over the keyframe's lead-in (see <see cref="LosslessArgs"/>);
 /// a re-encode goes through FastEncoder's <see cref="Pipeline"/> with a frame-exact trim. Several spans are joined without re-encoding.
 /// Working files stay in a private folder next to the destination (same volume, so the final move is atomic), so a failed or
 /// cancelled export never leaves a partial output.
@@ -123,8 +124,9 @@ public static class ExportService
     }
 
     /// <summary>
-    /// A lossless span: the picture from the keyframe of its first chunk to the exact end, and the sound cut to the same times.
-    /// Copying can cut anywhere except the picture's start, so only that one snaps.
+    /// A lossless span: the picture is copied from the keyframe of its first chunk to the exact end, and the sound is cut to the same
+    /// times. When the plan starts after that keyframe, the lead-in frames stay in the file (they are what the first frames reference)
+    /// but an MP4 edit list hides them: timestamps count from A, the keyframe sits at a negative time, and the file plays from A.
     /// </summary>
     private static async Task<string> LosslessAsync(ExportJob job, ExportPlan plan, (int First, int Last) audioChunks, string dir, Action<double, string> progress, CancellationToken ct)
     {
@@ -133,11 +135,18 @@ public static class ExportService
         var audio = Path.Combine(dir, "audio.m4a");
         await GatherAsync(job.Media, plan, audioChunks, video, audio, f => progress(f * gatherEnd, "Reading chunks"), ct).ConfigureAwait(false);
         var first = await FirstDtsAsync(video, ct).ConfigureAwait(false) ?? plan.SnappedStart;
+        var origin = LosslessOrigin(plan, first);
+        var end = LosslessEnd(plan);
+        var cut = Path.Combine(dir, "audio-cut.m4a");
         var output = Path.Combine(dir, "out.mp4");
-        await Pipeline.RunAsync(LosslessArgs(video, audio, output, first, LosslessEnd(plan), job.AudioDelay), plan.End - plan.SnappedStart,
-            (f, _) => progress(gatherEnd + f * (1 - gatherEnd), "Joining"), ct).ConfigureAwait(false);
+        var span = plan.End - plan.SnappedStart;
+        await Pipeline.RunAsync(LosslessAudioArgs(audio, cut, origin, end, job.AudioDelay), span,
+            (f, _) => progress(gatherEnd + f * 0.5 * (1 - gatherEnd), "Joining"), ct).ConfigureAwait(false);
+        await Pipeline.RunAsync(LosslessArgs(video, cut, output, origin, end), span,
+            (f, _) => progress(gatherEnd + (0.5 + f * 0.5) * (1 - gatherEnd), "Joining"), ct).ConfigureAwait(false);
         File.Delete(video);                                                                          // this job's own files: free the space early
         File.Delete(audio);
+        File.Delete(cut);
         return output;
     }
 
@@ -145,20 +154,37 @@ public static class ExportService
     public static double LosslessEnd(ExportPlan plan) => plan.End >= plan.SnappedEnd - 0.001 ? plan.End + 0.05 : plan.End;
 
     /// <summary>
-    /// <c>-copyts</c> keeps the absolute tfdt, which is what the two streams are aligned on; <c>-itsoffset</c> applies the sync; the output's
-    /// <c>-ss</c>/<c>-to</c> cut both streams to the picture, and <c>make_zero</c> moves the result to 0.
+    /// The instant on the media axis that becomes 0 in a lossless output. A plan that starts after its keyframe counts from A (1 ms
+    /// early, so a frame stamped exactly on A is kept), which makes the keyframe's timestamp negative. A plan that starts on its keyframe
+    /// counts from <paramref name="firstDts"/>, the first packet's dts, so that packet is never cut away.
     /// </summary>
-    /// <param name="first">The first video packet's dts. The cut must not start after it: without its keyframe, the picture is lost.</param>
-    public static List<string> LosslessArgs(string video, string audio, string output, double first, double end, double audioDelay)
-    {
-        var args = new List<string> { "-hide_banner", "-nostdin", "-y", "-loglevel", "error", "-progress", "pipe:1", "-nostats", "-copyts", "-i", video };
-        if (Math.Abs(audioDelay) > 0.0005) args.AddRange(["-itsoffset", Number(audioDelay)]);
-        args.AddRange(["-i", audio, "-map", "0:v:0", "-map", "1:a:0", "-c", "copy"]);
-        var start = first - 0.001;
-        if (start > 0) args.AddRange(["-ss", Number(start)]);
-        args.AddRange(["-to", Number(end), "-avoid_negative_ts", "make_zero", "-movflags", "+faststart", output]);
-        return args;
-    }
+    public static double LosslessOrigin(ExportPlan plan, double firstDts) =>
+        plan.Start > plan.SnappedStart + 0.001 ? Math.Max(plan.Start - 0.001, firstDts) : firstDts;   // a first packet after A (jitter) is never cut away
+
+    /// <summary>
+    /// The sound of a lossless span as its own file. <c>-copyts</c> keeps the absolute tfdt, <c>-itsoffset</c> applies the sync and moves
+    /// <paramref name="origin"/> to 0; <c>-ss 0</c> drops the sound before it, and <c>-to</c> ends it with the picture. Every audio frame is
+    /// a key frame, so it cuts anywhere (to within one frame, 21 ms).
+    /// </summary>
+    public static List<string> LosslessAudioArgs(string audio, string output, double origin, double end, double audioDelay) =>
+    [
+        "-hide_banner", "-nostdin", "-y", "-loglevel", "error", "-progress", "pipe:1", "-nostats", "-copyts",
+        "-itsoffset", Number(audioDelay - origin), "-i", audio, "-vn", "-c", "copy",
+        "-ss", "0", "-to", Number(end - origin), "-avoid_negative_ts", "disabled", output,
+    ];
+
+    /// <summary>
+    /// The picture and the cut sound as one file. <c>-itsoffset</c> moves <paramref name="origin"/> to 0, so the keyframe before it gets a
+    /// negative timestamp; <c>-avoid_negative_ts disabled</c> keeps it, and the MP4 muxer writes an edit list that starts the track at 0.
+    /// There is no <c>-ss</c> on purpose: it shifts every timestamp and so writes no edit list. <c>-to</c> ends the picture on B.
+    /// </summary>
+    /// <param name="audio">The sound from <see cref="LosslessAudioArgs"/>, already counting from the same origin.</param>
+    public static List<string> LosslessArgs(string video, string audio, string output, double origin, double end) =>
+    [
+        "-hide_banner", "-nostdin", "-y", "-loglevel", "error", "-progress", "pipe:1", "-nostats", "-copyts",
+        "-itsoffset", Number(-origin), "-i", video, "-i", audio, "-map", "0:v:0", "-map", "1:a:0", "-c", "copy",
+        "-to", Number(end - origin), "-avoid_negative_ts", "disabled", "-movflags", "+faststart", output,
+    ];
 
     /// <summary>
     /// The first packet's dts as ffmpeg reads it. A chunk's tfdt isn't that: the init segment's edit list moves it, by 66 ms on a real clip.

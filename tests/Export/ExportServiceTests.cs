@@ -114,13 +114,14 @@ public sealed class ExportServiceTests : IDisposable
     private static EncodeSettings X264 => new() { Encoder = "x264", Quality = 30, Speed = 0, Audio = "aac", AudioKbps = 64 };
 
     [Fact]
-    public async Task Lossless_snaps_its_start_to_the_grid_and_starts_at_zero()
+    public async Task Lossless_starts_exactly_at_a_and_ends_on_b()
     {
+        // Intentional change: it used to snap to the keyframe at the head (7 s); the lead-in is hidden by an edit list now (6 s).
         var o = ClipAxisMpvTests.Origin;
         var r = await ExportService.RunAsync(Job(o + 1, o + 7, Copy), null, default);
         var info = await Ff.ProbeAsync(r.Path);
         Assert.NotNull(info);
-        Assert.Equal(7, info!.Duration, 0);          // from the keyframe at the head to the exact end
+        Assert.Equal(6, info!.Duration, 0);          // A to B
         Assert.True(info.HasAudio);
         Assert.Equal([Path.GetFileName(r.Path)], Directory.GetFileSystemEntries(_out).Select(Path.GetFileName));   // no working files left
     }

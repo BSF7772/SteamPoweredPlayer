@@ -36,15 +36,21 @@ public static class ExportSpans
     }
 
     /// <summary>
-    /// One plan per output segment, in order. Lossless spans start on the keyframe before their start and keep their exact end, then
-    /// merge when they overlap, so a frame is never written twice.
+    /// One plan per output segment, in order. Lossless spans are read from the keyframe before their start and keep their exact end,
+    /// then merge when they overlap, so a frame is never written twice. The FIRST lossless plan keeps its exact start: its lead-in
+    /// frames go into the file but an MP4 edit list hides them, so the file plays from A. Later plans start on their keyframe and show
+    /// it: the join (concat) can't carry an edit list into the middle of a file.
     /// </summary>
     public static IReadOnlyList<ExportPlan> Plans(SessionMedia media, IEnumerable<ExportSpan> spans, bool lossless)
     {
         var plans = Normalize(spans).Select(s => ExportPlan.For(media, s.Start, s.End)).OfType<ExportPlan>().ToList();
         if (!lossless) return plans;
         var snapped = Normalize(plans.Select(p => new ExportSpan(p.SnappedStart, p.End)));
-        return [.. snapped.Select(s => ExportPlan.For(media, s.Start, s.End)).OfType<ExportPlan>()];
+        var result = snapped.Select(s => ExportPlan.For(media, s.Start, s.End)).OfType<ExportPlan>().ToList();
+        if (result.Count > 0 && plans.Count > 0 && ExportPlan.For(media, plans[0].Start, result[0].End) is { } first
+            && first.FirstChunk == result[0].FirstChunk)
+            result[0] = first;
+        return result;
     }
 
     /// <summary>

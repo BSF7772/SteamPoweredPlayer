@@ -24,7 +24,19 @@ public sealed class ExportEditRulesTests
     {
         var plans = ExportSpans.Plans(Media(), [new(1, 2), new(2.5, 3.5), new(20, 21)], lossless: true);
         Assert.Equal([(1, 2), (7, 7)], plans.Select(p => (p.FirstChunk, p.LastChunk)));
-        Assert.Equal((0.0, 3.5), (plans[0].Start, plans[0].End));
+        // Intentional change (edit-list start): the FIRST plan keeps its exact start (its lead-in is hidden); later ones start on their keyframe.
+        Assert.Equal((1.0, 3.5), (plans[0].Start, plans[0].End));
+        Assert.Equal(18.0, plans[1].Start);
+    }
+
+    [Fact]
+    public void A_lossless_plan_counts_from_a_and_one_on_its_keyframe_counts_from_the_first_dts()
+    {
+        var inside = ExportPlan.For(Media(), 4.5, 8)!;                  // chunk 2 starts at 3 s
+        Assert.Equal(4.499, ExportService.LosslessOrigin(inside, 2.967), 6);
+        var onKeyframe = ExportPlan.For(Media(), 3, 8)!;
+        Assert.Equal(2.967, ExportService.LosslessOrigin(onKeyframe, 2.967), 6);
+        Assert.Equal(5.0, ExportService.LosslessOrigin(inside, 5.0), 6);   // a first packet after A is never cut away
     }
 
     [Theory]
@@ -38,11 +50,16 @@ public sealed class ExportEditRulesTests
     }
 
     [Fact]
-    public void Lossless_args_cut_both_streams_on_the_real_timestamps()
+    public void Lossless_args_count_from_a_so_the_keyframe_is_negative_and_the_muxer_writes_an_edit_list()
     {
-        var a = string.Join(' ', ExportService.LosslessArgs("v", "a", "o", 100, 106.5, -1.5));
-        Assert.Contains("-copyts -i v -itsoffset -1.5 -i a", a);
-        Assert.Contains("-ss 99.999 -to 106.5", a);
+        // Intentional change: no -ss/make_zero on the picture any more (they shift everything, so no edit list).
+        var audio = string.Join(' ', ExportService.LosslessAudioArgs("a", "c", 100, 106.5, -1.5));
+        Assert.Contains("-copyts -itsoffset -101.5 -i a", audio);
+        Assert.Contains("-ss 0 -to 6.5", audio);
+        var video = string.Join(' ', ExportService.LosslessArgs("v", "c", "o", 100, 106.5));
+        Assert.Contains("-itsoffset -100 -i v -i c", video);
+        Assert.Contains("-to 6.5 -avoid_negative_ts disabled", video);
+        Assert.DoesNotContain("-ss", video);
     }
 
     [Fact]
@@ -235,10 +252,101 @@ public sealed class ExportEditEndToEndTests : IDisposable
     {
         var job = Job(Copy, new ExportSpan(O + 3.5, O + 8.2)) with { AudioDelay = delay };
         var s = await StreamsAsync((await ExportService.RunAsync(job, null, default)).Path);
-        Assert.InRange(s["video"].Start, 0, 0.12);                  // the keyframe of the chunk at O + 3
+        Assert.InRange(s["video"].Start, 0, 0.12);                  // A: the lead-in from the keyframe at O + 3 is hidden by the edit list
         Assert.InRange(s["audio"].Start, 0, 0.12);
-        Assert.InRange(s["video"].End, 5.05, 5.35);                 // B = 5.2 s after that keyframe
-        Assert.InRange(s["audio"].End, 5.05, 5.35);
+        // Intentional change: B is now 4.7 s after A (it was 5.2 s: the file used to start on the keyframe, 0.5 s before A).
+        Assert.InRange(s["video"].End, 4.55, 4.85);
+        Assert.InRange(s["audio"].End, 4.55, 4.85);
+    }
+
+    private static string Q(double v) => v.ToString("0.######", System.Globalization.CultureInfo.InvariantCulture);
+
+    /// <summary>The source's frames as (pts, md5) on the tfdt axis: the chunks of video, byte-concatenated, decoded with -copyts.</summary>
+    private async Task<List<(double Pts, string Md5)>> SourceFramesAsync()
+    {
+        var joined = Path.Combine(_out, "source.mp4");
+        Directory.CreateDirectory(_out);
+        await using (var target = File.Create(joined))
+            foreach (var name in new[] { "init-stream0.m4s" }.Concat(Enumerable.Range(1, 4).Select(c => FolderNames.ChunkFile(0, c))))
+                await target.WriteAsync(await File.ReadAllBytesAsync(Path.Combine(_clip, name)));
+        return await FramesAsync(joined, copyts: true);
+    }
+
+    private static async Task<List<(double Pts, string Md5)>> FramesAsync(string file, bool copyts = false, bool ignoreEditList = false, int? count = null)
+    {
+        var args = new List<string> { "-v", "error" };
+        if (copyts) args.Add("-copyts");
+        if (ignoreEditList) args.AddRange(["-ignore_editlist", "1"]);
+        args.AddRange(["-i", file, "-map", "0:v:0", "-fps_mode", "passthrough"]);
+        if (count is { } n) args.AddRange(["-frames:v", Q(n)]);
+        args.AddRange(["-f", "framemd5", "-"]);
+        var r = await Ff.RunAsync(Ff.Ffmpeg, args);
+        var inv = System.Globalization.CultureInfo.InvariantCulture;
+        var tb = double.Parse(r.StdOut.Split('\n').First(l => l.StartsWith("#tb", StringComparison.Ordinal)).Split("1/")[1], inv);
+        return [.. r.StdOut.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).Where(l => l[0] != '#')
+            .Select(l => l.Split(',', StringSplitOptions.TrimEntries)).Select(p => (double.Parse(p[2], inv) / tb, p[5]))];
+    }
+
+    private async Task<double> ShownFrameAsync(string file, bool ignoreEditList = false, List<(double Pts, string Md5)>? source = null)
+    {
+        source ??= await SourceFramesAsync();
+        var first = (await FramesAsync(file, ignoreEditList: ignoreEditList, count: 1))[0];
+        return source.Single(f => f.Md5 == first.Md5).Pts;           // the source time of the frame the player shows first
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(-1.8)]
+    [InlineData(1.8)]
+    public async Task Lossless_save_clip_plays_from_a_not_from_the_keyframe(double delay)
+    {
+        const double a = O + 4.4, b = O + 9.2;                       // the keyframe is at O + 3: 1.4 s of hidden lead-in
+        var r = await ExportService.RunAsync(Job(Copy, new ExportSpan(a, b)) with { AudioDelay = delay }, null, default);
+        var info = await Ff.ProbeAsync(r.Path);
+        Assert.InRange(info!.Duration, 4.8 - 0.05, 4.8 + 0.1);        // B - A, not B - keyframe (6.2)
+        var source = await SourceFramesAsync();
+        var firstShown = await ShownFrameAsync(r.Path, source: source);
+        Assert.InRange(firstShown, a - 0.001, a + 0.034);             // the frame at A: the first one with a time >= A
+        Assert.Equal(O + 3, await ShownFrameAsync(r.Path, ignoreEditList: true, source: source), 2);   // a player that ignores edit lists starts on the keyframe
+        var s = await StreamsAsync(r.Path);
+        Assert.InRange(s["video"].Start, 0, 0.05);
+        Assert.InRange(s["audio"].Start, 0, 0.05);                    // sound starts with the picture: no silent or frozen start
+        Assert.InRange(s["audio"].End, 4.8 - 0.05, 4.8 + 0.05);       // both streams end on B
+        Assert.InRange(s["video"].End, 4.8 - 0.05, 4.8 + 0.1);
+    }
+
+    [Fact]
+    public async Task Lossless_from_a_keyframe_has_no_hidden_lead_in()
+    {
+        var r = await ExportService.RunAsync(Job(Copy, new ExportSpan(O + 3, O + 8)), null, default);
+        Assert.InRange((await Ff.ProbeAsync(r.Path))!.Duration, 4.95, 5.1);
+        var source = await SourceFramesAsync();
+        Assert.Equal(await ShownFrameAsync(r.Path, source: source), await ShownFrameAsync(r.Path, ignoreEditList: true, source: source), 3);
+    }
+
+    [Fact]
+    public async Task Lossless_markers_are_chapters_counted_from_a_and_the_edit_list_survives()
+    {
+        const double a = O + 4.4, b = O + 9.2;
+        var job = Job(Copy, new ExportSpan(a, b)) with { Chapters = [new ExportChapter(a + 1, "Kill"), new ExportChapter(O + 3.5, "before A")] };
+        var r = await ExportService.RunAsync(job, null, default);
+        var p = await Ff.RunAsync(Ff.Ffprobe, ["-v", "error", "-show_entries", "chapter=start_time:chapter_tags=title", "-of", "csv=p=0", r.Path]);
+        Assert.Equal(["0.000000,Start", "1.000000,Kill"], p.StdOut.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries));
+        Assert.InRange((await Ff.ProbeAsync(r.Path))!.Duration, 4.75, 4.95);
+        Assert.InRange(await ShownFrameAsync(r.Path), a - 0.001, a + 0.034);
+    }
+
+    [Fact]
+    public async Task Two_lossless_spans_hide_the_lead_in_of_the_first_and_start_the_second_on_its_keyframe()
+    {
+        // The concat join can't carry an edit list into the middle of the file, so only the first span is frame-exact.
+        var r = await ExportService.RunAsync(Job(Copy, new ExportSpan(O + 1, O + 2), new ExportSpan(O + 7.5, O + 10)), null, default);
+        Assert.InRange((await Ff.ProbeAsync(r.Path))!.Duration, 5 - 0.1, 5 + 0.15);   // 1 s + (10 - 6) s
+        var source = await SourceFramesAsync();
+        Assert.InRange(await ShownFrameAsync(r.Path, source: source), O + 1 - 0.001, O + 1 + 0.034);
+        var all = await FramesAsync(r.Path);
+        var secondStart = source.Single(f => f.Md5 == all[30].Md5).Pts;    // 1 s into the output
+        Assert.InRange(secondStart, O + 6 - 0.001, O + 6 + 0.07);
     }
 
     [Theory]
