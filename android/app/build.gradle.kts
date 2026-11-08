@@ -17,6 +17,16 @@ android {
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         ndk { abiFilters += listOf("arm64-v8a", "x86_64") } // x86_64: the development emulator
     }
+    buildTypes {
+        // Instrumented tests clear the app's data and Gradle uninstalls what it tested. Their own id keeps the debug app's saved
+        // server profiles and Keystore-sealed passwords out of reach.
+        create("itest") {
+            initWith(getByName("debug"))
+            applicationIdSuffix = ".itest"
+            matchingFallbacks += "debug"
+        }
+    }
+    testBuildType = "itest"
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17

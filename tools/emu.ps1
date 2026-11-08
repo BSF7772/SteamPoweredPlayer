@@ -10,9 +10,13 @@
     tools\emu.ps1 create    create the AVD when it is missing
     tools\emu.ps1 start     create when missing, start without a window, wait for the boot to finish
     tools\emu.ps1 stop      shut the running emulator down
-    tools\emu.ps1 delete    delete the AVD (the next start makes a fresh one)
+    tools\emu.ps1 delete -WipeCredentials    delete the AVD and the server passwords saved in it
+
+  Saved credentials live in the app's data on the AVD. Never uninstall app.steampoweredplayer or wipe the AVD: tests run
+  under their own id (.itest) so they can't touch them.
 
 .PARAMETER Command  check, create, start, stop or delete.
+.PARAMETER WipeCredentials  Required by delete: the saved server password goes with the AVD.
 .PARAMETER Window   Start with a window instead of headless.
 .PARAMETER Gpu      Emulator GPU mode (default host).
 .PARAMETER BootTimeoutSeconds  How long start waits for the boot to finish.
@@ -22,7 +26,8 @@ param(
     [Parameter(Position = 0, Mandatory)][ValidateSet('check', 'create', 'start', 'stop', 'delete')][string]$Command,
     [switch]$Window,
     [string]$Gpu = 'host',
-    [int]$BootTimeoutSeconds = 300
+    [int]$BootTimeoutSeconds = 300,
+    [switch]$WipeCredentials
 )
 
 Set-StrictMode -Version 2
@@ -83,7 +88,8 @@ switch ($Command) {
     'start' {
         New-Avd
         if (Get-RunningSerial) { Write-Host "already running: $(Get-RunningSerial)"; exit 0 }
-        $emuArgs = @('-avd', $avdName, '-gpu', $Gpu, '-no-snapshot-save', '-no-boot-anim', '-no-audio')
+        # -no-snapshot: every boot is a cold boot from the disk, so saved data stays and RAM (which can hold secrets) never lands in a file.
+        $emuArgs = @('-avd', $avdName, '-gpu', $Gpu, '-no-snapshot', '-no-boot-anim', '-no-audio')
         if (-not $Window) { $emuArgs += '-no-window' }
         $log = Join-Path $env:ANDROID_USER_HOME 'emulator.log'
         Start-Process -FilePath $emulator -ArgumentList $emuArgs -WindowStyle Hidden -RedirectStandardOutput $log -RedirectStandardError "$log.err" | Out-Null
@@ -96,17 +102,21 @@ switch ($Command) {
             if ((Get-Date) -gt $deadline) { throw "boot did not finish in $BootTimeoutSeconds s; see $log" }
             Start-Sleep -Seconds 2
         }
+        Start-Sleep -Seconds 5                  # the package manager refuses activities for a moment after boot_completed
+        & adb shell cmd uimode night yes | Out-Null   # the app follows the system; development runs in dark mode
         Write-Host "booted: $(Get-RunningSerial)"
     }
     'stop' {
         $serial = Get-RunningSerial
         if (-not $serial) { Write-Host 'no emulator running'; exit 0 }
+        & adb -s $serial shell sync
         & adb -s $serial emu kill
     }
     'delete' {
         if (Get-RunningSerial) { throw 'stop the emulator first' }
         if (-not (Test-Avd)) { Write-Host 'no AVD to delete'; exit 0 }
-        # The folder holds only emulator state this script created: the app's test data, nothing of the maintainer's.
+        # The AVD holds the server profiles and the sealed passwords the maintainer typed. They can't be exported.
+        if (-not $WipeCredentials) { throw 'this erases the saved server password, which must then be typed again; pass -WipeCredentials only if the maintainer asked' }
         Remove-Item -LiteralPath (Join-Path $env:ANDROID_AVD_HOME "$avdName.avd") -Recurse -Force
         Remove-Item -LiteralPath (Join-Path $env:ANDROID_AVD_HOME "$avdName.ini") -Force
     }
