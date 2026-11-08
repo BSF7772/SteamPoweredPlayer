@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- SPDX-License-Identifier: GPL-3.0-or-later -->
+<resources>
+    <string name="app_name">SteamPoweredPlayer</string>
+    <string name="home_empty_title">No library yet</string>
+    <string name="home_empty_body">Connecting to your PC\'s recordings comes next in this build. Your library stays read-only: nothing is ever written to the share.</string>
+</resources>
