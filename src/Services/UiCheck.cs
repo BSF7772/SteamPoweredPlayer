@@ -455,7 +455,13 @@ internal static partial class UiCheck
             if (box is not null) box.Value = 4321;
             var slider = Find("PlayerSyncSlider") as Slider;
             await Task.Delay(100);
-            Add(CheckResult.From(slider is { Maximum: 5000, Minimum: -5000, Value: 4321 }, $"{id}.sync-range", "A typed value is exact, and the slider reaches ±5 s", $"slider {slider?.Value} of {slider?.Maximum}"));
+            Add(CheckResult.From(slider is { Maximum: 5000, Minimum: -5000, StepFrequency: 10, Value: 4320 } && box?.Value is 4321, $"{id}.sync-range",
+                "The slider moves in 10 ms steps and reaches ±5 s; a typed value stays exact", $"slider {slider?.Value} of {slider?.Maximum} step {slider?.StepFrequency}, box {box?.Value}"));
+            if (box is not null) box.Value = 137;
+            await Task.Delay(100);
+            var exact = await WaitFor(() => Math.Abs((mpv?.AudioDelay ?? double.NaN) - 0.137) < 0.0005, 3);
+            Add(CheckResult.From(exact && box?.Value is 137 && slider?.Value is 140, $"{id}.sync-typed-exact", "A typed 137 ms is applied as 137, not the slider's 140",
+                $"delay {(mpv?.AudioDelay ?? double.NaN) * 1000:0.#} ms, box {box?.Value}, slider {slider?.Value}"));
 
             // ---- exports through the buttons, with the sound shifted: both must keep all their sound
             if (box is not null) box.Value = -300;
@@ -497,6 +503,48 @@ internal static partial class UiCheck
                 && lowest.TransformToVisual(top).TransformBounds(new Windows.Foundation.Rect(0, 0, lowest.ActualWidth, lowest.ActualHeight)).Bottom <= top.ActualHeight;
             Add(CheckResult.From(buttons, $"{id}.export-buttons", "Screenshot and Share stay on screen, with the special menu open", buttons ? "inside the window" : "cut off"));
             Add(CheckResult.From(shotTaken && toast, $"{id}.screenshot", "Screenshot button saves a frame and says so on the Player", $"PNG {shotTaken}, toast {toast}"));
+            await ToastChecks(id, dir);
+        }
+
+        private IEnumerable<InfoBar> Toasts() => Descendants(window.Content).OfType<InfoBar>();
+
+        /// <summary>Toasts about a file name it as a link and open it on a click (intercepted: no real app starts); non-error toasts close after 5 s, errors stay.</summary>
+        private async Task ToastChecks(string id, string dir)
+        {
+            var shot = Directory.EnumerateFiles(dir, "*.png").FirstOrDefault();
+            var bar = Toasts().FirstOrDefault(b => b.Title == "Screenshot saved");
+            var link = bar?.ActionButton as HyperlinkButton;
+            var named = shot is not null && link?.Content is TextBlock t && t.Text == Path.GetFileName(shot) && AutomationProperties.GetAutomationId(link) == "ToastOpenFile";
+            Add(CheckResult.From(named, $"{id}.toast-link", "The screenshot toast names the file as a link button", named ? "link" : "no link button with the file name"));
+
+            string? opened = null;
+            FileOpener.Intercept = p => opened = p;
+            try
+            {
+                var fake = Path.Combine(dir, "toast-check.png");
+                AppServices.Toast("Toast click check", null, InfoBarSeverity.Success, overPlayer: true, openPath: fake);
+                await Task.Delay(100);
+                var mine = Toasts().FirstOrDefault(b => b.Title == "Toast click check");
+                var clicked = mine?.ActionButton is { } button && Invoke(button);
+                await Task.Delay(100);
+                var stillUp = Toasts().Any(b => b.Title == "Toast click check");
+                Add(CheckResult.From(clicked && opened == fake && !stillUp, $"{id}.toast-open",
+                    "Clicking the link opens the file (intercepted) and closes the toast", $"opened {opened is not null}, still up {stillUp}"));
+
+                opened = null;
+                AppServices.Toast("Toast close check", null, InfoBarSeverity.Success, overPlayer: true, openPath: fake);
+                await Task.Delay(100);
+                if (Toasts().FirstOrDefault(b => b.Title == "Toast close check") is { } closing) closing.IsOpen = false;
+                await Task.Delay(100);
+                Add(CheckResult.From(opened is null, $"{id}.toast-close-no-open", "Closing a toast with its X does not open the file", opened is null ? "not opened" : "opened"));
+            }
+            finally { FileOpener.Intercept = null; }
+
+            AppServices.Toast("Toast error check", "stays", InfoBarSeverity.Error);
+            var closed = await WaitFor(() => !Toasts().Any(b => b.Title == "Screenshot saved"), 7);
+            var errorStays = Toasts().Any(b => b.Title == "Toast error check");
+            Add(CheckResult.From(closed && errorStays, $"{id}.toast-auto-close", "A toast closes by itself after 5 s; an error stays until dismissed", $"closed {closed}, error still up {errorStays}"));
+            if (Toasts().FirstOrDefault(b => b.Title == "Toast error check") is { } err) err.IsOpen = false;
         }
 
         private ContentDialog? OpenDialog() =>

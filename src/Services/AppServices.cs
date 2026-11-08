@@ -138,9 +138,10 @@ public static class AppServices
         Trickplay?.Kick();
     }
 
+    /// <param name="openPath">A file the toast is about: its name becomes a link, and a click opens the file.</param>
     /// <param name="overPlayer">Show it on the Player page too: for the result of something the user just pressed there.</param>
-    public static void Toast(string title, string? message = null, InfoBarSeverity severity = InfoBarSeverity.Informational, int seconds = 6, bool overPlayer = false) =>
-        Window?.ShowToast(title, message, severity, seconds, overPlayer);
+    public static void Toast(string title, string? message = null, InfoBarSeverity severity = InfoBarSeverity.Informational, int seconds = 6, bool overPlayer = false, string? openPath = null) =>
+        Window?.ShowToast(title, message, severity, seconds, overPlayer, openPath);
 
     // ---- exports --------------------------------------------------------------------------------------------------------
 
@@ -204,7 +205,7 @@ public static class AppServices
                     }
                     break;
                 case ExportItemState.Done when item.Result is { } result:
-                    Toast("Export finished", $"{Path.GetFileName(result.Path)}  ·  {Pipeline.Size(result.Bytes)}", InfoBarSeverity.Success, overPlayer: true);
+                    Toast("Export finished", Pipeline.Size(result.Bytes), InfoBarSeverity.Success, overPlayer: true, openPath: result.Path);
                     s_taskbar.Flash();
                     break;
                 case ExportItemState.Cancelled:
