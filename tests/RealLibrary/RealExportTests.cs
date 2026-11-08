@@ -41,7 +41,7 @@ public sealed class RealExportTests(ITestOutputHelper output) : IDisposable
         foreach (var (name, s, expected) in new[] { ("lossless", Copy, plan.SnappedEnd - plan.SnappedStart), ("encoded", X264, plan.End - plan.Start) })
         {
             var sw = Stopwatch.StartNew();
-            var r = await ExportService.RunAsync(new ExportJob(media, start, end, s, new EditSettings(), _out, label + "-" + name, root), null, default);
+            var r = await ExportService.RunAsync(new ExportJob(media, [new ExportSpan(start, end)], s, new EditSettings(), _out, label + "-" + name, root), null, default);
             var info = await Ff.ProbeAsync(r.Path);
             Assert.NotNull(info);
             Assert.True(info!.HasAudio);

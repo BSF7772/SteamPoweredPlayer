@@ -108,7 +108,7 @@ public sealed class ExportServiceTests : IDisposable
 
     private SessionMedia Media() => new(_clip, [new SegmentRun(1, 4)], 3.0, false, false, ClipAxisMpvTests.Origin);
 
-    private ExportJob Job(double start, double end, EncodeSettings s) => new(Media(), start, end, s, new EditSettings(), _out, "out");
+    private ExportJob Job(double start, double end, EncodeSettings s) => new(Media(), [new ExportSpan(start, end)], s, new EditSettings(), _out, "out");
 
     private static EncodeSettings Copy => new() { Encoder = "copy", Audio = "copy" };
     private static EncodeSettings X264 => new() { Encoder = "x264", Quality = 30, Speed = 0, Audio = "aac", AudioKbps = 64 };

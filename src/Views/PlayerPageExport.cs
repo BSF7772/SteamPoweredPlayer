@@ -109,7 +109,7 @@ public sealed partial class PlayerPage
         if (folder is null || !Directory.Exists(folder)) folder = await ChooseExportFolderAsync();     // the folder is the user's choice: no default
         if (folder is null) return;
 
-        var job = new ExportJob(media, range.Start, range.End, preset.Build(), new EditSettings(), folder,
+        var job = new ExportJob(media, [new ExportSpan(range.Start, range.End)], preset.Build(), new EditSettings(), folder,
             ExportPaths.SafeStem($"{GameText.Text} {DateTime.Now:yyyy-MM-dd HH-mm-ss}"), AppServices.Steam.RecordingsPath);
         using var cts = new CancellationTokenSource();
         _exportCts = cts;
