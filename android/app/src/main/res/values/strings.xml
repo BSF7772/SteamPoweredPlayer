@@ -2,6 +2,31 @@
 <!-- SPDX-License-Identifier: GPL-3.0-or-later -->
 <resources>
     <string name="app_name">SteamPoweredPlayer</string>
-    <string name="home_empty_title">No library yet</string>
-    <string name="home_empty_body">Connecting to your PC\'s recordings comes next in this build. Your library stays read-only: nothing is ever written to the share.</string>
+    <string name="home_empty_title">Connect to your PC</string>
+    <string name="home_empty_body">Add the file share that holds your Steam recordings. Access is read-only: nothing is ever written to the share.</string>
+    <string name="add_server">Add a server</string>
+    <string name="connecting">Connecting…</string>
+    <string name="try_connection">Try connection</string>
+    <string name="edit">Edit</string>
+    <string name="remove">Remove</string>
+    <string name="cancel">Cancel</string>
+    <string name="save_and_try">Save and try</string>
+    <string name="connected">Connected</string>
+    <string name="on">on</string>
+    <string name="off">off</string>
+    <string name="connection_details">%1$s · cipher %2$s · signing %3$s</string>
+    <string name="unencrypted_warning">Without encryption, anyone on this network can read what the app reads.</string>
+    <string name="refused_dialect">Refused: this server doesn\'t offer SMB 3.0 or newer.</string>
+    <string name="refused_encryption">Refused: the session isn\'t encrypted. Turn on encryption for the share on the PC.</string>
+    <string name="refused_signing">Refused: the session is neither signed nor encrypted.</string>
+    <string name="unreachable">Can\'t reach this server from the current network.</string>
+    <string name="connection_failed">Couldn\'t connect: %1$s</string>
+    <string name="field_name">Name</string>
+    <string name="field_host">Host or IP address</string>
+    <string name="field_share">Share</string>
+    <string name="field_path">Folder inside the share (optional)</string>
+    <string name="field_user">User</string>
+    <string name="field_domain">Domain (optional)</string>
+    <string name="field_password">Password</string>
+    <string name="field_require_encryption">Require encryption</string>
 </resources>
