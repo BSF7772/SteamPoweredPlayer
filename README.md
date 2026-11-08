@@ -38,7 +38,9 @@ FastEncoder is a git submodule (`external/FastEncoder`), and its `src/Core` file
   dragging, **Detect** (automatic sync), fix timing drift.
 - **Export by how much time to spend**: Ultra quality (CPU only), Quality, Medium (the default, best quality for the time), Performance,
   Ultra performance, each on Auto, CPU or GPU (NVENC/QSV/AMF). Ultra performance is 720p30 H.264 for social media. Special presets: Archive, Universal (H.264), Fit to size.
-- **Save clip**: lossless, from the keyframe before A to exactly B, with markers as chapters.
+- **Save clip**: lossless, plays from exactly A to exactly B, with markers as chapters. The file also holds up to 3 s of frames before A
+  (the picture can only be decoded from the keyframe before it); an MP4 edit list hides them, so players that honour edit lists (mpv, ffmpeg)
+  start on A. A player that ignores edit lists starts on that keyframe, with the sound out of step by the same amount.
 - **Share**: makes a small copy, opens Windows' share window, then removes the copy.
 - **Highlight reel**: chosen events (±N seconds) stitched into one video.
 - **Delete with care**: off until you enable it, clips only (never Steam's cache), Recycle Bin by default, and every delete confirmed.

@@ -360,7 +360,7 @@
                             </StackPanel>
                         </Button>
                         <Button x:Name="SaveClipButton" Grid.Column="1" AutomationProperties.AutomationId="PlayerSaveClip" Content="Save clip" HorizontalAlignment="Stretch" IsTabStop="False" Click="SaveClip_Click"
-                                ToolTipService.ToolTip="Lossless copy with markers as chapters. Keeps the original speed and sound. Starts on the keyframe before A, ends exactly on B" />
+                                ToolTipService.ToolTip="Lossless copy with markers as chapters. Keeps the original speed and sound. Plays from exactly A (up to 3 s of earlier frames are kept in the file but hidden) to exactly B" />
                     </Grid>
                     <Grid ColumnSpacing="8">
                         <Grid.ColumnDefinitions>

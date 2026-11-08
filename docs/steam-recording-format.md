@@ -53,7 +53,7 @@ as a clip). Regex: `^(bg|fg)_(\d+)_(\d{8})_(\d{6})(?:_(\d+))?$`. Empty `video/bg
   `init-stream1.m4s` (audio), `chunk-stream{0,1}-NNNNN.m4s`, 3.000 s per segment.
 - Typical video: HEVC Main (`hev1`), 1080p–1440p at 59.94 fps, ~22 Mbps, **`yuvj420p` (full range)**. Older or other GPUs can give
   H.264 (`avc1`). Audio: AAC-LC 48 kHz stereo, 128 kbps.
-- **One IDR at the start of each chunk** (GOP = 3 s). Lossless cuts snap to 3 s; frame-exact cuts need a re-encode.
+- **One IDR at the start of each chunk** (GOP = 3 s). A lossless cut is read from the keyframe before its start (up to 3 s earlier); an MP4 edit list hides those lead-in frames so the file plays from the exact start. Cutting the picture inside a GOP itself needs a re-encode.
 - Chunks carry absolute `tfdt`, and frames are stamped unevenly (game-capture jitter). **The `tfdt` axis is the session's absolute
   time**: chunk N starts at about (N−1) × 3 s (+ up to 8 ms) in live sessions and also in trimmed sessions (a session whose chunk
   1881 sits at 5640.006 s). Clips restart the chunk numbers at 1 but **not** `tfdt` (chunk 1 of one clip starts at 585.0 s).

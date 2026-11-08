@@ -4,8 +4,9 @@ using SteamPoweredPlayer.Core.Library;
 namespace SteamPoweredPlayer.Core.Export;
 
 /// <summary>
-/// The chunks an export reads for a range on the media (tfdt) axis. A lossless export starts at <see cref="SnappedStart"/> (only a chunk
-/// start is a keyframe) and ends at <see cref="End"/>; a re-encode trims to <see cref="Start"/>..<see cref="End"/>.
+/// The chunks an export reads for a range on the media (tfdt) axis. A lossless export reads from <see cref="SnappedStart"/> (only a chunk
+/// start is a keyframe) but plays from <see cref="Start"/>: the frames before it are hidden by an MP4 edit list. Both lossless and
+/// re-encoded exports end at <see cref="End"/>; a re-encode trims to <see cref="Start"/>..<see cref="End"/>.
 /// </summary>
 /// <param name="GapSeconds">Chunks missing on disk inside the range: the output holds the picture over them.</param>
 public sealed record ExportPlan(int FirstChunk, int LastChunk, double Start, double End, double SnappedStart, double SnappedEnd, double GapSeconds)

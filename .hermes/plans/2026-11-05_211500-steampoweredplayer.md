@@ -512,7 +512,7 @@ GPU trickplay on real 1440p HEVC inside the app, a 60 fps gap session.
 
 **Phase 3 progress (started 2026-11-08 on the maintainer's word; Phase 2.2 re-tested by the maintainer).** Code complete on the desktop,
 waiting for the maintainer's test. In: export core and queue (`ExportService`, `ExportQueue`: chunks are copied through `RangeSource`, muxed
-on their real timestamps, lossless snaps to the 3 s grid, re-encodes trim frame-exact through FastEncoder's `Pipeline`, several kept spans join
+on their real timestamps, lossless is read from the keyframe before A and an MP4 edit list hides the lead-in so the file plays from A (up to 3 s of hidden frames; in a join only the first span), re-encodes trim frame-exact through FastEncoder's `Pipeline`, several kept spans join
 without re-encoding); `ExportLadder` (D20) with special presets incl. Fit to size; speed, volume and mute come from the player's controls, with a warning at the first export (D23); the sync row under the video (±5 s,
 typed ms, held nudges, Detect with "Low confidence: not applied", applied after 1 s with a ring and a check mark, kept for the game); on the Export card: the folder in plain text, cuts as
 kept parts drawn on the timeline, highlight reel from markers, size estimate, markers as chapters, fix timing drift, Save clip, screenshots `S` with a toast, Share,

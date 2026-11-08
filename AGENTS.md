@@ -69,7 +69,9 @@ spikes/              throwaway experiments (Phase 0)
 - **Background recordings are Steam's rolling cache.** Steam trims them continuously. Open every file with read + write + **delete**
   sharing so Steam's cleanup never fails, and survive files vanishing mid-read.
 - Folder and timeline timestamps are **UTC**.
-- Lossless cuts snap to the 3 s keyframe grid; frame-exact cuts re-encode.
+- Lossless cuts are read from the keyframe before A (3 s grid) and an MP4 edit list hides those lead-in frames, so the file plays from A
+  (the file holds up to 3 s of hidden frames; only the first kept span of a joined export gets this, later spans start on their keyframe).
+  A cut inside a GOP without hidden frames means a re-encode.
 - Android reads the library through file-share protocols and is **download-first by default**, because wireless links are unreliable. The desktop has no download feature: the OS mounts shares, so a share is just a path.
 - No polling: use FileSystemWatcher, SMB change notify, libmpv events and Android network callbacks.
 
