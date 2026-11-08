@@ -73,6 +73,21 @@ public sealed record AbLoopResult(int Samples, int Wraps, double MaxPastB, doubl
         $"{Samples} samples, {Wraps} wrap(s), max {MaxPastB * 1000:0} ms past B, min {MinBeforeA * 1000:0} ms before A");
 }
 
+/// <summary>Result of a loop-length observation: <see cref="Laps"/> completed A→B laps, the worst |span − (B−A)| in seconds.</summary>
+public sealed record LoopLengthResult(int Samples, int Laps, double MeanSpan, double MaxSpanError, double Tolerance, bool Ok, string Trace = "")
+{
+    public string Describe() => string.Create(CultureInfo.InvariantCulture,
+        $"{Samples} samples, {Laps} lap(s), mean span {MeanSpan:0.000} s, max span error {MaxSpanError * 1000:0} ms (tol {Tolerance * 1000:0} ms)")
+        + (Trace.Length == 0 ? "" : "; laps first->last: " + Trace);
+}
+
+/// <summary>Result of consecutive frame-back steps: the worst |step − one frame| in frames.</summary>
+public sealed record FrameBackResult(int Steps, double MaxErrorFrames, bool Ok)
+{
+    public string Describe() => string.Create(CultureInfo.InvariantCulture,
+        $"{Steps} step(s), worst deviation from exactly one frame {MaxErrorFrames:0.00} frame(s)");
+}
+
 /// <summary>The pure rules of <c>--realcheck</c>: which recordings to use and what counts as a pass.</summary>
 public static class RealCheckRules
 {
@@ -106,6 +121,7 @@ public static class RealCheckRules
         int wraps = 0;
         double maxPast = double.NegativeInfinity, minBefore = double.NegativeInfinity;
         var started = false;
+        var prev = double.NaN;                                 // last available sample: mpv has no time-pos during the loop's reload
         for (var i = 0; i < positions.Count; i++)
         {
             var p = positions[i];
@@ -113,10 +129,53 @@ public static class RealCheckRules
             if (!started) { started = true; }
             maxPast = Math.Max(maxPast, p - b);
             minBefore = Math.Max(minBefore, a - p);
-            if (i > 0 && double.IsFinite(positions[i - 1]) && positions[i - 1] - p > (b - a) / 2) wraps++;
+            if (double.IsFinite(prev) && prev - p > (b - a) / 2) wraps++;
+            prev = p;
         }
         if (!started) return new(0, 0, double.NaN, double.NaN, false);
         var ok = wraps >= 1 && maxPast <= tol && minBefore <= tol;
         return new(positions.Count, wraps, maxPast, minBefore, ok);
+    }
+
+    /// <summary>
+    /// A loop works when every lap, measured from the player's own position (first sample after a wrap to the last sample before the
+    /// next one), is as long as the marked range: within one frame plus two sampling steps, for at least three laps. The first span is dropped:
+    /// sampling starts after the seek to A, so that lap is only a partial observation.
+    /// </summary>
+    public static LoopLengthResult EvaluateLoopLength(IReadOnlyList<double> positions, double a, double b, double fps, double speed, double stepSeconds, int minLaps = 3)
+    {
+        var tol = 1 / fps + 2 * speed * stepSeconds + 0.001;
+        var wrapDrop = 3 / fps;
+        var spans = new List<double>();
+        var trace = new List<string>();
+        var have = false;
+        double first = 0, last = 0;
+        var count = 0;
+        foreach (var p in positions)
+        {
+            if (!double.IsFinite(p)) continue;
+            count++;
+            if (have && last - p > wrapDrop) { spans.Add(last - first); trace.Add(string.Create(CultureInfo.InvariantCulture, $"{first:0.000}->{last:0.000}")); have = false; }
+            if (!have) { first = p; have = true; }
+            last = p;
+        }
+        if (spans.Count > 0) { spans.RemoveAt(0); trace.RemoveAt(0); }
+        if (spans.Count == 0) return new(count, 0, double.NaN, double.NaN, tol, false);
+        var want = b - a;
+        var maxErr = spans.Max(s => Math.Abs(s - want));
+        return new(count, spans.Count, spans.Average(), maxErr, tol, spans.Count >= minLaps && maxErr <= tol, string.Join(" ", trace.Take(8)));
+    }
+
+    /// <summary>
+    /// Frame-back steps work when every consecutive pair of shown-frame timestamps differs by exactly one frame (±0.35 frame, which
+    /// absorbs millisecond rounding). <paramref name="positions"/> is the start followed by the position after each step.
+    /// </summary>
+    public static FrameBackResult EvaluateFrameBacks(IReadOnlyList<double> positions, double fps)
+    {
+        if (positions.Count < 2 || positions.Any(p => !double.IsFinite(p))) return new(0, double.NaN, false);
+        var worst = 0.0;
+        for (var i = 1; i < positions.Count; i++)
+            worst = Math.Max(worst, Math.Abs((positions[i - 1] - positions[i]) * fps - 1));
+        return new(positions.Count - 1, worst, worst <= 0.35);
     }
 }

@@ -226,7 +226,7 @@ public static class RealCheck
             // A-B loop: A = 1 s, B = 3 s after the opened point (the clip: UI 1 s and 3 s)
             var a = start + 1;
             var b = start + 3;
-            s.SetAbLoop(a, b);
+            s.SetLoop(a, b);
             await s.SeekAsync(a, ct).ConfigureAwait(false);
             s.SetPause(false);
             var samples = new List<double>();
@@ -237,11 +237,107 @@ public static class RealCheck
                 samples.Add(rig.TimePos);
             }
             s.SetPause(true);
-            s.SetAbLoop(null, null);
+            s.SetLoop(null, null);
             var ab = RealCheckRules.EvaluateAbLoop(samples, a, b, fps);
             Add(CheckResult.From(ab.Ok, $"{id}.ab-loop", $"{label}: A-B loop (A = 1 s, B = 3 s) loops", ab.Describe()));
 
+            await LoopLengthCheck(id, label, rig, media, start, fps, ct).ConfigureAwait(false);
+            await FrameBackCheck(id, label, rig, media, start, fps, ct).ConfigureAwait(false);
             await MarkerCheck(id, label, entry, media, ct).ConfigureAwait(false);
+        }
+
+        /// <summary>P1: the loop is as long as the marked range, measured from time-pos over at least three laps.</summary>
+        private async Task LoopLengthCheck(string id, string label, PlaybackRig rig, SessionMedia media, double start, double fps, CancellationToken ct)
+        {
+            var s = rig.Session;
+            var chunk = media.SegmentSeconds;
+            // inside one chunk, and spanning two chunk boundaries' worth of range (>= 2 chunks), at 1x and 2x
+            var cases = new (string Name, double A, double B, double Speed)[]
+            {
+                ("one chunk, 1x", start + 0.5, start + 2.5, 1),
+                ("two chunks, 1x", start + chunk * 0.5, start + chunk * 1.5 + 1.5, 1),
+                ("two chunks, 2x", start + chunk * 0.5, start + chunk * 1.5 + 1.5, 2),
+            };
+            foreach (var (name, a0, b0, speed) in cases)
+            {
+                var a = PlaybackSession.Snap(media, a0);
+                // B inside the last chunk must stay before its last frame: a loop ended by the end of the file is a shorter lap by design
+                var b = PlaybackSession.Snap(media, Math.Min(b0, media.ChunkEndSeconds(media.LastChunk!.Value) - 0.25));
+                if (b - a < 1) continue;
+                s.SetPause(true);
+                s.SetSpeed(speed);
+                s.SetLoop(a, b);
+                await s.SeekAsync(a, ct).ConfigureAwait(false);
+                s.SetPause(false);
+                var samples = new List<double>();
+                var sw = Stopwatch.StartNew();
+                var run = TimeSpan.FromSeconds(Math.Min(40, (b - a) / speed * 4.6 + 1.5));   // a partial lap plus three full ones
+                const int stepMs = 15;
+                while (sw.Elapsed < run)
+                {
+                    await Task.Delay(stepMs, ct).ConfigureAwait(false);
+                    samples.Add(rig.TimePos);
+                }
+                s.SetPause(true);
+                s.SetLoop(null, null);
+                s.SetSpeed(1);
+                var r = RealCheckRules.EvaluateLoopLength(samples, a, b, fps, speed, stepMs / 1000.0);
+                var key = name.Replace(", ", "-").Replace(" ", "");
+                Add(CheckResult.From(r.Ok, $"{id}.loop-length.{key}", $"{label}: A-B loop length ({name}, {F(b - a, "0.0")} s) matches A→B",
+                    r.Describe(), number: double.IsFinite(r.MaxSpanError) ? r.MaxSpanError * 1000 : double.NaN, unit: "ms"));
+            }
+        }
+
+        /// <summary>P2: ten consecutive frame-backs, the first across a chunk boundary, each exactly one frame, timecodes agreeing.</summary>
+        private async Task FrameBackCheck(string id, string label, PlaybackRig rig, SessionMedia media, double start, double fps, CancellationToken ct)
+        {
+            var s = rig.Session;
+            var frame = 1 / fps;
+            var mediaStart = media.TfdtOriginSeconds;
+            // 4 frames after the first chunk boundary inside the opened range: 10 steps cross it
+            var from = PlaybackSession.Snap(media, start + media.SegmentSeconds + 4 * frame);
+            s.SetPause(true);
+            await s.SeekAsync(from, ct).ConfigureAwait(false);
+            await Task.Delay(250, ct).ConfigureAwait(false);
+            var positions = new List<double> { rig.TimePos };
+            for (var i = 0; i < 10; i++)
+            {
+                await s.StepBackAsync(frame, ct).ConfigureAwait(false);
+                await Task.Delay(250, ct).ConfigureAwait(false);
+                positions.Add(rig.TimePos);
+            }
+            var r = RealCheckRules.EvaluateFrameBacks(positions, fps);
+            var perSecond = (int)Math.Round(fps);
+            var tcOk = true;
+            string tcNote = "";
+            if (formatter is { } f)
+            {
+                // Steam's pts are irregular (a real clip: 15-21 ms gaps at 59.094 fps), so a fixed-fps FF grid can repeat or skip one
+                // number for a genuine one-frame step. The timecode must agree with the shown frame within that rounding: it never rises,
+                // each step drops 0..2 FF, and the ten steps together drop 10 FF +-1.
+                var tcs = positions.Select(p => f.Format(p - mediaStart, fps)).ToList();
+                long Index(string tc) =>
+                    tc.Length >= 11 && int.TryParse(tc[0..2], NumberStyles.None, CultureInfo.InvariantCulture, out var h)
+                    && int.TryParse(tc[3..5], NumberStyles.None, CultureInfo.InvariantCulture, out var m)
+                    && int.TryParse(tc[6..8], NumberStyles.None, CultureInfo.InvariantCulture, out var s)
+                    && int.TryParse(tc[9..11], NumberStyles.None, CultureInfo.InvariantCulture, out var ff)
+                        ? ((h * 60L + m) * 60 + s) * perSecond + ff - 1 : long.MinValue;
+                var idx = tcs.Select(Index).ToList();
+                if (idx.Any(i => i == long.MinValue)) tcOk = false;
+                else
+                {
+                    for (var i = 1; i < idx.Count; i++)
+                    {
+                        var d = idx[i - 1] - idx[i];
+                        if (d < 0 || d > 2) tcOk = false;
+                    }
+                    if (Math.Abs(idx[0] - idx[^1] - (idx.Count - 1)) > 1) tcOk = false;
+                }
+                tcNote = (tcOk ? "; timecodes agree with the shown frames (steps of 0-2 FF, 10 FF +-1 in total)" : "; timecodes do NOT agree with the shown frames") + " [" + string.Join(" ", tcs.Select(t => t.Length >= 11 ? t[^11..] : t)) + "] fps " + fps.ToString("0.###", CultureInfo.InvariantCulture);
+            }
+            Add(CheckResult.From(r.Ok && tcOk, $"{id}.frame-back", $"{label}: 10 frame-backs, each exactly one frame (across a chunk boundary)",
+                r.Describe() + tcNote + "; deltas (ms) " + string.Join(", ", positions.Zip(positions.Skip(1), (x, y) => Ms(x - y))),
+                number: r.MaxErrorFrames, unit: "frames"));
         }
 
         private async Task AudioCheck(string id, string label, PlaybackRig rig, double start, CancellationToken ct)
@@ -363,7 +459,7 @@ public static class RealCheck
             rig.Player.SetDemuxerCache(plan);
             await rig.Session.ReloadAsync(start, ReloadCause.Policy, true, ct).ConfigureAwait(false);
             var loopEnd = Math.Max(start + 1, end - 0.5);
-            rig.Session.SetAbLoop(start, loopEnd);
+            rig.Session.SetLoop(start, loopEnd);
             var xs = new List<double>();
             var ys = new List<double>();
             var net = new List<double>();
@@ -393,7 +489,7 @@ public static class RealCheck
                 if (double.IsFinite(pos) && double.IsFinite(last) && last - pos > pass / 2) loops++;
                 last = pos;
             }
-            rig.Session.SetAbLoop(null, null);
+            rig.Session.SetLoop(null, null);
             var expectedMb = DemuxerCache.ExpectedCacheBytes(media.BitsPerSecond) / 1048576.0;
             var bitrate = media.BitsPerSecond is { } bps ? F(bps / 1e6, "0.0") + " Mbit/s" : "unknown bitrate (fallback " + F(DemuxerCache.FallbackBitsPerSecond / 1e6) + " Mbit/s)";
             Add(BudgetRules.RamGate("ram.peak", "RAM peak <= base + demuxer cache + 15 %", peak, baseMb, expectedMb) with

@@ -305,6 +305,8 @@ internal static partial class UiCheck
                 "\"" + Redactor.Scrub(timecode) + "\""));
             await Capture(id);
 
+            await TransportBounds(id);
+
             // +5 through the button
             var expected = PlaybackSession.Snap(s.Media!, mpv.TimePos + 5) - s.MediaStartSeconds;
             var fwd = Find("PlayerForward5");
@@ -340,6 +342,68 @@ internal static partial class UiCheck
             var ab = RealCheckRules.EvaluateAbLoop(samples, 1, 3, fps);
             Add(CheckResult.From(aSet && bSet && ab.Ok, $"{id}.ab-loop", "A-B loop through the loop button (A = 1 s, B = 3 s)",
                 (aSet && bSet ? "" : "the button could not be pressed; ") + ab.Describe()));
+        }
+
+        /// <summary>The transport controls (the volume slider or, when narrow, its button) and the timeline's zoom group.</summary>
+        private static readonly string[][] TransportControls =
+        [
+            ["PlayerPlayPause"], ["PlayerBack5"], ["PlayerFrameBack"], ["PlayerFrameForward"], ["PlayerForward5"], ["PlayerTimecode"],
+            ["PlayerAbLoop"], ["PlayerSpeed"], ["PlayerMute"], ["PlayerVolume", "PlayerVolumeButton"],
+            ["TimelineZoomOut"], ["TimelineZoomLevel"], ["TimelineZoomIn"], ["PlayerFullscreen"],
+        ];
+
+        /// <summary>
+        /// P3: every transport control lies fully inside the window and inside the player's lower block (nothing is clipped or pushed out) at
+        /// the default and at the minimum window size.
+        /// </summary>
+        private async Task TransportBounds(string id)
+        {
+            var aw = window.AppWindow;
+            var original = aw.Size;
+            var op = aw.Presenter as Microsoft.UI.Windowing.OverlappedPresenter;
+            var minW = Math.Max(op?.PreferredMinimumWidth ?? 0, 1);
+            var minH = Math.Max(op?.PreferredMinimumHeight ?? 0, 1);
+            try
+            {
+                await TransportBoundsAt(id, "default", original.Width, original.Height);
+                aw.Resize(new Windows.Graphics.SizeInt32(minW, minH));
+                await Task.Delay(500);
+                await TransportBoundsAt(id, "minimum", minW, minH);
+                await Capture(id + "-min");
+            }
+            finally
+            {
+                aw.Resize(original);
+                await Task.Delay(300);
+            }
+        }
+
+        private async Task TransportBoundsAt(string id, string label, int pixelsW, int pixelsH)
+        {
+            await Task.Delay(300);
+            var root = window.Content as FrameworkElement;
+            var lower = Find("PlayerLower");
+            if (root is null || lower is null) { Add(CheckResult.Fail($"{id}.transport-{label}", $"Transport controls fully visible ({label} window)", "no PlayerLower element")); return; }
+            const double eps = 1.0;
+            var area = new Windows.Foundation.Rect(0, 0, root.ActualWidth, root.ActualHeight);
+            var lowerBounds = lower.TransformToVisual(root).TransformBounds(new Windows.Foundation.Rect(0, 0, lower.ActualWidth, lower.ActualHeight));
+            var bad = new List<string>();
+            var missing = new List<string>();
+            foreach (var ids in TransportControls)
+            {
+                var el = ids.Select(Find).FirstOrDefault(e => e is { ActualWidth: > 0 });
+                if (el is null) { missing.Add(ids[0]); continue; }
+                var b = el.TransformToVisual(root).TransformBounds(new Windows.Foundation.Rect(0, 0, el.ActualWidth, el.ActualHeight));
+                var inWindow = b.Left >= -eps && b.Top >= -eps && b.Right <= area.Right + eps && b.Bottom <= area.Bottom + eps;
+                var inLower = b.Left >= lowerBounds.Left - eps && b.Right <= lowerBounds.Right + eps;
+                if (!inWindow || !inLower)
+                    bad.Add(string.Create(CultureInfo.InvariantCulture,
+                        $"{AutomationProperties.GetAutomationId(el)} x {b.Left:0}..{b.Right:0} (lower {lowerBounds.Left:0}..{lowerBounds.Right:0}, window 0..{area.Right:0}) y {b.Top:0}..{b.Bottom:0} (window height {area.Bottom:0})"));
+            }
+            var ok = bad.Count == 0 && missing.Count == 0;
+            Add(CheckResult.From(ok, $"{id}.transport-{label}", $"Every transport control fully visible ({label} window, {pixelsW}x{pixelsH} px)",
+                ok ? $"{TransportControls.Length} controls inside the window and the player block, content {area.Right:0}x{area.Bottom:0} DIP"
+                   : (missing.Count > 0 ? "not shown: " + string.Join(", ", missing) + "; " : "") + string.Join("; ", bad)));
         }
 
         private async Task Back(string id)

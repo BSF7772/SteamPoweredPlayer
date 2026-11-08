@@ -29,9 +29,20 @@ public sealed class FakeMpvPlayer : IMpvPlayer
         var gate = Gate;
         if (gate is not null) await gate.Task.WaitAsync(cancellationToken);
         TimePos = startSeconds;
+        if (FramePts is { Length: > 0 } pts)
+        {
+            // like mpv's start seek: frames before the start are dropped, the first frame at/after it is shown (the last one past the end)
+            _index = 0;
+            while (_index + 1 < pts.Length && pts[_index] < startSeconds) _index++;
+            TimePos = pts[_index];
+        }
         if (EofReached) { EofReached = false; EofReachedChanged?.Invoke(false); }
         return true;
     }
+
+    /// <summary>Presentation times of the frames (ascending). When set, loads show the frame at/before the start and frame steps move through them.</summary>
+    public double[]? FramePts { get; set; }
+    private int _index;
 
     public int LoadCount { get { lock (Loads) return Loads.Count; } }
 
@@ -52,8 +63,16 @@ public sealed class FakeMpvPlayer : IMpvPlayer
     public void SetAudioDelay(double seconds) { }
     public DemuxerCachePlan? DemuxerCache { get; private set; }
     public void SetDemuxerCache(DemuxerCachePlan plan) => DemuxerCache = plan;
-    public void FrameStep() { FrameSteps++; Paused = true; }
-    public void SetAbLoop(double? a, double? b) { }
+    public void FrameStep()
+    {
+        FrameSteps++;
+        Paused = true;
+        if (FramePts is not { Length: > 0 } pts || _index + 1 >= pts.Length) return;
+        _index++;
+        Tick(pts[_index]);
+    }
+    public (double? A, double? B) AbLoop { get; private set; }
+    public void SetAbLoop(double? a, double? b) => AbLoop = (a, b);
     public Task ScreenshotToFileAsync(string path, CancellationToken cancellationToken = default) => Task.CompletedTask;
     public ValueTask DisposeAsync() => ValueTask.CompletedTask;
     internal void Unused() => EndFile?.Invoke(new MpvEndFile(MpvEndReason.Stop, 0, null));
