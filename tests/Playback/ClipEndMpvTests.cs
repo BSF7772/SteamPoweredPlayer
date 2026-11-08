@@ -53,7 +53,7 @@ public sealed class ClipEndMpvTests : IDisposable
         var m = await Scan();
         Assert.Equal(ClipAxisMpvTests.Origin, m.AxisShiftSeconds);
         Assert.Equal(Intended, m.EndSeconds, 6);
-        Assert.Equal(10.4, m.DurationSeconds, 6);
+        Assert.Equal(9.1, m.DurationSeconds, 6);                     // the part Steam meant, head and tail off
     }
 
     private static EncodeSettings Settings(string encoder) => encoder == "copy"
@@ -71,8 +71,8 @@ public sealed class ClipEndMpvTests : IDisposable
         Assert.Equal(Intended, spans[0].End, 6);
         var r = await ExportService.RunAsync(new ExportJob(media, [new ExportSpan(media.ChunkStartSeconds(1), media.ChunkEndSeconds(4))], settings, new EditSettings(), _out, "out"), null, default);
         var (video, audio) = await Lengths(r.Path);
-        Assert.InRange(video, 10.4 - 0.1, 10.4 + 0.1);               // not 12.0
-        Assert.InRange(audio, 10.4 - 0.1, 10.4 + 0.1);
+        Assert.InRange(video, 9.1 - 0.1, 9.1 + 0.1);                 // not 12.0
+        Assert.InRange(audio, 9.1 - 0.1, 9.1 + 0.1);
         Assert.InRange(Math.Abs(video - audio), 0, 0.1);
     }
 
@@ -98,9 +98,9 @@ public sealed class ClipEndMpvTests : IDisposable
         await using var s = new PlaybackSession(p);
         var eof = new TaskCompletionSource<double>(TaskCreationOptions.RunContinuationsAsynchronously);
         s.ReachedEnd += pos => eof.TrySetResult(pos);
-        Assert.Equal(10.4, media.DurationSeconds, 6);
+        Assert.Equal(9.1, media.DurationSeconds, 6);
         await s.OpenAsync(media, Intended - 1.5, play: true);
-        Assert.Equal(10.4, s.UiDuration, 6);
+        Assert.Equal(9.1, s.UiDuration, 6);
         s.SetSpeed(4);
         var pos = await eof.Task.WaitAsync(TimeSpan.FromSeconds(15));
         Assert.InRange(pos, Intended - 0.15, Intended + 0.05);       // the last frame is before the end, never 1.6 s of picture past it

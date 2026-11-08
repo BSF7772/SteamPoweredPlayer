@@ -75,12 +75,13 @@ as a clip). Regex: `^(bg|fg)_(\d+)_(\d{8})_(\d{6})(?:_(\d+))?$`. Empty `video/bg
 - **Zero-filled chunks exist** (S4 found two at the end of one session, with normal chunk names). Check the head of each chunk (an 8-byte
   read: a valid chunk starts with an MP4 box header, a zero-filled one with zeros) before trusting it.
 
-## Saved clips keep whole chunks: the intended end
+## Saved clips keep whole chunks: the intended window
 A saved clip is not cut at the frame: Steam copies the 3 s chunks that cover the part it means, so the clip's chunks run past that part.
 The chunks don't say where it ends (picture and sound both run to the last chunk's end); only the clip's own `session.mpd` does:
 `<Period start="PT25M34.317S">` (on the chunks' tfdt axis) and `mediaPresentationDuration="PT10.092S"` on `<MPD>` (the numbers here are
 an example). `clip.pb` repeats the duration (field 1.4 and 1.5.3, in ms) but has no start. The intended window is
-`[Period start, Period start + duration]`, and Steam's own player shows only that.
+`[Period start, Period start + duration]`, and Steam's own player shows only that. So does this app: the player and every export use
+`SessionMedia.StartSeconds`..`EndSeconds` (`ClipBounds`), and a lossless export hides the lead-in with an MP4 edit list.
 
 Measured on all 196 saved clips of one real library that had a readable manifest and contiguous chunks:
 - `pb duration == mediaPresentationDuration` in 195 (the other, a clip received from another device, differs by 0.36 s; the manifest is what the player uses).

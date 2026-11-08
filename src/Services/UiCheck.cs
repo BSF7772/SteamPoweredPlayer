@@ -455,17 +455,17 @@ internal static partial class UiCheck
             if (box is not null) box.Value = 4321;
             var slider = Find("PlayerSyncSlider") as Slider;
             await Task.Delay(100);
-            Add(CheckResult.From(slider is { Maximum: 5000, Minimum: -5000, StepFrequency: 10, Value: 4320 } && box?.Value is 4321, $"{id}.sync-range",
+            Add(CheckResult.From(slider is { Maximum: 5000, Minimum: -5000, StepFrequency: 10, SnapsTo: Microsoft.UI.Xaml.Controls.Primitives.SliderSnapsTo.StepValues } && box?.Value is 4321, $"{id}.sync-range",
                 "The slider moves in 10 ms steps and reaches ±5 s; a typed value stays exact", $"slider {slider?.Value} of {slider?.Maximum} step {slider?.StepFrequency}, box {box?.Value}"));
             if (box is not null) box.Value = 137;
             await Task.Delay(100);
             var exact = await WaitFor(() => Math.Abs((mpv?.AudioDelay ?? double.NaN) - 0.137) < 0.0005, 3);
-            Add(CheckResult.From(exact && box?.Value is 137 && slider?.Value is 140, $"{id}.sync-typed-exact", "A typed 137 ms is applied as 137, not the slider's 140",
+            Add(CheckResult.From(exact && box?.Value is 137, $"{id}.sync-typed-exact", "A typed 137 ms is applied as 137, not rounded to the slider's steps",
                 $"delay {(mpv?.AudioDelay ?? double.NaN) * 1000:0.#} ms, box {box?.Value}, slider {slider?.Value}"));
 
             // ---- exports through the buttons, with the sound shifted: both must keep all their sound
             if (box is not null) box.Value = -300;
-            await ExportButtonCheck(id, "save-clip", "PlayerSaveClip", "Save clip with sync -300 ms: from the keyframe to B exactly, sound all the way", dir, 2.9, 3.2, suffix: "");
+            await ExportButtonCheck(id, "save-clip", "PlayerSaveClip", "Save clip with sync -300 ms: plays from A to B exactly, sound all the way", dir, 1.9, 2.2, suffix: "");
             await ExportButtonCheck(id, "export", "PlayerExport", "Export Medium with sync -300 ms (A = 1 s, B = 3 s), sound all the way", dir, 1.7, 2.3, suffix: "_M");
             if (Find("PlayerSyncReset") is { } reset) Invoke(reset);
             await Task.Delay(1200);
@@ -717,9 +717,10 @@ internal static partial class UiCheck
             var parts = texts.Select(t => t.Split(" / ")).Where(p => p.Length == 2).ToList();
             var durations = parts.Select(p => p[1]).Distinct().Count();
             var maxFf = parts.Max(p => int.Parse(p[0][^2..], CultureInfo.InvariantCulture));
-            Add(CheckResult.From(parts.Count == texts.Count && durations == 1 && maxFf <= Math.Ceiling(fps) && moved is > presses - 1.5 and < presses + 1.5,
+            var live = s.Media!.Live;                                  // a live recording grows while the check runs, so its length may change
+            Add(CheckResult.From(parts.Count == texts.Count && (live || durations == 1) && maxFf <= Math.Ceiling(fps) && moved is > presses - 1.5 and < presses + 1.5,
                 $"{id}.frame-back-button", "Frame-back button: one frame per press, stable timecode",
-                $"moved {F(moved, "0.0")} frames in {presses} presses, highest FF {maxFf} at {F(fps, "0.##")} fps, {durations} duration value(s)"));
+                $"moved {F(moved, "0.0")} frames in {presses} presses, highest FF {maxFf} at {F(fps, "0.##")} fps, duration {string.Join(" then ", parts.Select(p => p[1]).Distinct())}, session {F(s.UiDuration, "0.000")} s"));
         }
 
         /// <summary>

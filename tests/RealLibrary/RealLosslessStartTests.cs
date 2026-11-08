@@ -61,9 +61,10 @@ public sealed class RealLosslessStartTests(ITestOutputHelper output) : IDisposab
         if (await RootAsync() is not { } root) return;
         var video = Path.Combine(root, "video");
         if (!Directory.Exists(video)) return;
-        // A cache session with a long run of chunks: not the active one (the newest), so nothing moves under the test.
+        // A cache session with a long run of chunks that nothing moves under the test: not the active one (the newest), and not one whose
+        // head Steam is trimming (first chunk above 1): chunks vanished between this test's reads there, and its reference read went wrong.
         var media = (await Task.WhenAll(Directory.EnumerateDirectories(video, "bg_*").OrderByDescending(Directory.GetLastWriteTimeUtc).Skip(1).Take(8)
-            .Select(async d => (await Scanner.ScanAsync(d)).Media))).FirstOrDefault(m => m is { ChunkCount: > 12 });
+            .Select(async d => (await Scanner.ScanAsync(d)).Media))).FirstOrDefault(m => m is { ChunkCount: > 12, FirstChunk: 1 });
         if (media is null) return;
         if (!Ff.Available) Ff.Locate();
         var chunk = media.Chunks().Skip(6).First();

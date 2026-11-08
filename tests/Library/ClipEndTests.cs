@@ -291,7 +291,8 @@ public sealed class ClipEndTests
         var r = await Scanner.ScanClipAsync(clip);
         Assert.Equal(11.392, r.Media!.EndLimitSeconds!.Value, 6);
         Assert.Equal(11.392, r.Media.EndSeconds, 6);
-        Assert.Equal(11.392, r.Media.DurationSeconds, 6);
+        Assert.Equal(10.092, r.Media.DurationSeconds, 6);
+        Assert.Equal(1.3, r.Media.StartSeconds, 6);
     }
 
     [Fact]

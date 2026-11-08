@@ -26,7 +26,6 @@ public sealed partial class PlayerPage
 {
     private const double NudgeSeconds = 0.02;
     private const double SyncLimitSeconds = 5;
-    private const double SyncStepMs = 10;                  // the slider's step: keep equal to StepFrequency in PlayerPage.xaml
     private static readonly TimeSpan SyncApplyDelay = TimeSpan.FromSeconds(1);
     private static bool s_encodersDetected;
     private static bool s_warnedThisRun;
@@ -416,10 +415,8 @@ public sealed partial class PlayerPage
 
     private void SyncSlider_ValueChanged(object sender, RangeBaseValueChangedEventArgs e)
     {
-        if (_syncUiBusy) return;
-        // the slider snaps a typed 137 to 140 on its own: that is not the user moving it, so the exact value stays
-        if (Math.Round(_audioDelay * 1000 / SyncStepMs) * SyncStepMs == e.NewValue) return;
-        SetAudioDelay(e.NewValue / 1000);
+        // A value set from code isn't snapped to StepFrequency (--uicheck measured it), so a typed 137 stays 137; only dragging moves in steps.
+        if (!_syncUiBusy && Math.Abs(e.NewValue / 1000 - _audioDelay) > 0.0005) SetAudioDelay(e.NewValue / 1000);
     }
 
     private void SyncBox_ValueChanged(NumberBox sender, NumberBoxValueChangedEventArgs args)
