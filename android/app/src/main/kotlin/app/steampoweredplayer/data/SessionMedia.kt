@@ -18,12 +18,28 @@ data class SessionMedia(
     val runs: List<SegmentRun>,
     val segmentSeconds: Double = DEFAULT_SEGMENT_SECONDS,
     val axisShiftSeconds: Double = 0.0,
+    /** Saved clips only: where Steam meant the clip to end, from [ClipBounds]. Its last chunk runs 0 to 3 s past it. */
+    val endLimitSeconds: Double? = null,
+    /** Saved clips only: where Steam meant the clip to start. Its first chunk starts 0 to 3 s before it. */
+    val startLimitSeconds: Double? = null,
 ) {
     val chunkCount: Int get() = runs.sumOf { it.count }
     val firstChunk: Int? get() = runs.firstOrNull()?.first
     val lastChunk: Int? get() = runs.lastOrNull()?.last
 
+    /** The start of the playable media: the first chunk's start, or the clip's intended start when that is later. 0 without chunks. */
+    val startSeconds: Double
+        get() = firstChunk?.let { maxOf(chunkStartSeconds(it), startLimitSeconds ?: Double.NEGATIVE_INFINITY) } ?: 0.0
+
+    /** The end of the playable media: the last chunk's end, or the clip's intended end when that is earlier. 0 without chunks. */
+    val endSeconds: Double
+        get() = lastChunk?.let { minOf(chunkEndSeconds(it), endLimitSeconds ?: Double.POSITIVE_INFINITY) } ?: 0.0
+
     fun contains(chunk: Int): Boolean = runs.any { chunk in it }
+
+    fun chunkStartSeconds(chunk: Int): Double = (chunk - 1) * segmentSeconds + axisShiftSeconds
+
+    fun chunkEndSeconds(chunk: Int): Double = chunk * segmentSeconds + axisShiftSeconds
 
     /** The chunk whose interval holds [mediaSeconds] (it may not be on disk). NaN counts as the axis zero; clamped to ±1e9. */
     fun chunkAt(mediaSeconds: Double): Long {
