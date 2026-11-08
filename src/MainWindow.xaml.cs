@@ -307,9 +307,9 @@ public sealed partial class MainWindow : Window
             timer = DispatcherQueue.CreateTimer();
             timer.Interval = ToastLife;
             timer.IsRepeating = false;
-            timer.Tick += (_, _) => { timer.Stop(); bar.IsOpen = false; };
-            bar.PointerEntered += (_, _) => timer.Stop();
-            bar.PointerExited += (_, _) => timer.Start();
+            timer.Tick += (_, _) => { timer?.Stop(); bar.IsOpen = false; };
+            bar.PointerEntered += (_, _) => timer?.Stop();
+            bar.PointerExited += (_, _) => timer?.Start();
         }
         void Retire() { timer?.Stop(); timer = null; }
         bar.Closed += (_, _) => { Retire(); ToastHost.Children.Remove(bar); };
