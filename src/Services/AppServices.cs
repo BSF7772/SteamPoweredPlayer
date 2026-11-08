@@ -33,7 +33,8 @@ public sealed record SteamInfo(bool SteamFound, string? RecordingsPath, TimeSpan
 /// <summary>The Player page receives this as its navigation parameter. <see cref="RecordingKey"/> is <c>RecordingEntry.RelativeFolder</c>.</summary>
 /// <param name="Media">The media to play when the recording is not in the library, e.g. a download.</param>
 /// <param name="Title">The heading for such a recording.</param>
-public sealed record PlayerRequest(string RecordingKey, double? StartSeconds = null, SessionMedia? Media = null, string? Title = null);
+/// <param name="Markers">Its markers, when known.</param>
+public sealed record PlayerRequest(string RecordingKey, double? StartSeconds = null, SessionMedia? Media = null, string? Title = null, IReadOnlyList<Marker>? Markers = null);
 
 /// <summary>Small service locator: the shell is tiny, and pages need the same few objects.</summary>
 public static class AppServices

@@ -340,7 +340,7 @@ public sealed partial class PlayerPage : Page
     private void RefreshMarkers(bool resetFilter)
     {
         if (_session is null || _media is null || _key is null) return;
-        var all = AppServices.Library?.FullMarkersFor(_key) ?? [];
+        var all = Request is { Markers: { } requested } asked && asked.RecordingKey == _key ? requested : AppServices.Library?.FullMarkersFor(_key) ?? [];
         var visible = Markers.Place(all, _media).Visible;
         _lane = [.. visible.Select(m =>
         {

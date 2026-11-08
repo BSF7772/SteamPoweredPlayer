@@ -54,6 +54,12 @@ public sealed class RealDownloadTests(ITestOutputHelper output) : IDisposable
         Assert.Equal(clip.Media.ChunkCount, local!.ChunkCount);
         Assert.Equal(clip.Media.AxisShiftSeconds, local.AxisShiftSeconds);
 
+        var withMarkers = list.Where(r => r.Name.Kind == RecordingKind.Clip).OrderByDescending(r => r.Media.ChunkCount).Take(10);
+        var counts = new List<int>();
+        foreach (var r in withMarkers) counts.Add((await RemoteLibrary.TryLoadMarkersAsync(root, r, 60)).Count);
+        output.WriteLine($"markers of the 10 longest clips: {string.Join(", ", counts)}");
+        Assert.Contains(counts, c => c > 0);
+
         var whole = ExportPlan.Whole(local)!;
         var job = new ExportJob(local with { Live = false, Temporary = false }, [new ExportSpan(whole.SnappedStart, whole.SnappedEnd)],
             new EncodeSettings { Encoder = "copy", Audio = "copy" }, new EditSettings(), Path.Combine(_dir, "out"), "downloaded");

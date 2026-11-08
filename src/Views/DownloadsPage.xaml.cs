@@ -238,13 +238,14 @@ public sealed partial class DownloadsPage : Page
         try
         {
             var scan = await Task.Run(() => Scanner.ScanAsync(folder));
+            var markers = LibraryBox.SelectedItem is string library ? await RemoteLibrary.TryLoadMarkersAsync(library, row.Recording) : [];
             if (scan.Media is not { ChunkCount: > 0 } media)
             {
                 AppServices.Toast("Nothing to play yet", "Wait for the first chunks to arrive.");
                 return;
             }
             // Local files that nothing trims: neither live nor Steam's rolling cache, however they looked on the other PC.
-            AppServices.Window?.NavigateToPlayer(new PlayerRequest($"{row.LibraryId}/{row.Recording.Folder}", Media: media with { Live = false, Temporary = false }, Title: row.Title));
+            AppServices.Window?.NavigateToPlayer(new PlayerRequest($"{row.LibraryId}/{row.Recording.Folder}", Media: media with { Live = false, Temporary = false }, Title: row.Title, Markers: markers));
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {

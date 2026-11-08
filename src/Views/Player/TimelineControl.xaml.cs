@@ -40,6 +40,8 @@ public sealed partial class TimelineControl : UserControl
     private double _mediaStart, _position;
     private (double Duration, double MediaStart, double ViewStart, double ViewLength, double Width) _film;
     private double? _loopA, _loopB;
+    private IReadOnlyList<(double Start, double End)> _kept = [];
+    private readonly List<Microsoft.UI.Xaml.Shapes.Rectangle> _keptRects = [];
     private double _width;
     private int _filmVersion, _previewVersion;
     private long _lastScrubSeek, _userMovedAt;
@@ -122,6 +124,24 @@ public sealed partial class TimelineControl : UserControl
     }
 
     /// <summary>The A–B loop in UI seconds (either may be null).</summary>
+    /// <summary>Draws the kept parts of a cut, in UI seconds, under the loop and the playhead.</summary>
+    public void SetKept(IReadOnlyList<(double Start, double End)> parts)
+    {
+        _kept = parts;
+        while (_keptRects.Count > parts.Count)
+        {
+            Overlay.Children.Remove(_keptRects[^1]);
+            _keptRects.RemoveAt(_keptRects.Count - 1);
+        }
+        while (_keptRects.Count < parts.Count)
+        {
+            var rect = new Microsoft.UI.Xaml.Shapes.Rectangle { Height = 54, Fill = new Microsoft.UI.Xaml.Media.SolidColorBrush(Microsoft.UI.ColorHelper.FromArgb(0x50, 0x22, 0xC5, 0x5E)) };
+            _keptRects.Add(rect);
+            Overlay.Children.Insert(0, rect);
+        }
+        UpdateVisuals();
+    }
+
     public void SetLoop(double? a, double? b)
     {
         _loopA = a;
@@ -234,6 +254,13 @@ public sealed partial class TimelineControl : UserControl
         var inView = _view.Duration > 0 && x >= -1 && x <= _width + 1;
         Playhead.Visibility = inView ? Visibility.Visible : Visibility.Collapsed;
         Canvas.SetLeft(Playhead, Math.Clamp(x - 1, 0, Math.Max(0, _width - 2)));
+
+        for (var i = 0; i < _keptRects.Count; i++)
+        {
+            var left = Math.Max(0, XOf(_kept[i].Start));
+            Canvas.SetLeft(_keptRects[i], left);
+            _keptRects[i].Width = Math.Max(0, Math.Min(_width, XOf(_kept[i].End)) - left);
+        }
 
         LoopA.Visibility = _loopA is not null ? Visibility.Visible : Visibility.Collapsed;
         LoopB.Visibility = _loopB is not null ? Visibility.Visible : Visibility.Collapsed;

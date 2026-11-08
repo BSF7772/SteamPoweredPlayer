@@ -86,6 +86,7 @@ public sealed partial class PlayerPage
     private void ResetExportEdits()
     {
         _kept.Clear();
+        Timeline.SetKept([]);
         _syncCts?.Cancel();
         SyncStatusText.Text = "";
         EstimateText.Text = "";
@@ -201,8 +202,12 @@ public sealed partial class PlayerPage
             var ui = _session is { } session ? (session.MediaToUi(s.Start), session.MediaToUi(s.End)) : (s.Start, s.End);
             _kept.Add(new KeptSpanRow(s, $"{Pipeline.Time(ui.Item1)}  →  {Pipeline.Time(ui.Item2)}"));
         }
+        DrawKept();
         OptionChanged();
     }
+
+    private void DrawKept() =>
+        Timeline.SetKept(_session is { } session ? [.. _kept.Select(k => (session.MediaToUi(k.Span.Start), session.MediaToUi(k.Span.End)))] : []);
 
     private void KeepAb_Click(object sender, RoutedEventArgs e)
     {

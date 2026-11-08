@@ -519,10 +519,10 @@ download; `--uicheck` presses Estimate, Detect, Save clip, Export, Keep A-B and 
 real library; `RealExportTests` and `RealDownloadTests` (`SPP_REAL_LIBRARY=auto`) do it headless.
 Measured: Steam's newest chunks can hold about 0.8 s less video than audio, so an export touching the live tail can have a shorter picture
 than its range; mid-session ranges are exact. MP4 forces the first chapter to 0, so a "Start" chapter precedes a later first marker.
-Not done: kept parts aren't drawn on the timeline; the Library's Exports list; viewing proxies (optional); a size-cap setting in the UI
+Not done: the Library's Exports list; viewing proxies (optional); a size-cap setting in the UI
 (`DownloadCacheGb` in settings.json, default 50); playing while a download catches up with the playhead (Play uses what has arrived);
 `Seek` isn't wired to the player, because Play only opens after the download started. Not verified: a real SMB share over a real wired or
-wireless link (the real-library runs used a local path), markers and trickplay for downloaded recordings (they aren't copied yet), the
+wireless link (the real-library runs used a local path), trickplay for downloaded recordings and their markers while offline (markers come from the library when it answers within 4 s), the
 folder picker and Open in FastEncoder in the UI (automation can't drive pickers).
 
 Resolved in Phase 3: one writer per chunk key (`DownloadQueue` runs one recording at a time).

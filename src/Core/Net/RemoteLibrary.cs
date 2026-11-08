@@ -65,6 +65,30 @@ public static class RemoteLibrary
         return "net-" + Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(normal)))[..12];
     }
 
+    /// <summary>
+    /// The recording's markers, read from the library. They need the library's timeline files, so offline the answer is empty after
+    /// <paramref name="timeoutSeconds"/>: markers must never hold up playing something already on this PC.
+    /// </summary>
+    public static async Task<IReadOnlyList<Marker>> TryLoadMarkersAsync(string root, RemoteRecording recording, double timeoutSeconds = 4)
+    {
+        var relative = (recording.Name.Kind == RecordingKind.CacheSession ? "video" : "clips") + "/" + recording.Folder;
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(timeoutSeconds));
+        try
+        {
+            return await Task.Run(async () =>
+            {
+                var builder = new LibraryBuilder(root);
+                if (builder.FolderFor(relative) is not { } folder) return (IReadOnlyList<Marker>)[];
+                var context = await builder.LoadContextAsync(cts.Token).ConfigureAwait(false);
+                return (await builder.LoadMarkersAsync(folder, context, cts.Token).ConfigureAwait(false)).Markers;
+            }, cts.Token).WaitAsync(cts.Token).ConfigureAwait(false);
+        }
+        catch (Exception e) when (e is OperationCanceledException or IOException or UnauthorizedAccessException)
+        {
+            return [];
+        }
+    }
+
     /// <exception cref="IOException">The library can't be reached.</exception>
     public static async Task<IReadOnlyList<RemoteRecording>> ListAsync(string root, CancellationToken ct)
     {

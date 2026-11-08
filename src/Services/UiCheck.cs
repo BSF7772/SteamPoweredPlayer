@@ -407,6 +407,7 @@ internal static partial class UiCheck
                 var keep = Find("PlayerKeepAb");
                 var kept = keep is not null && Invoke(keep) && await WaitFor(() => Find("PlayerExportRange") is TextBlock { Text: var t } && t.StartsWith("1 kept part", StringComparison.Ordinal), 3);
                 Add(CheckResult.From(kept, $"{id}.export-keep", "Keep A-B adds a kept part and clears the loop", kept ? "1 kept part" : "the range text did not change"));
+                await Capture(id + "-kept");
                 await ExportButtonCheck(id, "export-kept", "PlayerExport", "Export the kept part", dir, 1.7, 2.3);
                 if (!kept) Invoke(loop);                                    // Keep A-B clears the loop; otherwise clear it here
 
