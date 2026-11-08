@@ -66,6 +66,16 @@ public sealed class RealCheckRulesTests
     }
 
     [Fact]
+    public void A_wrap_through_unavailable_samples_still_counts()
+    {
+        // mpv reports no time-pos while the loop's reload runs: the wrap must be seen across the NaN gap
+        var samples = new List<double> { 1.0, 2.0, 2.9, double.NaN, double.NaN, 1.04, 1.5, 2.9, double.NaN, 1.04 };
+        var r = RealCheckRules.EvaluateAbLoop(samples, 1, 3, 60);
+        Assert.Equal(2, r.Wraps);
+        Assert.True(r.Ok, r.Describe());
+    }
+
+    [Fact]
     public void An_ab_loop_that_runs_past_b_or_never_wraps_fails()
     {
         var past = Enumerable.Range(0, 200).Select(i => 1 + i * 0.02).ToList();         // 1 .. 5 s, no wrap
@@ -77,6 +87,98 @@ public sealed class RealCheckRulesTests
         // wraps, but to the wrong place (e.g. the head of the session instead of A)
         var wrong = new List<double> { 1, 2, 2.9, 0.1, 0.5 };
         Assert.False(RealCheckRules.EvaluateAbLoop(wrong, 1, 3, 60).Ok);
+    }
+
+    // ---- loop length (P1) ------------------------------------------------------------------------------------------
+
+    private static List<double> Laps(double a, double b, int laps, double step, double wrapAt = double.NaN, double landAt = double.NaN)
+    {
+        var end = double.IsNaN(wrapAt) ? b : wrapAt;
+        var start = double.IsNaN(landAt) ? a : landAt;
+        var list = new List<double>();
+        for (var lap = 0; lap < laps; lap++)
+            for (var t = lap == 0 ? a : start; t < end; t += step) list.Add(t);
+        return list;
+    }
+
+    [Fact]
+    public void A_loop_that_is_exactly_a_to_b_over_several_laps_passes()
+    {
+        var r = RealCheckRules.EvaluateLoopLength(Laps(10, 12, 5, 0.016), 10, 12, 60, speed: 1, stepSeconds: 0.015);
+        Assert.True(r.Ok, r.Describe());
+        Assert.Equal(3, r.Laps);
+        Assert.True(r.MaxSpanError < 0.05, r.Describe());
+    }
+
+    [Fact]
+    public void A_loop_much_shorter_than_the_marked_range_fails()
+    {
+        // the reported symptom: marked 10..14 (4 s) but the player wraps after ~1.2 s
+        var r = RealCheckRules.EvaluateLoopLength(Laps(10, 14, 6, 0.016, wrapAt: 11.2), 10, 14, 60, speed: 1, stepSeconds: 0.015);
+        Assert.False(r.Ok);
+        Assert.True(r.MaxSpanError > 2.5, r.Describe());
+    }
+
+    [Fact]
+    public void A_loop_that_lands_late_or_overshoots_b_fails_and_fewer_than_three_laps_is_not_enough()
+    {
+        Assert.False(RealCheckRules.EvaluateLoopLength(Laps(10, 12, 5, 0.016, landAt: 10.5), 10, 12, 60, 1, 0.015).Ok);
+        Assert.False(RealCheckRules.EvaluateLoopLength(Laps(10, 12, 5, 0.016, wrapAt: 12.6), 10, 12, 60, 1, 0.015).Ok);
+        var two = RealCheckRules.EvaluateLoopLength(Laps(10, 12, 4, 0.016), 10, 12, 60, 1, 0.015);   // only 2 full laps after the partial first one
+        Assert.False(two.Ok);
+        Assert.Equal(2, two.Laps);
+        Assert.False(RealCheckRules.EvaluateLoopLength([], 10, 12, 60, 1, 0.015).Ok);
+    }
+
+
+    [Fact]
+    public void The_first_lap_is_a_partial_observation_and_is_not_measured()
+    {
+        // sampling starts after A (the seek to A already happened): the first span is short, the full laps after it are exact
+        var samples = new List<double>();
+        for (var t = 10.4; t < 12; t += 0.016) samples.Add(t);
+        samples.AddRange(Laps(10, 12, 4, 0.016));
+        var r = RealCheckRules.EvaluateLoopLength(samples, 10, 12, 60, 1, 0.015);
+        Assert.True(r.Ok, r.Describe());
+        Assert.Equal(3, r.Laps);
+    }
+    [Fact]
+    public void Loop_length_tolerance_grows_with_the_sampling_step_at_higher_speed()
+    {
+        // 2x: each sample advances 0.032 s of media; the measured span can be off by two samples without it being a bug
+        var r = RealCheckRules.EvaluateLoopLength(Laps(10, 12, 5, 0.032), 10, 12, 60, speed: 2, stepSeconds: 0.016);
+        Assert.True(r.Ok, r.Describe());
+    }
+
+    // ---- frame back (P2) -------------------------------------------------------------------------------------------
+
+    [Fact]
+    public void Ten_exact_frame_backs_pass_and_a_skip_or_a_repeat_fails()
+    {
+        double fps = 60, f = 1 / fps;
+        var good = Enumerable.Range(0, 11).Select(i => 30 - i * f).ToList();
+        var ok = RealCheckRules.EvaluateFrameBacks(good, fps);
+        Assert.True(ok.Ok, ok.Describe());
+        Assert.Equal(10, ok.Steps);
+
+        var skip = good.ToList(); skip[5] -= 1 * f;                  // one step moved two frames
+        for (var i = 6; i < skip.Count; i++) skip[i] -= f;
+        Assert.False(RealCheckRules.EvaluateFrameBacks(skip, fps).Ok);
+
+        var repeat = good.ToList(); repeat[4] = repeat[3];             // one step did not move
+        Assert.False(RealCheckRules.EvaluateFrameBacks(repeat, fps).Ok);
+
+        var forward = good.ToList(); forward[7] = forward[6] + f;      // "timestamp jump" forwards
+        Assert.False(RealCheckRules.EvaluateFrameBacks(forward, fps).Ok);
+        Assert.False(RealCheckRules.EvaluateFrameBacks([30.0], fps).Ok);
+    }
+
+    [Fact]
+    public void Frame_backs_tolerate_millisecond_rounded_timestamps()
+    {
+        double fps = 59.94;
+        var list = Enumerable.Range(0, 11).Select(i => Math.Round(30 - i / fps, 3)).ToList();
+        Assert.True(RealCheckRules.EvaluateFrameBacks(list, fps).Ok);
     }
 
     // ---- RAM (D-RAM) -----------------------------------------------------------------------------------------------
