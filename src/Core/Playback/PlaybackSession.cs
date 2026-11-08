@@ -350,15 +350,17 @@ public sealed class PlaybackSession : IAsyncDisposable
         double target;
         bool play;
         bool rebuild;
+        double? endLimit;
         lock (_gate)
         {
+            endLimit = EndLimitOf(_media);
             target = Snap(_media!, req.Position);
             play = req.Play ?? !_userPaused;
             rebuild = EnsureWindow(target, req.Force);
             _position = shown is not null && target == req.Position ? shown.Value : target;
         }
 
-        var ok = await _player.LoadAsync(_edl, target, play, _cts.Token).ConfigureAwait(false);
+        var ok = await _player.LoadAsync(_edl, target, play, endLimit, _cts.Token).ConfigureAwait(false);
         if (!ok) throw new TimeoutException("mpv did not deliver a first frame for the reload.");
 
         IReadOnlyList<int> window;
@@ -413,7 +415,7 @@ public sealed class PlaybackSession : IAsyncDisposable
                 var atHead = wanted <= start;
                 var from = Snap(media, wanted);
                 lock (_gate) EnsureWindow(from, false);
-                if (!await _player.LoadAsync(_edl, from, false, ct).ConfigureAwait(false)) return null;
+                if (!await _player.LoadAsync(_edl, from, false, EndLimitOf(media), ct).ConfigureAwait(false)) return null;
                 var first = _player.TimePos;
                 if (!double.IsFinite(first)) return null;
                 var list = new List<double> { first };
@@ -538,7 +540,10 @@ public sealed class PlaybackSession : IAsyncDisposable
     }
 
     private static double StartOf(SessionMedia? m) => m is { FirstChunk: { } f } ? m.ChunkStartSeconds(f) : 0;
-    private static double EndOf(SessionMedia? m) => m is { LastChunk: { } l } ? m.ChunkEndSeconds(l) : 0;
+    private static double EndOf(SessionMedia? m) => m?.EndSeconds ?? 0;
+
+    /// <summary>The end to give mpv: only a saved clip's intended end, never the chunks' own (a cache session may grow past it).</summary>
+    private static double? EndLimitOf(SessionMedia? m) => m is { EndLimitSeconds: not null } ? m.EndSeconds : null;
 
     public ValueTask DisposeAsync()
     {

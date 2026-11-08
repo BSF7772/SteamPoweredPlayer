@@ -146,6 +146,12 @@ public static class Scanner
             return CachedScan.GoneResult with { Result = r, Clip = pb };
         }
         var scan = await ScanCachedAsync(media, trusted, (options ?? new()) with { Temporary = false }, ct).ConfigureAwait(false);
+        // The chunks run past the end Steam meant (docs/steam-recording-format.md); only the clip's own manifest says where that is.
+        if (scan.Result.Media is { } m)
+        {
+            var mpd = await ScanManifest.ReadTextAsync(Path.Combine(media, "session.mpd"), ct).ConfigureAwait(false);
+            scan = scan with { Result = scan.Result with { Media = ClipEnd.Apply(m, mpd) } };
+        }
         return scan with { MediaFolder = media, Clip = pb };
     }
 

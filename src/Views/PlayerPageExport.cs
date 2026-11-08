@@ -195,7 +195,7 @@ public sealed partial class PlayerPage
         if (_media is null) return [];
         if (_kept.Count > 0) return [.. _kept.Select(k => k.Span)];
         if (_ab.Active) return [new ExportSpan(_ab.A!.Value, _ab.B!.Value)];
-        return ExportPlan.Whole(_media) is { } whole ? [new ExportSpan(whole.SnappedStart, whole.SnappedEnd)] : [];
+        return ExportPlan.Whole(_media) is { } whole ? [new ExportSpan(whole.SnappedStart, whole.End)] : [];
     }
 
     private EncodeSettings BuildSettings(string choice)

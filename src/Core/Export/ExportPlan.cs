@@ -5,7 +5,9 @@ namespace SteamPoweredPlayer.Core.Export;
 
 /// <summary>
 /// The chunks an export reads for a range on the media (tfdt) axis. A lossless export starts at <see cref="SnappedStart"/> (only a chunk
-/// start is a keyframe) and ends at <see cref="End"/>; a re-encode trims to <see cref="Start"/>..<see cref="End"/>.
+/// start is a keyframe) and ends at <see cref="End"/>; a re-encode trims to <see cref="Start"/>..<see cref="End"/>. <see cref="End"/> never
+/// passes <see cref="SessionMedia.EndSeconds"/>, so a saved clip's extra tail (<see cref="SessionMedia.EndLimitSeconds"/>) is never exported;
+/// <see cref="SnappedEnd"/> is still the last chunk's end, because that chunk has to be read.
 /// </summary>
 /// <param name="GapSeconds">Chunks missing on disk inside the range: the output holds the picture over them.</param>
 public sealed record ExportPlan(int FirstChunk, int LastChunk, double Start, double End, double SnappedStart, double SnappedEnd, double GapSeconds)
@@ -16,7 +18,9 @@ public sealed record ExportPlan(int FirstChunk, int LastChunk, double Start, dou
     /// </summary>
     public static ExportPlan? For(SessionMedia media, double start, double end)
     {
-        if (!double.IsFinite(start) || !double.IsFinite(end) || end <= start) return null;
+        if (!double.IsFinite(start) || !double.IsFinite(end)) return null;
+        end = Math.Min(end, media.EndSeconds);              // a saved clip stops where Steam meant it to (its last chunk runs past that)
+        if (end <= start) return null;
         int? first = null, last = null;
         var count = 0;
         foreach (var chunk in media.Chunks())

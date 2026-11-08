@@ -257,7 +257,7 @@ public sealed partial class PlayerPage : Page
         }
 
         var first = media.ChunkStartSeconds(media.FirstChunk!.Value);
-        var last = media.ChunkEndSeconds(media.LastChunk!.Value);          // clips: on the tfdt axis (AxisShiftSeconds)
+        var last = media.EndSeconds;                                       // clips: on the tfdt axis (AxisShiftSeconds), at Steam's intended end
         double? startMedia = null;
         var resumed = false;
         if (startUi is { } s) startMedia = first + s;

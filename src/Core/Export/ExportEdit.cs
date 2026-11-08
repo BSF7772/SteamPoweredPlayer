@@ -55,8 +55,8 @@ public static class ExportSpans
     {
         if (ExportPlan.Whole(media) is not { } whole) return [];
         return Normalize(moments.Where(double.IsFinite)
-            .Where(m => m >= whole.SnappedStart && m <= whole.SnappedEnd)
-            .Select(m => new ExportSpan(Math.Max(whole.SnappedStart, m - before), Math.Min(whole.SnappedEnd, m + after))));
+            .Where(m => m >= whole.SnappedStart && m <= whole.End)
+            .Select(m => new ExportSpan(Math.Max(whole.SnappedStart, m - before), Math.Min(whole.End, m + after))));
     }
 
     /// <summary>Output length of the plans in seconds, at <paramref name="speed"/>.</summary>

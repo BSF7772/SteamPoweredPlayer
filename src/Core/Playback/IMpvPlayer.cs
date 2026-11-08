@@ -42,11 +42,12 @@ public interface IMpvPlayer : IAsyncDisposable
     event Action<MpvEndFile>? EndFile;
 
     /// <summary>
-    /// <c>loadfile &lt;edl&gt; replace -1 start=&lt;t&gt;</c>. <c>pause</c> survives a load in mpv, so it is always set explicitly first:
+    /// <c>loadfile &lt;edl&gt; replace -1 start=&lt;t&gt;[,end=&lt;e&gt;]</c>; <paramref name="endSeconds"/> (media time) makes mpv end the file there, as a
+    /// saved clip needs (<see cref="Library.SessionMedia.EndLimitSeconds"/>: the EDL's own part lengths don't cut anything). <c>pause</c> survives a load in mpv, so it is always set explicitly first:
     /// <paramref name="play"/> false loads paused. Completes with true when the first frame (playback-restart) arrives,
     /// false on timeout or when a newer load replaced this one; throws <see cref="MpvException"/> when mpv cannot open the EDL.
     /// </summary>
-    Task<bool> LoadAsync(string edl, double startSeconds, bool play, CancellationToken cancellationToken = default);
+    Task<bool> LoadAsync(string edl, double startSeconds, bool play, double? endSeconds = null, CancellationToken cancellationToken = default);
 
     void SetPause(bool paused);
     void SetSpeed(double speed);

@@ -3,7 +3,9 @@ using System.Diagnostics;
 using FastEncoder.Core;
 using SteamPoweredPlayer.Core.Export;
 using SteamPoweredPlayer.Core.Library;
+using SteamPoweredPlayer.Core.Playback;
 using SteamPoweredPlayer.Core.Steam;
+using SteamPoweredPlayer.Tests.Fakes;
 using Xunit.Abstractions;
 
 namespace SteamPoweredPlayer.Tests.RealLibrary;
@@ -90,6 +92,58 @@ public sealed class RealExportTests(ITestOutputHelper output) : IDisposable
         if (best is null) return;
         var whole = ExportPlan.Whole(best)!;
         await CheckAsync("clip", best, whole.SnappedStart + 1, Math.Min(whole.SnappedEnd, whole.SnappedStart + 8), root);
+    }
+
+    private static async Task<double> AudioSecondsAsync(string path)
+    {
+        var psi = new ProcessStartInfo(Ff.Ffprobe) { UseShellExecute = false, CreateNoWindow = true, RedirectStandardOutput = true };
+        foreach (var a in new[] { "-v", "error", "-select_streams", "a:0", "-show_entries", "stream=duration", "-of", "csv=p=0", path }) psi.ArgumentList.Add(a);
+        using var p = Process.Start(psi)!;
+        var text = await p.StandardOutput.ReadToEndAsync();
+        await p.WaitForExitAsync();
+        return double.Parse(text.Trim(), System.Globalization.CultureInfo.InvariantCulture);
+    }
+
+    /// <summary>
+    /// A saved clip ends where Steam meant it to (<see cref="SessionMedia.EndLimitSeconds"/>): the player's length, the export plan and the
+    /// exported picture and sound all agree, instead of running up to 3 s past it. The 8 shortest clips, whole, lossless and re-encoded.
+    /// </summary>
+    [Fact]
+    public async Task Saved_clips_play_and_export_to_their_intended_end()
+    {
+        if (await RootAsync() is not { } root) return;
+        var clips = Path.Combine(root, "clips");
+        if (!Directory.Exists(clips)) return;
+        var scanned = new List<SessionMedia>();
+        foreach (var clip in Directory.EnumerateDirectories(clips, "clip_*"))
+            if ((await Scanner.ScanClipAsync(clip)).Media is { ChunkCount: > 0, Runs.Count: 1 } m) scanned.Add(m);
+        // SPP_REAL_CLIP (optional): only the clips whose media folder name contains this text
+        var only = Environment.GetEnvironmentVariable("SPP_REAL_CLIP");
+        var sample = string.IsNullOrEmpty(only)
+            ? scanned.OrderBy(m => m.ChunkCount).Take(8).ToList()
+            : scanned.Where(m => m.Folder.Contains(only, StringComparison.Ordinal)).ToList();
+        var trimmed = 0;
+        foreach (var media in sample)
+        {
+            var first = media.ChunkStartSeconds(media.FirstChunk!.Value);
+            Assert.Equal(media.EndSeconds - first, media.DurationSeconds, 6);
+            await using var session = new PlaybackSession(new FakeMpvPlayer());
+            await session.OpenAsync(media, play: false);
+            Assert.Equal(media.DurationSeconds, session.UiDuration, 6);       // the player's length, before any export
+            if (media.EndLimitSeconds is not null) trimmed++;
+            var whole = new ExportSpan(first, media.ChunkEndSeconds(media.LastChunk!.Value));
+            Assert.Equal(media.EndSeconds, ExportPlan.Whole(media)!.End, 6);
+            foreach (var (name, settings) in new[] { ("lossless", Copy), ("encoded", X264) })
+            {
+                var r = await ExportService.RunAsync(new ExportJob(media, [whole], settings, new EditSettings(), _out, "end-" + name, root), null, default);
+                var (video, audio) = (await VideoSecondsAsync(r.Path), await AudioSecondsAsync(r.Path));
+                output.WriteLine($"{media.ChunkCount} chunks, {name}: player {media.DurationSeconds:0.000} s, video {video:0.000} s, audio {audio:0.000} s, chunks {media.ChunkCount * 3.0:0.0} s");
+                Assert.InRange(video, media.DurationSeconds - 0.15, media.DurationSeconds + 0.15);
+                Assert.InRange(audio, media.DurationSeconds - 0.15, media.DurationSeconds + 0.15);
+                File.Delete(r.Path);
+            }
+        }
+        output.WriteLine($"{sample.Count} clips checked, {trimmed} with an intended end before the last chunk's end");
     }
 
     [Fact]

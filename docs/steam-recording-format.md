@@ -75,6 +75,31 @@ as a clip). Regex: `^(bg|fg)_(\d+)_(\d{8})_(\d{6})(?:_(\d+))?$`. Empty `video/bg
 - **Zero-filled chunks exist** (S4 found two at the end of one session, with normal chunk names). Check the head of each chunk (an 8-byte
   read: a valid chunk starts with an MP4 box header, a zero-filled one with zeros) before trusting it.
 
+## Saved clips keep whole chunks: the intended end
+A saved clip is not cut at the frame: Steam copies the 3 s chunks that cover the part it means, so the clip's chunks run past that part.
+The chunks don't say where it ends (picture and sound both run to the last chunk's end); only the clip's own `session.mpd` does:
+`<Period start="PT25M34.317S">` (on the chunks' tfdt axis) and `mediaPresentationDuration="PT10.092S"` on `<MPD>` (the numbers here are
+an example). `clip.pb` repeats the duration (field 1.4 and 1.5.3, in ms) but has no start. The intended window is
+`[Period start, Period start + duration]`, and Steam's own player shows only that.
+
+Measured on all 196 saved clips of one real library that had a readable manifest and contiguous chunks:
+- `pb duration == mediaPresentationDuration` in 195 (the other, a clip received from another device, differs by 0.36 s; the manifest is what the player uses).
+- Head (first chunk start to Period start): 0 to 3 s (median 1.4 s; one clip −0.06 s, i.e. none).
+- **Tail** (last chunk end to Period start + duration): video −0.18 to 3.03 s (median 1.5 s), audio 0.04 to 2.98 s (median 1.5 s). So 1.5 s
+  of extra footage at the end is normal, up to a whole chunk.
+- The extra tail has real sound: in the clip that was reported, all four audio chunks hold 12.0 s of audio at a constant level, as the
+  video holds 12.0 s. A clip whose exported sound is shorter than its picture is a sync shift (negative audio delay), not a short
+  recording: cross-correlating that export with the chunks' audio gave an offset of 1.82 s.
+- The rule is a sanity-checked one: an end is used only if it lies before the last chunk's end by less than a segment (+0.1 s);
+  otherwise (zero-filled or `dynamic` manifest, no `Period`, a duration that doesn't fit the chunks) nothing is cut.
+
+SteamPoweredPlayer applies it in `ClipEnd` (Core): the scanner sets `SessionMedia.EndLimitSeconds` for clips only, and `EndSeconds`,
+`DurationSeconds`, the player (mpv `end=`, since an EDL part's `length` does not cut an `mp4_dash` segment, tested with mpv), the timeline,
+seeking and every export range stop there. Cache sessions have no such end (their live tail is a different case: the newest chunks can
+hold about 0.8 s less video than audio). **Not applied: the head.** The first chunk also starts 0 to 3 s before `Period start`; the
+player still opens at the first chunk, and a lossless export still starts on the keyframe at that chunk's start (only a re-encode can start
+at `Period start`).
+
 ## The manifest is not the truth
 Seen in practice:
 - `startNumber="1"` while the first chunk on disk is `01840`, with `mediaPresentationDuration="PT0.0S"` (a trimmed cache session).
