@@ -54,9 +54,11 @@ public sealed class ExportQueue(Func<ExportJob, IProgress<ExportProgress>, Cance
         }
     }
 
-    public ExportItem Enqueue(ExportJob job, string title)
+    public ExportItem Enqueue(ExportJob job, string title) => Enqueue(new ExportItem(job, title));
+
+    /// <summary>For a caller that must know the item before it can finish.</summary>
+    public ExportItem Enqueue(ExportItem item)
     {
-        var item = new ExportItem(job, title);
         lock (_gate)
         {
             _items.Add(item);

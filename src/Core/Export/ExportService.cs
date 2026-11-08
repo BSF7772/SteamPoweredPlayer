@@ -21,8 +21,9 @@ public sealed record ExportResult(string Path, long Bytes, IReadOnlyList<ExportP
 
 /// <summary>
 /// Runs an export. Each kept span is handled alone: its chunks are copied through <see cref="RangeSource"/> first, so Steam can keep
-/// trimming its cache while ffmpeg works on private bytes; they are muxed on the real timestamps; then that mux is the lossless
-/// result, or FastEncoder's <see cref="Pipeline"/> encodes it with a frame-exact trim. Several spans are joined without re-encoding.
+/// trimming its cache while ffmpeg works on private bytes. The audio takes extra chunks (<see cref="ExportPlan.AudioChunks"/>), so a
+/// sync shift or Steam's jitter never runs out of sound. A lossless span is then muxed on the real timestamps and cut to the picture;
+/// a re-encode goes through FastEncoder's <see cref="Pipeline"/> with a frame-exact trim. Several spans are joined without re-encoding.
 /// Working files stay in a private folder next to the destination (same volume, so the final move is atomic), so a failed or
 /// cancelled export never leaves a partial output.
 /// </summary>
@@ -104,14 +105,15 @@ public static class ExportService
         Action<double, string> progress, CancellationToken ct)
     {
         Directory.CreateDirectory(dir);
-        var (gatherEnd, muxEnd) = job.Lossless ? (0.9, 1.0) : (0.05, 0.07);
-        var (mux, origin) = await JoinAsync(job.Media, plan, dir, gatherEnd, muxEnd, progress, ct).ConfigureAwait(false);
-        if (job.Lossless && Math.Abs(job.AudioDelay) <= 0.0005) return mux;
+        var audio = ExportPlan.AudioChunks(job.Media, plan, job.AudioDelay);
+        if (job.Lossless) return await LosslessAsync(job, plan, audio, dir, progress, ct).ConfigureAwait(false);
 
+        const double gatherEnd = 0.05, muxEnd = 0.07;
+        var (mux, origin) = await JoinAsync(job.Media, plan, audio, dir, gatherEnd, muxEnd, progress, ct).ConfigureAwait(false);
         var info = await Ff.ProbeAsync(mux, ct).ConfigureAwait(false)
             ?? throw new InvalidOperationException("ffprobe could not read the joined recording.");
         var output = Path.Combine(dir, "out" + extension);
-        var (start, end) = job.Lossless ? (0, null) : OutputTrim(plan, origin, info.Duration);
+        var (start, end) = OutputTrim(plan, origin, info.Duration);
         var settings = job.Settings.Clone();
         if (settings.TargetSize) settings.TargetMB *= (plan.End - plan.Start) / totalSpan;          // the budget is for the whole file
         await Pipeline.EncodeAsync(new EncodeRequest(info, start, end, settings, job.Edit, output, AudioDelay: job.AudioDelay),
@@ -120,15 +122,64 @@ public static class ExportService
         return output;
     }
 
-    /// <summary>Copies a plan's chunks into <paramref name="dir"/> and muxes them; returns the mux and the first chunk's real tfdt.</summary>
-    private static async Task<(string Mux, double Origin)> JoinAsync(SessionMedia media, ExportPlan plan, string dir, double gatherEnd, double muxEnd,
-        Action<double, string> progress, CancellationToken ct)
+    /// <summary>
+    /// A lossless span: the picture from the keyframe of its first chunk to the exact end, and the sound cut to the same times.
+    /// Copying can cut anywhere except the picture's start, so only that one snaps.
+    /// </summary>
+    private static async Task<string> LosslessAsync(ExportJob job, ExportPlan plan, (int First, int Last) audioChunks, string dir, Action<double, string> progress, CancellationToken ct)
     {
-        // Read before Steam can trim it: the mux below starts the output at this instant.
-        var origin = await ScanTfdt.ReadSecondsAsync(media.Folder, plan.FirstChunk, ct).ConfigureAwait(false) ?? plan.SnappedStart;
+        const double gatherEnd = 0.9;
         var video = Path.Combine(dir, "video.mp4");
         var audio = Path.Combine(dir, "audio.m4a");
-        await GatherAsync(media, plan, video, audio, f => progress(f * gatherEnd, "Reading chunks"), ct).ConfigureAwait(false);
+        await GatherAsync(job.Media, plan, audioChunks, video, audio, f => progress(f * gatherEnd, "Reading chunks"), ct).ConfigureAwait(false);
+        var first = await FirstDtsAsync(video, ct).ConfigureAwait(false) ?? plan.SnappedStart;
+        var output = Path.Combine(dir, "out.mp4");
+        await Pipeline.RunAsync(LosslessArgs(video, audio, output, first, LosslessEnd(plan), job.AudioDelay), plan.End - plan.SnappedStart,
+            (f, _) => progress(gatherEnd + f * (1 - gatherEnd), "Joining"), ct).ConfigureAwait(false);
+        File.Delete(video);                                                                          // this job's own files: free the space early
+        File.Delete(audio);
+        return output;
+    }
+
+    /// <summary>The exact end; at a chunk's edge a little past it, because Steam's chunks run a few ms off the grid and a last frame must not go.</summary>
+    public static double LosslessEnd(ExportPlan plan) => plan.End >= plan.SnappedEnd - 0.001 ? plan.End + 0.05 : plan.End;
+
+    /// <summary>
+    /// <c>-copyts</c> keeps the absolute tfdt, which is what the two streams are aligned on; <c>-itsoffset</c> applies the sync; the output's
+    /// <c>-ss</c>/<c>-to</c> cut both streams to the picture, and <c>make_zero</c> moves the result to 0.
+    /// </summary>
+    /// <param name="first">The first video packet's dts. The cut must not start after it: without its keyframe, the picture is lost.</param>
+    public static List<string> LosslessArgs(string video, string audio, string output, double first, double end, double audioDelay)
+    {
+        var args = new List<string> { "-hide_banner", "-nostdin", "-y", "-loglevel", "error", "-progress", "pipe:1", "-nostats", "-copyts", "-i", video };
+        if (Math.Abs(audioDelay) > 0.0005) args.AddRange(["-itsoffset", Number(audioDelay)]);
+        args.AddRange(["-i", audio, "-map", "0:v:0", "-map", "1:a:0", "-c", "copy"]);
+        var start = first - 0.001;
+        if (start > 0) args.AddRange(["-ss", Number(start)]);
+        args.AddRange(["-to", Number(end), "-avoid_negative_ts", "make_zero", "-movflags", "+faststart", output]);
+        return args;
+    }
+
+    /// <summary>
+    /// The first packet's dts as ffmpeg reads it. A chunk's tfdt isn't that: the init segment's edit list moves it, by 66 ms on a real clip.
+    /// </summary>
+    private static async Task<double?> FirstDtsAsync(string path, CancellationToken ct)
+    {
+        var r = await Ff.RunAsync(Ff.Ffprobe, ["-v", "error", "-show_entries", "packet=dts_time", "-read_intervals", "%+#1", "-of", "csv=p=0", path], ct).ConfigureAwait(false);
+        return double.TryParse(r.StdOut.Split('\n', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries).FirstOrDefault()?.TrimEnd(','), NumberStyles.Float, CultureInfo.InvariantCulture, out var dts) ? dts : null;
+    }
+
+    private static string Number(double value) => value.ToString("0.######", CultureInfo.InvariantCulture);
+
+    /// <summary>Copies a plan's chunks into <paramref name="dir"/> and muxes them; returns the mux and the instant that became its 0.</summary>
+    private static async Task<(string Mux, double Origin)> JoinAsync(SessionMedia media, ExportPlan plan, (int First, int Last) audioChunks, string dir, double gatherEnd, double muxEnd,
+        Action<double, string> progress, CancellationToken ct)
+    {
+        var video = Path.Combine(dir, "video.mp4");
+        var audio = Path.Combine(dir, "audio.m4a");
+        await GatherAsync(media, plan, audioChunks, video, audio, f => progress(f * gatherEnd, "Reading chunks"), ct).ConfigureAwait(false);
+        // make_zero below moves the earliest packet of the two to 0, so that instant is where the trim counts from.
+        var origin = Math.Min(await FirstDtsAsync(video, ct).ConfigureAwait(false) ?? plan.SnappedStart, await FirstDtsAsync(audio, ct).ConfigureAwait(false) ?? double.MaxValue);
         var mux = Path.Combine(dir, "mux.mp4");
         await Pipeline.RunAsync(MuxArgs(video, audio, mux), plan.SnappedEnd - plan.SnappedStart,
             (f, _) => progress(gatherEnd + f * (muxEnd - gatherEnd), "Joining"), ct).ConfigureAwait(false);
@@ -169,10 +220,10 @@ public static class ExportService
         "-movflags", "+faststart", output,
     ];
 
-    private static async Task GatherAsync(SessionMedia media, ExportPlan plan, string video, string audio, Action<double> progress, CancellationToken ct)
+    private static async Task GatherAsync(SessionMedia media, ExportPlan plan, (int First, int Last) audioChunks, string video, string audio, Action<double> progress, CancellationToken ct)
     {
         await using var v = RangeSource.Create(media, 0, plan.FirstChunk, plan.LastChunk);
-        await using var a = RangeSource.Create(media, 1, plan.FirstChunk, plan.LastChunk);
+        await using var a = RangeSource.Create(media, 1, audioChunks.First, audioChunks.Last);
         var total = Math.Max(1, v.Length + a.Length);
         long done = 0;
         foreach (var (source, path) in new[] { ((Stream)v, video), (a, audio) })
@@ -205,7 +256,7 @@ public static class ExportService
         var work = NewTempWork();
         try
         {
-            var (mux, _) = await JoinAsync(media, plan, work, 0.3, 0.35, (f, _) => progress?.Invoke(f), ct).ConfigureAwait(false);
+            var (mux, _) = await JoinAsync(media, plan, (plan.FirstChunk, plan.LastChunk), work, 0.3, 0.35, (f, _) => progress?.Invoke(f), ct).ConfigureAwait(false);
             var info = await Ff.ProbeAsync(mux, ct).ConfigureAwait(false)
                 ?? throw new InvalidOperationException("ffprobe could not read the joined recording.");
             return await AudioSync.DetectAsync(mux, 0, info.Duration, f => progress?.Invoke(0.35 + f * 0.65), ct).ConfigureAwait(false);
@@ -238,7 +289,7 @@ public static class ExportService
             {
                 var dir = Path.Combine(work, $"e{i}");
                 Directory.CreateDirectory(dir);
-                var (mux, origin) = await JoinAsync(job.Media, samples[i], dir, 0.5, 1, (_, _) => { }, ct).ConfigureAwait(false);
+                var (mux, origin) = await JoinAsync(job.Media, samples[i], (samples[i].FirstChunk, samples[i].LastChunk), dir, 0.5, 1, (_, _) => { }, ct).ConfigureAwait(false);
                 var info = await Ff.ProbeAsync(mux, ct).ConfigureAwait(false)
                     ?? throw new InvalidOperationException("ffprobe could not read the joined recording.");
                 var output = Path.Combine(dir, "out." + job.Settings.Container);

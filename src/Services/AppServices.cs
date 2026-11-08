@@ -138,13 +138,33 @@ public static class AppServices
         Trickplay?.Kick();
     }
 
-    public static void Toast(string title, string? message = null, InfoBarSeverity severity = InfoBarSeverity.Informational, int seconds = 6) =>
-        Window?.ShowToast(title, message, severity, seconds);
+    /// <param name="overPlayer">Show it on the Player page too: for the result of something the user just pressed there.</param>
+    public static void Toast(string title, string? message = null, InfoBarSeverity severity = InfoBarSeverity.Informational, int seconds = 6, bool overPlayer = false) =>
+        Window?.ShowToast(title, message, severity, seconds, overPlayer);
 
     // ---- exports --------------------------------------------------------------------------------------------------------
 
     private static ExportQueue? s_exports;
     private static Taskbar? s_taskbar;
+    private static readonly HashSet<ExportItem> s_shares = [];
+
+    /// <summary>Queues a throwaway clip for <see cref="ShareSheet"/>: when it's done, Windows' share window opens for it.</summary>
+    public static void Share(ExportJob job)
+    {
+        var item = new ExportItem(job, job.Stem);
+        lock (s_shares) s_shares.Add(item);
+        Exports.Enqueue(item);
+    }
+
+    public static bool IsShare(ExportItem item)
+    {
+        lock (s_shares) return s_shares.Contains(item);
+    }
+
+    private static bool EndShare(ExportItem item)
+    {
+        lock (s_shares) return s_shares.Remove(item);
+    }
 
     /// <summary>Fires on any thread after a queued export changed.</summary>
     public static event Action? ExportsChanged;
@@ -167,21 +187,32 @@ public static class AppServices
     {
         ExportsChanged?.Invoke();
         if (Window is not { } window) return;
+        var state = item.State;             // as of this event: progress fires right before the end, and only the event after it may report the end
         window.DispatcherQueue.TryEnqueue(() =>
         {
             s_taskbar ??= new Taskbar(window.Hwnd);
             if (Exports.OverallFraction is { } fraction) s_taskbar.Set(Taskbar.State.Normal, fraction);
             else s_taskbar.Set(Taskbar.State.None);
-            switch (item.State)
+            switch (state)
             {
+                case ExportItemState.Done when item.Result is { } shared && EndShare(item):
+                    try { ShareSheet.Show(window.Hwnd, shared.Path); }
+                    catch (Exception e) when (e is System.Runtime.InteropServices.COMException or InvalidOperationException)
+                    {
+                        PlayerLog.Write("share failed: " + e.GetType().Name);
+                        Toast("Couldn't open Windows' share window", e.Message, InfoBarSeverity.Error);
+                    }
+                    break;
                 case ExportItemState.Done when item.Result is { } result:
-                    Toast("Export finished", $"{Path.GetFileName(result.Path)}  ·  {Pipeline.Size(result.Bytes)}", InfoBarSeverity.Success);
+                    Toast("Export finished", $"{Path.GetFileName(result.Path)}  ·  {Pipeline.Size(result.Bytes)}", InfoBarSeverity.Success, overPlayer: true);
                     s_taskbar.Flash();
                     break;
                 case ExportItemState.Cancelled:
-                    Toast("Export cancelled", null, InfoBarSeverity.Informational, 3);
+                    if (EndShare(item)) ShareSheet.Sweep();
+                    Toast("Export cancelled", null, InfoBarSeverity.Informational, 3, overPlayer: true);
                     break;
                 case ExportItemState.Failed when item.Error is { } error:
+                    if (EndShare(item)) ShareSheet.Sweep();
                     PlayerLog.Write("export failed: " + error.GetType().Name);
                     Toast("Export failed", error is ChunkGoneException gone ? ExportService.DescribeGone(item.Job.Media, gone) : error.Message, InfoBarSeverity.Error);
                     break;

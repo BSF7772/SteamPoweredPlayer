@@ -48,17 +48,17 @@ public static class ExportSelfChecks
 
     private sealed record Choice(string Id, Func<EncodeSettings> Build);
 
-    /// <summary>Every ladder tier on each engine this machine has, every special preset, and FastEncoder's other presets.</summary>
+    /// <summary>Every ladder tier on each engine this machine has, every special preset, and Save clip's copy. FastEncoder tests its other presets itself.</summary>
     private static List<Choice> AllChoices()
     {
         var choices = new List<Choice>();
         foreach (var tier in ExportLadder.Tiers)
         {
-            choices.Add(new(tier.Id + "-cpu", () => ExportLadder.Build(tier, LadderEngine.Cpu, Encoders.BestGpu)));
+            choices.Add(new(tier.Id + "-cpu", () => ExportLadder.Build(tier, LadderEngine.Cpu, Encoders.BestGpu, Encoders.BestHardware(Family.H264))));
             if (ExportLadder.UsesGpu(tier, LadderEngine.Gpu, Encoders.BestGpu))
-                choices.Add(new(tier.Id + "-gpu", () => ExportLadder.Build(tier, LadderEngine.Gpu, Encoders.BestGpu)));
+                choices.Add(new(tier.Id + "-gpu", () => ExportLadder.Build(tier, LadderEngine.Gpu, Encoders.BestGpu, Encoders.BestHardware(Family.H264))));
         }
-        choices.AddRange(Presets.All.Select(p => new Choice(p.Id, p.Build)));
+        choices.AddRange(ExportLadder.SpecialIds.Append("trim").Select(id => new Choice(id, Presets.Get(id)!.Build)));
         return choices;
     }
 

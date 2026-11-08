@@ -739,6 +739,7 @@ public sealed partial class PlayerPage : Page
         var i = Array.FindIndex(Speeds, s => Math.Abs(s - speed) < 0.001);
         if (i >= 0) _speedIndex = i;
         SpeedText.Text = Speeds[_speedIndex].ToString("0.##", CultureInfo.InvariantCulture) + "×";
+        OptionChanged();
         foreach (var item in SpeedMenu.Items.OfType<ToggleMenuFlyoutItem>())
             item.IsChecked = item.Tag is double d && Math.Abs(d - speed) < 0.001;
     }
@@ -751,6 +752,7 @@ public sealed partial class PlayerPage : Page
         MuteButton.IsChecked = mpv.Muted;
         MuteGlyph.Glyph = mpv.Muted || mpv.Volume <= 0 ? "" : "";
         _syncingVolume = false;
+        OptionChanged();
     }
 
     private void Pulse(string glyph)
@@ -1158,6 +1160,12 @@ public sealed partial class PlayerPage : Page
 
     private void Page_PreviewKeyDown(object sender, KeyRoutedEventArgs e)
     {
+        // Typing a number: the keys are the box's, and Enter hands them back to the player.
+        if (FocusManager.GetFocusedElement(XamlRoot) is TextBox)
+        {
+            if (e.Key == VirtualKey.Enter) DispatcherQueue.TryEnqueue(() => Focus(FocusState.Programmatic));
+            return;
+        }
         var ctrl = Down(VirtualKey.Control);
         var shift = Down(VirtualKey.Shift);
         var step = shift ? 30 : 5;

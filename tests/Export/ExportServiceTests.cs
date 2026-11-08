@@ -114,13 +114,13 @@ public sealed class ExportServiceTests : IDisposable
     private static EncodeSettings X264 => new() { Encoder = "x264", Quality = 30, Speed = 0, Audio = "aac", AudioKbps = 64 };
 
     [Fact]
-    public async Task Lossless_snaps_to_the_grid_and_starts_at_zero()
+    public async Task Lossless_snaps_its_start_to_the_grid_and_starts_at_zero()
     {
         var o = ClipAxisMpvTests.Origin;
         var r = await ExportService.RunAsync(Job(o + 1, o + 7, Copy), null, default);
         var info = await Ff.ProbeAsync(r.Path);
         Assert.NotNull(info);
-        Assert.Equal(9, info!.Duration, 0);          // chunks 1..3
+        Assert.Equal(7, info!.Duration, 0);          // from the keyframe at the head to the exact end
         Assert.True(info.HasAudio);
         Assert.Equal([Path.GetFileName(r.Path)], Directory.GetFileSystemEntries(_out).Select(Path.GetFileName));   // no working files left
     }

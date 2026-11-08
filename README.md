@@ -37,8 +37,9 @@ FastEncoder is a git submodule (`external/FastEncoder`), and its `src/Core` file
 - **Edits, like FastEncoder**: several cuts per recording, speed, volume, remove audio, an audio-sync slider you hear live while
   dragging, **Detect** (automatic sync), fix timing drift.
 - **Export by how much time to spend**: Ultra quality (CPU only), Quality, Medium (the default, best quality for the time), Performance,
-  Ultra performance, each on Auto, CPU or GPU (NVENC/QSV/AMF). Special presets: Archive, Compact 720p, Universal (H.264), Fit to size, and
-  Trim only (lossless, on Steam's 3-second keyframes). "Open in FastEncoder" hands a cut to the full app.
+  Ultra performance, each on Auto, CPU or GPU (NVENC/QSV/AMF). Ultra performance is 720p30 H.264 for social media. Special presets: Archive, Universal (H.264), Fit to size.
+- **Save clip**: lossless, from the keyframe before A to exactly B, with markers as chapters.
+- **Share**: makes a small copy, opens Windows' share window, then removes the copy.
 - **Highlight reel**: chosen events (±N seconds) stitched into one video.
 - **Delete with care**: off until you enable it, clips only (never Steam's cache), Recycle Bin by default, and every delete confirmed.
 

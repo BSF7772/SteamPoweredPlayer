@@ -40,8 +40,8 @@ public sealed class AppSettings
     /// <summary>The ladder's engine switch: Auto, Cpu or Gpu.</summary>
     public string ExportEngine { get; set; } = "Auto";
 
-    /// <summary>The user's FastEncoder.exe, chosen the first time "Open in FastEncoder" is used.</summary>
-    public string? FastEncoderPath { get; set; }
+    /// <summary>The user ticked "Don't show this again" on the warning that the player's settings go into an export.</summary>
+    public bool SkipPlayerSettingsWarning { get; set; }
 
     /// <summary>Audio delay in seconds applied to every recording of a game, by game id.</summary>
     public Dictionary<string, double> GameAudioDelays { get; set; } = [];

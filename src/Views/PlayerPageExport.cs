@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 using System.Collections.ObjectModel;
-using System.Diagnostics;
 using System.Globalization;
 using FastEncoder.Core;
 using Microsoft.UI.Xaml;
@@ -9,8 +8,6 @@ using Microsoft.UI.Xaml.Controls.Primitives;
 using SteamPoweredPlayer.Core.Export;
 using SteamPoweredPlayer.Core.Playback;
 using SteamPoweredPlayer.Services;
-using Windows.Storage.Pickers;
-using WinRT.Interop;
 
 namespace SteamPoweredPlayer.Views;
 
@@ -21,14 +18,17 @@ public sealed record KeptSpanRow(ExportSpan Span, string Text)
 }
 
 /// <summary>
-/// The Player's Export card: what to keep (kept spans, else the A–B range, else the whole recording), the approved quality ladder or a special preset, speed
-/// and sound, audio sync, and the queue. Exports live in <see cref="AppServices.Exports"/>, so they outlive this page.
+/// The Player's Export card: what to keep (kept spans, else the A–B range, else the whole recording), the approved quality ladder or a special preset, audio
+/// sync, Share and the queue. Speed, mute and volume are the player's own controls: one setting each, heard before exporting.
+/// Exports live in <see cref="AppServices.Exports"/>, so they outlive this page.
 /// </summary>
 public sealed partial class PlayerPage
 {
     private const double NudgeSeconds = 0.02;
-    private static readonly double[] ExportSpeeds = [0.25, 0.5, 0.75, 1, 1.25, 1.5, 2, 3, 4];
+    private const double SyncLimitSeconds = 5;
+    private static readonly TimeSpan SyncApplyDelay = TimeSpan.FromSeconds(1);
     private static bool s_encodersDetected;
+    private static bool s_warnedThisRun;
 
     private readonly ObservableCollection<KeptSpanRow> _kept = [];
     private readonly Dictionary<string, ToggleButton> _choiceButtons = [];
@@ -38,6 +38,8 @@ public sealed partial class PlayerPage
     private bool _exportUiReady;
     private bool _exportSubscribed;
     private double _audioDelay;
+    private bool _syncUiBusy, _syncPending, _warningOpen;
+    private Microsoft.UI.Dispatching.DispatcherQueueTimer? _syncApplyTimer, _syncDoneTimer;
     private CancellationTokenSource? _syncCts;
     private CancellationTokenSource? _estimateCts;
 
@@ -49,8 +51,6 @@ public sealed partial class PlayerPage
         if (_exportUiReady) return;
         _exportUiReady = true;
         KeptList.ItemsSource = _kept;
-        SpeedBox.ItemsSource = ExportSpeeds.Select(s => s.ToString("0.##", CultureInfo.InvariantCulture) + "×").ToList();
-        SpeedBox.SelectedIndex = Array.IndexOf(ExportSpeeds, 1.0);
         if (!s_encodersDetected)
         {
             ExportButton.IsEnabled = false;
@@ -67,6 +67,7 @@ public sealed partial class PlayerPage
         if (Enum.TryParse<LadderEngine>(AppServices.Settings.ExportEngine, out var engine)) _engine = engine;
         BuildChoiceTiles();
         SizeChanged += (_, _) => FitExportLayout();
+        Lower.SizeChanged += (_, _) => FitExportLayout();
         FitExportLayout();
         UpdateExportUi();
     }
@@ -117,8 +118,6 @@ public sealed partial class PlayerPage
         SpecialGrid.ColumnDefinitions.Add(new ColumnDefinition());
         SpecialGrid.ColumnDefinitions.Add(new ColumnDefinition());
         SpecialGrid.ColumnDefinitions.Add(new ColumnDefinition());
-        SpecialGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
-        SpecialGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         for (var i = 0; i < ExportLadder.SpecialIds.Count; i++)
         {
             var id = ExportLadder.SpecialIds[i];
@@ -126,8 +125,7 @@ public sealed partial class PlayerPage
             var tile = ChoiceTile("ExportSpecial-" + id, ($"{preset.Emoji} {preset.Name}", 11, false));
             ToolTipService.SetToolTip(tile, preset.Tagline);
             WireTile(tile, () => _exportChoice == id, () => SelectExportChoice(id));
-            Grid.SetColumn(tile, i % 3);
-            Grid.SetRow(tile, i / 3);
+            Grid.SetColumn(tile, i);
             SpecialGrid.Children.Add(tile);
             _choiceButtons[id] = tile;
         }
@@ -151,8 +149,9 @@ public sealed partial class PlayerPage
     /// <summary>The edits leave a short window to the video, and the export card never squeezes the Events list away.</summary>
     private void FitExportLayout()
     {
-        EditsCard.Visibility = !_fullscreen && ActualHeight is 0 or >= 680 ? Visibility.Visible : Visibility.Collapsed;
-        if (RightPanel.ActualHeight > 0) ExportScroll.MaxHeight = Math.Max(150, RightPanel.ActualHeight - 120 - 12 - 190);
+        SyncCard.Visibility = !_fullscreen && ActualHeight is 0 or >= 680 ? Visibility.Visible : Visibility.Collapsed;
+        SyncSlider.Visibility = Lower.ActualWidth is 0 or >= 680 ? Visibility.Visible : Visibility.Collapsed;   // the typed value and the nudges stay
+        if (RightPanel.ActualHeight > 0) ExportScroll.MaxHeight = Math.Max(150, RightPanel.ActualHeight - 120 - 12 - 240);
     }
 
     private void SubscribeExports()
@@ -166,6 +165,8 @@ public sealed partial class PlayerPage
             _exportSubscribed = false;
             _syncCts?.Cancel();
             _estimateCts?.Cancel();
+            FlushSync();
+            _syncDoneTimer?.Stop();
         };
         OnExportsChanged();
     }
@@ -179,7 +180,11 @@ public sealed partial class PlayerPage
         SetSyncStatus("");
         EstimateText.Text = "";
         var game = _entry?.GameId;
-        SetAudioDelay(game is not null && AppServices.Settings.GameAudioDelays.TryGetValue(game, out var d) ? d : 0);
+        _syncApplyTimer?.Stop();
+        _syncPending = false;
+        ShowSyncState(busy: false, applied: null);
+        ShowAudioDelay(game is not null && AppServices.Settings.GameAudioDelays.TryGetValue(game, out var d) ? d : 0);
+        _host?.Mpv?.SetAudioDelay(_audioDelay);
         UpdateExportUi();
     }
 
@@ -195,38 +200,55 @@ public sealed partial class PlayerPage
 
     private EncodeSettings BuildSettings(string choice)
     {
-        var s = ExportLadder.Tier(choice) is { } tier ? ExportLadder.Build(tier, _engine, Encoders.BestGpu) : Presets.Get(choice)!.Build();
+        var s = ExportLadder.Tier(choice) is { } tier ? ExportLadder.Build(tier, _engine, Encoders.BestGpu, Encoders.BestHardware(Family.H264)) : Presets.Get(choice)!.Build();
         if (s.TargetSize && double.IsFinite(TargetSizeBox.Value) && TargetSizeBox.Value > 0) s.TargetMB = TargetSizeBox.Value;
         return s;
     }
 
-    private EditSettings BuildEdit() => new()
+    /// <summary>The edits are the player's settings at this moment: what you hear is what you export.</summary>
+    private EditSettings BuildEdit()
     {
-        Speed = SpeedBox.SelectedIndex >= 0 ? ExportSpeeds[SpeedBox.SelectedIndex] : 1,
-        Volume = VolumeEditSlider.Value / 100,
-        Mute = MuteEditToggle.IsChecked == true,
-        FixSync = FixDriftToggle.IsChecked == true,
-    };
+        var mpv = _host?.Mpv;
+        return new EditSettings
+        {
+            Speed = Speeds[_speedIndex],
+            Volume = mpv is null ? 1 : Math.Clamp(mpv.Volume / 100, 0, 1),
+            Mute = mpv?.Muted == true,
+            FixSync = FixDriftToggle.IsOn,
+        };
+    }
+
+    /// <summary>"2×, no sound"; empty when the player is at its neutral settings.</summary>
+    private static string PlayerSettingsText(EditSettings edit)
+    {
+        var parts = new List<string>();
+        if (Math.Abs(edit.Speed - 1) > 0.001) parts.Add(edit.Speed.ToString("0.##", CultureInfo.InvariantCulture) + "×");
+        if (edit.Mute) parts.Add("no sound");
+        else if (edit.Volume < 0.995) parts.Add(edit.Volume.ToString("P0", CultureInfo.InvariantCulture).Replace(" ", "") + " volume");
+        return string.Join(", ", parts);
+    }
 
     private ExportJob? BuildJob(string choice, string folder)
     {
         if (_media is null) return null;
+        FlushSync();
         var spans = ExportSelection();
         if (spans.Count == 0) return null;
         var chapters = ChaptersToggle.IsOn ? _lane.Select(l => new ExportChapter(l.Source.StartSeconds, l.Title)).ToList() : [];
         return new ExportJob(_media, spans, BuildSettings(choice), BuildEdit(), folder,
-            ExportPaths.SafeStem($"{GameText.Text} {DateTime.Now:yyyy-MM-dd HH-mm-ss}"), AppServices.Steam.RecordingsPath, _audioDelay, chapters);
+            ExportPaths.SafeStem($"{GameText.Text} {DateTime.Now:yyyy-MM-dd HH-mm-ss}") + ExportLadder.FileSuffix(choice), AppServices.Steam.RecordingsPath, _audioDelay, chapters);
     }
 
     private void UpdateExportUi()
     {
         if (!_exportUiReady) return;
-        ToolTipService.SetToolTip(ExportFolderButton, AppServices.Settings.ExportFolder ?? "Choose the export folder");
+        var folder = AppServices.Settings.ExportFolder;
+        ExportFolderText.Text = folder is null ? "Saves to: asked on your first export" : "Saves to " + folder;
+        ToolTipService.SetToolTip(ExportFolderText, folder ?? "No folder chosen yet");
         KeepAbButton.IsEnabled = _ab.Active;
         ClearKeptButton.Visibility = _kept.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
         HighlightsButton.IsEnabled = _lane.Count > 0;
 
-        var lossless = _exportChoice == "trim";
         var gpu = Encoders.BestGpu;
         var tier = ExportLadder.Tier(_exportChoice);
         foreach (var (id, button) in _choiceButtons) button.IsChecked = id == _exportChoice;
@@ -239,17 +261,19 @@ public sealed partial class PlayerPage
         {
             var usesGpu = ExportLadder.UsesGpu(tier, _engine, gpu);
             var nvenc = gpu?.Id.EndsWith("_nvenc", StringComparison.Ordinal) == true;
-            ChoiceInfoText.Text = $"{tier.Name} · {(usesGpu ? "GPU" : "CPU")}: " + (usesGpu ? (nvenc ? tier.GpuInfo : gpu!.Label) : tier.CpuInfo);
+            var shown = tier.Id == ExportLadder.ShareId ? Encoders.BestHardware(Family.H264) ?? gpu : gpu;
+            ChoiceInfoText.Text = $"{tier.Name} · {(usesGpu ? "GPU" : "CPU")}: " + (usesGpu ? (nvenc ? tier.GpuInfo : shown!.Label) : tier.CpuInfo);
         }
         else if (Presets.Get(_exportChoice) is { } special) ChoiceInfoText.Text = $"{special.Name}: {special.Tagline}";
         TargetSizeBox.Visibility = _exportChoice == "target" ? Visibility.Visible : Visibility.Collapsed;
-        SpeedBox.IsEnabled = VolumeEditSlider.IsEnabled = MuteEditToggle.IsEnabled = FixDriftToggle.IsEnabled = !lossless;
-        EditsTitle.Text = lossless ? "Export edits (sync only with Trim only)" : "Export edits";
+        SpecialExpander.Header = Presets.Get(_exportChoice) is { } picked && tier is null ? "Special purpose · " + picked.Name : "Special purpose";
+        if (tier is null) SpecialExpander.IsExpanded = true;
 
-        var plans = _media is null ? [] : ExportSpans.Plans(_media, ExportSelection(), lossless);
+        var plans = _media is null ? [] : ExportSpans.Plans(_media, ExportSelection(), lossless: false);
         var ready = plans.Count > 0;
         ExportButton.IsEnabled = ready;
         SaveClipButton.IsEnabled = ready;
+        ShareButton.IsEnabled = ready;
         DetectButton.IsEnabled = ready;
         EstimateButton.IsEnabled = ready;
         if (!ready)
@@ -258,17 +282,15 @@ public sealed partial class PlayerPage
             return;
         }
         var what = _kept.Count > 0 ? $"{plans.Count} kept part{(plans.Count == 1 ? "" : "s")}" : _ab.Active ? "A–B range" : "Whole recording";
-        var length = ExportSpans.OutputSeconds(plans, lossless ? 1 : BuildEdit().Speed);
-        var text = $"{what}  ·  {Pipeline.Time(length)}";
-        if (lossless && (_ab.Active || _kept.Count > 0)) text += "  ·  lossless cuts snap to 3 s keyframes";
+        var edit = BuildEdit();
+        var text = $"{what}  ·  {Pipeline.Time(ExportSpans.OutputSeconds(plans, edit.Speed))}";
+        if (PlayerSettingsText(edit) is { Length: > 0 } player) text += "  ·  player: " + player;
         var gaps = plans.Sum(p => p.GapSeconds);
         if (gaps > 0) text += $"  ·  {Pipeline.Time(gaps)} missing on disk";
         ExportRangeText.Text = text;
     }
 
     private void ExportOption_Changed(object sender, RoutedEventArgs e) => OptionChanged();
-
-    private void ExportOption_SelectionChanged(object sender, SelectionChangedEventArgs e) => OptionChanged();
 
     private void OptionChanged()
     {
@@ -278,8 +300,6 @@ public sealed partial class PlayerPage
     }
 
     private void TargetSize_ValueChanged(NumberBox sender, NumberBoxValueChangedEventArgs args) => OptionChanged();
-
-    private void VolumeEdit_ValueChanged(object sender, Microsoft.UI.Xaml.Controls.Primitives.RangeBaseValueChangedEventArgs e) => OptionChanged();
 
     // ---- cuts -----------------------------------------------------------------------------------------------------------
 
@@ -323,19 +343,86 @@ public sealed partial class PlayerPage
 
     // ---- audio sync -----------------------------------------------------------------------------------------------------
 
+    /// <summary>
+    /// A new sync value: exports use it at once; playback and the game's saved value follow 1 s after the last change, so dragging or
+    /// holding a nudge doesn't make mpv re-sync on every step. The ring shows it's on its way, the check mark that it arrived.
+    /// </summary>
     private void SetAudioDelay(double seconds)
     {
-        _audioDelay = Math.Round(seconds, 3);
-        AudioDelayText.Text = string.Create(CultureInfo.InvariantCulture, $"Sync {_audioDelay * 1000:+0;-0;0} ms");
-        if (Math.Abs(SyncSlider.Value - _audioDelay * 1000) > 0.5) SyncSlider.Value = _audioDelay * 1000;
-        _host?.Mpv?.SetAudioDelay(_audioDelay);                         // hear it live
-        var game = _entry?.GameId;
-        ApplyToGameToggle.IsChecked = game is not null && AppServices.Settings.GameAudioDelays.TryGetValue(game, out var saved) && Math.Abs(saved - _audioDelay) < 0.0005;
+        ShowAudioDelay(seconds);
+        _syncPending = true;
+        ShowSyncState(busy: true, applied: null);
+        if (_syncApplyTimer is null)
+        {
+            _syncApplyTimer = DispatcherQueue.CreateTimer();
+            _syncApplyTimer.IsRepeating = false;
+            _syncApplyTimer.Interval = SyncApplyDelay;
+            _syncApplyTimer.Tick += (_, _) => FlushSync();
+        }
+        _syncApplyTimer.Stop();
+        _syncApplyTimer.Start();
+    }
+
+    private void ShowAudioDelay(double seconds)
+    {
+        _audioDelay = Math.Round(Math.Clamp(seconds, -SyncLimitSeconds, SyncLimitSeconds), 3);
+        _syncUiBusy = true;
+        var ms = _audioDelay * 1000;
+        if (Math.Abs(SyncSlider.Value - ms) > 0.5) SyncSlider.Value = ms;
+        if (double.IsNaN(SyncBox.Value) || Math.Abs(SyncBox.Value - ms) > 0.5) SyncBox.Value = ms;
+        _syncUiBusy = false;
+    }
+
+    /// <summary>Applies a waiting sync value now: to playback, and to this game's next recordings (0 forgets it).</summary>
+    private void FlushSync()
+    {
+        _syncApplyTimer?.Stop();
+        if (!_syncPending) return;
+        _syncPending = false;
+        var mpv = _host?.Mpv;
+        mpv?.SetAudioDelay(_audioDelay);
+        if (_entry?.GameId is { } game)
+        {
+            var delays = AppServices.Settings.GameAudioDelays;
+            if (Math.Abs(_audioDelay) < 0.0005) delays.Remove(game);
+            else delays[game] = _audioDelay;
+            AppServices.Settings.Save();
+        }
+        // Asks mpv now: its AudioDelay property follows by an event, a moment later.
+        ShowSyncState(busy: false, applied: mpv is null || Math.Abs(mpv.GetDouble("audio-delay") - _audioDelay) < 0.002);
+    }
+
+    /// <param name="applied">True shows a check mark for a moment, false a warning that stays until the next change, null nothing.</param>
+    private void ShowSyncState(bool busy, bool? applied)
+    {
+        SyncBusyRing.IsActive = busy;
+        SyncBusyRing.Visibility = busy ? Visibility.Visible : Visibility.Collapsed;
+        SyncAppliedIcon.Visibility = applied is null ? Visibility.Collapsed : Visibility.Visible;
+        _syncDoneTimer?.Stop();
+        if (applied is null) return;
+        SyncAppliedIcon.Glyph = applied.Value ? "\uE73E" : "\uE7BA";
+        ToolTipService.SetToolTip(SyncAppliedIcon, applied.Value ? "Applied" : "Playback didn't take this value");
+        if (!applied.Value) return;
+        if (_syncDoneTimer is null)
+        {
+            _syncDoneTimer = DispatcherQueue.CreateTimer();
+            _syncDoneTimer.IsRepeating = false;
+            _syncDoneTimer.Interval = TimeSpan.FromSeconds(1.5);
+            _syncDoneTimer.Tick += (_, _) => SyncAppliedIcon.Visibility = Visibility.Collapsed;
+        }
+        _syncDoneTimer.Start();
     }
 
     private void SyncSlider_ValueChanged(object sender, RangeBaseValueChangedEventArgs e)
     {
-        if (Math.Abs(e.NewValue / 1000 - _audioDelay) > 0.0005) SetAudioDelay(e.NewValue / 1000);
+        if (!_syncUiBusy && Math.Abs(e.NewValue / 1000 - _audioDelay) > 0.0005) SetAudioDelay(e.NewValue / 1000);
+    }
+
+    private void SyncBox_ValueChanged(NumberBox sender, NumberBoxValueChangedEventArgs args)
+    {
+        if (_syncUiBusy) return;
+        if (double.IsNaN(args.NewValue)) { ShowAudioDelay(_audioDelay); return; }       // an emptied box goes back to the value in use
+        if (Math.Abs(args.NewValue / 1000 - _audioDelay) > 0.0005) SetAudioDelay(args.NewValue / 1000);
     }
 
     private void SetSyncStatus(string text)
@@ -348,21 +435,10 @@ public sealed partial class PlayerPage
 
     private void NudgeLater_Click(object sender, RoutedEventArgs e) => SetAudioDelay(_audioDelay + NudgeSeconds);
 
-    /// <summary>For <c>--uicheck</c>.</summary>
-    internal string? CurrentGameId => _entry?.GameId;
-
     private void NudgeReset_Click(object sender, RoutedEventArgs e) => SetAudioDelay(0);
 
-    private void ApplyToGame_Toggled(object sender, RoutedEventArgs e)
-    {
-        if (_entry?.GameId is not { } game) return;
-        var delays = AppServices.Settings.GameAudioDelays;
-        var saved = delays.TryGetValue(game, out var old) && Math.Abs(old - _audioDelay) < 0.0005;
-        if ((ApplyToGameToggle.IsChecked == true) == saved) return;     // SetAudioDelay moved the toggle: nothing to store
-        if (ApplyToGameToggle.IsChecked == true) delays[game] = _audioDelay;
-        else delays.Remove(game);
-        AppServices.Settings.Save();
-    }
+    /// <summary>For <c>--uicheck</c>.</summary>
+    internal string? CurrentGameId => _entry?.GameId;
 
     private async void Detect_Click(object sender, RoutedEventArgs e)
     {
@@ -467,14 +543,69 @@ public sealed partial class PlayerPage
     /// <summary>Save clip: lossless, with the markers as chapters, whatever the preset box says.</summary>
     private async void SaveClip_Click(object sender, RoutedEventArgs e)
     {
-        await EnqueueAsync("trim");
+        await EnqueueAsync(SaveClipChoice);
     }
 
     private async Task EnqueueAsync(string choice)
     {
+        if (choice != SaveClipChoice && !await ConfirmPlayerSettingsAsync()) return;
         if (await ExportFolderAsync() is not { } folder || BuildJob(choice, folder) is not { } job) return;
         AppServices.Exports.Enqueue(job, job.Stem);
     }
+
+    /// <summary>
+    /// Share: the sharing tier into a private temp folder, then Windows' share window (<see cref="AppServices.Share"/>), then the copy goes.
+    /// No chapters: a data track is one more thing a social network can refuse.
+    /// </summary>
+    private async void Share_Click(object sender, RoutedEventArgs e)
+    {
+        if (!await ConfirmPlayerSettingsAsync()) return;
+        if (BuildJob(ExportLadder.ShareId, ShareSheet.NewFolder()) is not { } job) return;
+        AppServices.Share(job with { Chapters = null, Stem = ExportPaths.SafeStem($"{GameText.Text} {DateTime.Now:yyyy-MM-dd HH-mm-ss}") });
+    }
+
+    /// <summary>The first export of a run says that the player's settings go into the file, until the user ticks "Don't show this again".</summary>
+    private async Task<bool> ConfirmPlayerSettingsAsync()
+    {
+        if (s_warnedThisRun || AppServices.Settings.SkipPlayerSettingsWarning) return true;
+        if (_warningOpen) return false;
+        _warningOpen = true;
+        var again = new CheckBox { Content = "Don't show this again" };
+        var now = PlayerSettingsText(BuildEdit());
+        var dialog = new ContentDialog
+        {
+            Title = "The player's settings go into the export",
+            Content = new StackPanel
+            {
+                Spacing = 12,
+                Children =
+                {
+                    new TextBlock { TextWrapping = TextWrapping.Wrap, Text = "Speed, mute and volume on the player's controls also apply to the exported file, and so does the audio sync. Only Save clip keeps the original speed and sound." },
+                    new TextBlock { TextWrapping = TextWrapping.Wrap, Text = now.Length > 0 ? "Right now: " + now + "." : "Right now they are at normal speed and full volume." },
+                    again,
+                },
+            },
+            PrimaryButtonText = "Export",
+            CloseButtonText = "Cancel",
+            DefaultButton = ContentDialogButton.Primary,
+            XamlRoot = XamlRoot,
+        };
+        try
+        {
+            if (await dialog.ShowAsync() != ContentDialogResult.Primary) return false;
+        }
+        finally { _warningOpen = false; }
+        s_warnedThisRun = true;
+        if (again.IsChecked == true)
+        {
+            AppServices.Settings.SkipPlayerSettingsWarning = true;
+            AppServices.Settings.Save();
+        }
+        return true;
+    }
+
+    /// <summary>FastEncoder's stream copy: what Save clip is made of.</summary>
+    private const string SaveClipChoice = "trim";
 
     private void CancelExport_Click(object sender, RoutedEventArgs e) => AppServices.Exports.CancelAll();
 
@@ -492,39 +623,8 @@ public sealed partial class PlayerPage
         ExportQueueText.Visibility = busy ? Visibility.Visible : Visibility.Collapsed;
         if (busy)
         {
-            var stage = running is null ? "Starting" : $"{running.Stage}  ·  {running.Fraction:P0}";
+            var stage = running is null ? "Starting" : (AppServices.IsShare(running) ? "Preparing to share  ·  " : "") + $"{running.Stage}  ·  {running.Fraction:P0}";
             ExportQueueText.Text = waiting > 0 ? $"{stage}  ·  {waiting} waiting" : stage;
-        }
-        var last = items.LastOrDefault(i => i.State == ExportItemState.Done && File.Exists(i.Result?.Path));
-        OpenFastEncoderButton.Visibility = last is null ? Visibility.Collapsed : Visibility.Visible;
-    }
-
-    // ---- open in FastEncoder --------------------------------------------------------------------------------------------
-
-    private async void OpenFastEncoder_Click(object sender, RoutedEventArgs e)
-    {
-        var last = AppServices.Exports.Items.LastOrDefault(i => i.State == ExportItemState.Done && File.Exists(i.Result?.Path));
-        if (last?.Result is not { } result) return;
-        var exe = AppServices.Settings.FastEncoderPath;
-        if (exe is null || !File.Exists(exe))
-        {
-            var picker = new FileOpenPicker();
-            InitializeWithWindow.Initialize(picker, AppServices.Window!.Hwnd);
-            picker.FileTypeFilter.Add(".exe");
-            exe = (await picker.PickSingleFileAsync())?.Path;
-            if (exe is null) return;
-            AppServices.Settings.FastEncoderPath = exe;
-            AppServices.Settings.Save();
-        }
-        try
-        {
-            var psi = new ProcessStartInfo(exe) { UseShellExecute = false, WorkingDirectory = Path.GetDirectoryName(exe)! };
-            psi.ArgumentList.Add(result.Path);
-            Process.Start(psi)?.Dispose();
-        }
-        catch (Exception ex) when (ex is System.ComponentModel.Win32Exception or InvalidOperationException)
-        {
-            AppServices.Toast("Couldn't open FastEncoder", ex.Message, InfoBarSeverity.Error);
         }
     }
 
@@ -543,7 +643,7 @@ public sealed partial class PlayerPage
         try
         {
             await mpv.ScreenshotToFileAsync(path);
-            AppServices.Toast("Screenshot saved", Path.GetFileName(path), InfoBarSeverity.Success, 3);
+            AppServices.Toast("Screenshot saved", Path.GetFileName(path), InfoBarSeverity.Success, 3, overPlayer: true);
         }
         catch (Exception ex) when (ex is IOException or InvalidOperationException or MpvException or ObjectDisposedException)
         {

@@ -24,7 +24,6 @@ public sealed class ExportLadderTests
     [InlineData("quality", 28, "5")]
     [InlineData("medium", 32, "6")]
     [InlineData("performance", 33, "10")]
-    [InlineData("ultra-performance", 35, "12")]
     public void Cpu_mapping_matches_the_approved_table(string id, int crf, string preset)
     {
         var s = ExportLadder.Build(T(id), LadderEngine.Cpu, Nvenc);
@@ -35,12 +34,36 @@ public sealed class ExportLadderTests
     [InlineData("quality", 33, "p7", GpuProfile.Quality)]
     [InlineData("medium", 36, "p4", GpuProfile.Balanced)]
     [InlineData("performance", 36, "p2", GpuProfile.Fast)]
-    [InlineData("ultra-performance", 36, "p1", GpuProfile.Fast)]
     public void Gpu_mapping_matches_the_approved_table(string id, int cq, string preset, GpuProfile profile)
     {
         var s = ExportLadder.Build(T(id), LadderEngine.Gpu, Nvenc);
         Assert.Equal(("av1_nvenc", cq, preset, profile), (s.Encoder, s.Quality, SpeedName(s), s.GpuProfile));
     }
+
+    [Theory]
+    [InlineData(LadderEngine.Auto, "h264_nvenc")]
+    [InlineData(LadderEngine.Cpu, "x264")]
+    public void Ultra_performance_is_720p30_h264_aac_for_sharing(LadderEngine engine, string encoder)
+    {
+        var s = ExportLadder.Build(T("ultra-performance"), engine, Nvenc, Encoders.Get("h264_nvenc"));
+        Assert.Equal((encoder, 720, 30, "aac"), (s.Encoder, s.MaxShortSide, s.FpsCap, s.Audio));
+    }
+
+    [Fact]
+    public void Ultra_performance_falls_back_to_x264_without_a_gpu_h264_encoder() =>
+        Assert.Equal("x264", ExportLadder.Build(T("ultra-performance"), LadderEngine.Auto, null).Encoder);
+
+    [Theory]
+    [InlineData("ultra-quality", "_UQ")]
+    [InlineData("quality", "_Q")]
+    [InlineData("medium", "_M")]
+    [InlineData("performance", "_P")]
+    [InlineData("ultra-performance", "_UP")]
+    [InlineData("archive", "")]
+    [InlineData("target", "")]
+    [InlineData("trim", "")]
+    public void Ladder_files_say_their_tier_and_special_ones_keep_their_name(string id, string suffix) =>
+        Assert.Equal(suffix, ExportLadder.FileSuffix(id));
 
     [Fact]
     public void Ultra_quality_is_cpu_only_even_when_the_gpu_is_asked_for()
@@ -75,7 +98,9 @@ public sealed class ExportLadderTests
 
     [Theory]
     [InlineData("medium", true)]
-    [InlineData("trim", true)]
+    [InlineData("archive", true)]
+    [InlineData("trim", false)]             // Save clip does this
+    [InlineData("compact", false)]          // removed: Ultra performance is the small one
     [InlineData("balanced", false)]         // an old saved choice falls back to the default
     [InlineData(null, false)]
     public void Saved_choice_is_validated(string? id, bool known) => Assert.Equal(known, ExportLadder.IsKnown(id));

@@ -52,7 +52,7 @@ Measured on a development machine (NVMe SSD, desktop NVIDIA GPU) against a real 
 | D2 | Desktop playback | libmpv ≥ 0.42 D3D11 render API → `SwapChainPanel`, `hwdec=d3d11va` (zero-copy), `hwdec=no` for the CPU option | `wid` child HWND, FFmpegInteropX, LibVLC | Live `audio-delay`, pitch-correct speed, frame-step, `hr-seek`, A-B loop, EDL built in; XAML overlays. `wid` is the fallback |
 | D3 | Opening recordings | Own chunk index → **lead EDL** over a ~60-chunk window (`!mp4_dash,init=` + `!new_stream`), seek-by-reload (S2) | MPD via ffmpeg/mpv | MPD fails on real sessions. Fallback: libmpv `stream_cb` virtual fMP4 |
 | D4 | Export | Stage 1 lossless range (byte-concat → `ffmpeg -c copy`); stage 2 FastEncoder `Pipeline` on that file | Re-encode from the MPD | Fast, robust, reuses every preset/sync/CFR fix |
-| D5 | FastEncoder | **Git submodule `external/FastEncoder`** (relative URL `../FastEncoder.git`, pinned commit ≥ `b4ccf39`, not added yet); its Core sources are linked into the build (`$(FastEncoderDir)`, defaulting to the submodule; overridable to a side-by-side checkout for joint development); "Open in FastEncoder" hand-off | Fork / copy / NuGet package | One source of truth, reproducible builds for anyone cloning with `--recursive` |
+| D5 | FastEncoder | **Git submodule `external/FastEncoder`** (relative URL `../FastEncoder.git`, pinned commit ≥ `b4ccf39`, not added yet); its Core sources are linked into the build (`$(FastEncoderDir)`, defaulting to the submodule; overridable to a side-by-side checkout for joint development) | Fork / copy / NuGet package | One source of truth, reproducible builds for anyone cloning with `--recursive` |
 | D6 | Encoders | ffmpeg: SVT-AV1 10-bit + Opus (CPU), NVENC/QSV/AMF (GPU, each proven by a test encode), x264/x265 | — | FastEncoder's catalog |
 | D7 | Android UI | Kotlin + Compose (Material 3), FastEncoder palette and shapes | .NET Android, Flutter | Performance, battery, platform APIs |
 | D8 | Android playback | libmpv AAR, `hwdec=mediacodec`, same EDL builder, **local files** in download-first mode | ExoPlayer | Same behaviour as the desktop; ExoPlayer is the fallback |
@@ -66,8 +66,10 @@ Measured on a development machine (NVMe SSD, desktop NVIDIA GPU) against a real 
 | D16 | Secrets | Android Keystore (AES-GCM key, TEE-backed where available); Windows Credential Manager/DPAPI; never logged | Plain prefs | Common-sense security |
 | D17 | Tooling | Portable in `.tools/` via `tools/bootstrap.ps1` (pinned + SHA-256); `tools/env.ps1` sets env for the current shell only | System installs | Nothing system-wide |
 | D18 | Public-safety | No developer-machine data in the repo: placeholders in docs, synthetic fixtures, maintainers keep local pre-commit checks | — | The repo is shared |
-| D20 | Export presets | Approved ladder (2026-11-06): **Ultra quality (CPU only) / Quality / Medium / Performance / Ultra performance**, engine **Auto (GPU if present) / CPU / GPU**, plus Archive, Compact 720p, Universal H.264, Fit to size, Trim only. Default = best performance per quality: **Medium, Auto** (GPU p4 lookahead 8: 1.9× faster than p7 for −0.09 VMAF) | FastEncoder's old flat preset list | Pick by how much time to spend |
+| D20 | Export presets | Approved ladder (2026-11-06): **Ultra quality (CPU only) / Quality / Medium / Performance / Ultra performance**, engine **Auto (GPU if present) / CPU / GPU**, plus Archive, Universal H.264, Fit to size. Default = best performance per quality: **Medium, Auto** (GPU p4 lookahead 8: 1.9× faster than p7 for −0.09 VMAF). Changed by the maintainer, 2026-11-08: Ultra performance is 720p30 H.264 + AAC for social media; Compact 720p and Trim only are gone (Save clip does the latter); the ladder adds `_UQ _Q _M _P _UP` to file names | FastEncoder's old flat preset list | Pick by how much time to spend |
 | D21 | Downloads | **Android only**, where download-first is the default. The desktop has no Downloads view, chunk downloader or network-library feature (maintainer, 2026-11-08): Windows and Linux already mount file shares, so a share is just a path to the OS | Download-first on the desktop too (built, then removed) | The OS already handles it, and only the phone lacks Steam |
+| D22 | Share | A Share button in place of "Open in FastEncoder" (dropped by the maintainer, 2026-11-08: FastEncoder's functions are already here). It exports with Ultra performance to a private temp folder, opens Windows' share window, and removes the copy when cancelled, 2 min after a target took it, or at the next share or app start/close at the latest | Keeping the clip in the export folder | Fast sharing without leaving files behind |
+| D23 | Edit settings | Speed, mute and volume are the player's own controls, one setting each; the export takes them, and the first export of a run warns (with "Don't show this again"). Save clip keeps the original speed and sound. Boost above 100 % is gone with the export slider | Separate export controls under the video (built, then removed) | Double settings confused; what you hear is what you export |
 | D19 | Licence | **GPL-3.0-or-later** for this repo; SPDX headers (`// SPDX-License-Identifier: GPL-3.0-or-later`) in every source file; `docs/third-party.md` lists bundled components and their licences when binaries ship | MIT/Apache with LGPL-only builds of libmpv + FFmpeg | The libmpv builds we ship are GPL: Windows builds (shinchiro) compile FFmpeg with `--enable-gpl --enable-version3` (x264/x265 linked), and the Android libmpv AAR builds FFmpeg with `--enable-gpl --enable-version3`, so the distributed app is GPLv3 regardless. GPLv3 (not v2) is needed for Apache-2.0 deps (Media3) and FFmpeg "version3" builds. Every other dependency (MIT, BSD, Apache-2.0, LGPL-2.1 JCIFS) is compatible. FastEncoder (MIT) can be compiled in. A permissive licence would only be honest with self-built LGPL libmpv/FFmpeg on both platforms, which costs maintenance for no user benefit |
 
 ## 3. Architecture
@@ -122,8 +124,9 @@ Measured on a development machine (NVMe SSD, desktop NVIDIA GPU) against a real 
 5. CacheFollower rebuilds the window EDL, keeping the position, when Steam trims the head or playback reaches the live end (S2: EOF →
    rebuilt EDL → `loadfile start=` continues within 0.03 s, first frame 169 ms).
 
-**Export path (desktop):** `RangeSource(video)` → ffmpeg stdin, `RangeSource(audio)` → temp `.m4a` → `-c copy -avoid_negative_ts
-make_zero -movflags +faststart`. That's final for Trim only / Save clip; otherwise it goes on to `Pipeline.EncodeAsync(...)`.
+**Export path (desktop):** video chunks and audio chunks (one extra each side, plus the sync shift) → private temp files. Save clip: `-copyts`,
+`-itsoffset` for the sync, output `-ss`/`-to` on the real timestamps, `-c copy -avoid_negative_ts make_zero -movflags +faststart`. Otherwise a mux on
+the real timestamps goes on to `Pipeline.EncodeAsync(...)`.
 **Export path (phone):** local or downloaded chunks in range → Media3 Muxer (lossless, audio-sync as a timestamp shift) → final, or
 Transformer re-encode → MediaStore.
 
@@ -136,11 +139,11 @@ Transformer re-encode → MediaStore.
 |---|---|---|
 | 1 Efficient OSS codecs | ffmpeg SVT-AV1/Opus default, NVENC/QSV/AMF, x264/x265; libmpv decode | 3, 4 |
 | 2 GPU + CPU | Encoder picker with HW proof test; "Decoding: GPU (auto) / CPU" in Settings; GPU thumbnails with CPU fallback | 2–3 |
-| 3 FastEncoder | Linked Core, identical preset tiles, size estimate, "Open in FastEncoder" | 3 |
+| 3 FastEncoder | Linked Core, identical preset tiles, size estimate, Share | 3 |
 | 4 Design language | Mica, 52 px title bar, `Card` style, brand gradient #7C3AED→#2563EB→#06B6D4, staggered entrance, emoji tiles, BusyLine shimmer, toasts, dashed empty states, monospace timecodes, Fluent glyphs. Android uses the same palette/shapes | 2, 4 |
 | 5 By game | Games rail; per game: Cache strip, Clips grid (filters: saved/downloaded/★, map/mode chips, event counts), Recordings, Exports | 1–2 |
 | 6 Steam parity, better | Timeline bands + markers, phases/tags, next/prev event, replay, clip, export. Better: broken/trimmed sessions play, live cache follow, instant seek, trickplay, frame step, 0.25–4×, A-B loop, live sync, cross-library event search, highlight reel, storage view, resume, remote libraries, no Steam needed | 2–5 |
-| 7 Cuts, sync, speed | Several cuts, lossless or frame-exact; speed 0.25–4×; volume; mute; sync slider heard live, nudges, Detect, apply to game; fix timing drift | 3, 4 |
+| 7 Cuts, sync, speed | Several cuts, lossless or frame-exact; speed 0.25–4×, volume and mute from the player's own controls; sync ±5 s (slider, typed ms, held nudges, Detect), applied after 1 s and kept for the game; fix timing drift | 3, 4 |
 | 8 Android, secure SMB | SMB 3.1.1 encrypted, read-only, server profiles, download-first, editing + export on the phone | 4 |
 
 ### 4.2 Desktop UI
@@ -154,7 +157,7 @@ Transformer re-encode → MediaStore.
 │ └────────────────┘ │ ┌thumb─────┐ ┌thumb─────┐ ┌thumb─────┐        RECORDINGS · EXPORTS below          │ │
 │                    └──────────────────────────────────────────────────────────────────────────────────────┘ │
 │ PLAYER (FastEncoder 3 columns 310 | * | 392): Up next │ video + markers lane + filmstrip/trim + transport   │
-│                                                 + edits card (speed · volume · mute · sync + Detect)        │
+│                                                 + audio sync row (slider · ms · nudges · Detect)           │
 │                                                 │ Events list (filters) + Export card (preset tiles)        │
 │ status: Ready · indexing ▁▁▁                                  [Stop]  [✂ Export cut]       │
 └─────────────────────────────────────────────────────────────────────────────────────────────────────────────┘
@@ -384,7 +387,7 @@ generator (S4: first fragment of each chunk, 160 px JPEG q10 every 3 s, zero-fil
 ### Phase 3: Desktop edits, export
 Cuts, speed/volume/mute, live sync + nudges, **Detect** (FastEncoder `AudioSync`; S6: `Low` confidence on real gameplay, so the UI
 shows "Low confidence: not applied" instead of a number, and a fix is `AudioDelay = −AudioLate` through one tested helper), apply to
-game, fix timing drift, the approved preset ladder (D20) + size estimate, export queue with taskbar progress, **Save clip** (markers as chapters), "Open in FastEncoder", highlight reel,
+game, fix timing drift, the approved preset ladder (D20) + size estimate, export queue with taskbar progress, **Save clip** (markers as chapters), **Share** (D22), highlight reel,
 screenshots, colour-range check per encoder, **export folder picker on first export**. No network libraries or downloads on the desktop (D21).
 
 ### Phase 4: Android
@@ -510,14 +513,16 @@ GPU trickplay on real 1440p HEVC inside the app, a 60 fps gap session.
 **Phase 3 progress (started 2026-11-08 on the maintainer's word; Phase 2.2 re-tested by the maintainer).** Code complete on the desktop,
 waiting for the maintainer's test. In: export core and queue (`ExportService`, `ExportQueue`: chunks are copied through `RangeSource`, muxed
 on their real timestamps, lossless snaps to the 3 s grid, re-encodes trim frame-exact through FastEncoder's `Pipeline`, several kept spans join
-without re-encoding); `ExportLadder` (D20) with special presets incl. Fit to size; the edits card under the video (speed 0.25-4×, volume,
-mute, fix timing drift, sync slider heard live, nudges, Detect with "Low confidence: not applied", apply to game); on the Export card: cuts as
-kept parts drawn on the timeline, highlight reel from markers, size estimate, markers as chapters, Save clip, screenshots `S`, Open in
-FastEncoder, taskbar progress, `Ctrl+E`; in the Library: the Exports list per game and the Cache strip's Save clip.
+without re-encoding); `ExportLadder` (D20) with special presets incl. Fit to size; speed, volume and mute come from the player's controls, with a warning at the first export (D23); the sync row under the video (±5 s,
+typed ms, held nudges, Detect with "Low confidence: not applied", applied after 1 s with a ring and a check mark, kept for the game); on the Export card: the folder in plain text, cuts as
+kept parts drawn on the timeline, highlight reel from markers, size estimate, markers as chapters, fix timing drift, Save clip, screenshots `S` with a toast, Share,
+tier suffixes in file names, taskbar progress, `Ctrl+E`; in the Library: the Exports list per game and the Cache strip's Save clip.
 Automated: `tools\e2e.ps1` runs build, unit tests, `--selftest` and `--uicheck` on the real shortest clip and active cache, with a 5 minute budget.
 Measured: Steam's newest chunks can hold about 0.8 s less video than audio, so an export touching the live tail can have a shorter picture
 than its range; mid-session ranges are exact. MP4 forces the first chapter to 0, so a "Start" chapter precedes a later first marker.
-Not verified by automation: the folder picker and Open in FastEncoder (automation can't drive pickers), how things look and sound.
+Maintainer's test of 2026-11-08 (`phase3.feedback`), fixed: Save clip kept a sync shift as a 1.8 s frozen start and a silent end, and ended on the chunk edge; cuts lost the tail of their sound
+under a sync shift, because audio was read only from the picture's chunks. A chunk's tfdt isn't its first dts (66 ms off on a real clip), so the trim counts from the probed dts.
+Not verified by automation: the folder picker (automation can't drive pickers), sending through the share window (`SPP_UICHECK_REAL_SHARE=1` proves it opens and gets the clip), how things look and sound.
 Not moved upstream: FastEncoder's own app still shows its old presets; the ladder lives in this repo (`src/Core/Export/ExportLadder.cs`) until the
 maintainer asks for it there, since preset definitions in FastEncoder are ask-first.
 

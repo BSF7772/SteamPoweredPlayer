@@ -4,8 +4,8 @@ using SteamPoweredPlayer.Core.Library;
 namespace SteamPoweredPlayer.Core.Export;
 
 /// <summary>
-/// The chunks an export reads for a range on the media (tfdt) axis. <see cref="SnappedStart"/>..<see cref="SnappedEnd"/> is what a
-/// lossless export contains (the 3 s keyframe grid); a re-encode trims to <see cref="Start"/>..<see cref="End"/> inside it.
+/// The chunks an export reads for a range on the media (tfdt) axis. A lossless export starts at <see cref="SnappedStart"/> (only a chunk
+/// start is a keyframe) and ends at <see cref="End"/>; a re-encode trims to <see cref="Start"/>..<see cref="End"/>.
 /// </summary>
 /// <param name="GapSeconds">Chunks missing on disk inside the range: the output holds the picture over them.</param>
 public sealed record ExportPlan(int FirstChunk, int LastChunk, double Start, double End, double SnappedStart, double SnappedEnd, double GapSeconds)
@@ -31,6 +31,18 @@ public sealed record ExportPlan(int FirstChunk, int LastChunk, double Start, dou
         var snappedEnd = media.ChunkEndSeconds(b);
         return new ExportPlan(a, b, Math.Max(start, snappedStart), Math.Min(end, snappedEnd), snappedStart, snappedEnd,
             (b - a + 1 - count) * media.SegmentSeconds);
+    }
+
+    /// <summary>
+    /// The audio chunks that hold the sound of this plan: output time t plays source time t − <paramref name="audioDelay"/>, so a sync shift
+    /// reads past the picture's chunks, and Steam's audio chunks can run up to a second off the grid. One chunk of margin each side
+    /// covers that; only the recording's own start or end can leave the sound short.
+    /// </summary>
+    public static (int First, int Last) AudioChunks(SessionMedia media, ExportPlan plan, double audioDelay)
+    {
+        var margin = media.SegmentSeconds;
+        var range = For(media, plan.Start - audioDelay - margin, plan.End - audioDelay + margin);
+        return range is null ? (plan.FirstChunk, plan.LastChunk) : (range.FirstChunk, range.LastChunk);
     }
 
     /// <summary>The whole recording, or null when it has no chunks.</summary>

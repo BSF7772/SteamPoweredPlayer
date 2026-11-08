@@ -46,6 +46,7 @@ public sealed partial class MainWindow : Window
         };
         Root.Loaded += Root_Loaded;
         AppServices.LibraryCreated += WireSource;
+        ShareSheet.Sweep();                     // clips a closed or killed app left behind
         Closed += (_, _) =>
         {
             PlayerHost.Instance?.Shutdown();      // flush resume positions, dispose renderer then mpv
@@ -243,12 +244,13 @@ public sealed partial class MainWindow : Window
     // =====================================================================================
 
     /// <summary>
-    /// F6: toasts sit bottom-left, away from the player controls; on the Player page only errors are shown (anything else would cover
-    /// the video), and opening the Player closes the toasts that are still up.
+    /// F6: toasts sit bottom-left, away from the player controls; on the Player page only errors and the result of a button pressed there
+    /// are shown (anything else would cover the video), and opening the Player closes the toasts that are still up.
     /// </summary>
-    public void ShowToast(string title, string? message, InfoBarSeverity severity, int seconds = 6)
+    public void ShowToast(string title, string? message, InfoBarSeverity severity, int seconds = 6, bool overPlayer = false)
     {
-        if (severity != InfoBarSeverity.Error && ContentFrame.Content is PlayerPage) return;
+        if (severity != InfoBarSeverity.Error && !overPlayer && ContentFrame.Content is PlayerPage) return;
+        ToastHost.Width = ContentFrame.Content is PlayerPage ? 296 : 400;      // over the playlist, clear of the transport
         var bar = new InfoBar
         {
             Title = title,

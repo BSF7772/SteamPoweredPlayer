@@ -24,7 +24,25 @@ public sealed class ExportEditRulesTests
     {
         var plans = ExportSpans.Plans(Media(), [new(1, 2), new(2.5, 3.5), new(20, 21)], lossless: true);
         Assert.Equal([(1, 2), (7, 7)], plans.Select(p => (p.FirstChunk, p.LastChunk)));
-        Assert.Equal((0.0, 6.0), (plans[0].Start, plans[0].End));
+        Assert.Equal((0.0, 3.5), (plans[0].Start, plans[0].End));
+    }
+
+    [Theory]
+    [InlineData(0, 3, 5)]               // one chunk of margin around chunks 4..4 (9..12 s)
+    [InlineData(-5, 4, 7)]              // sound 5 s earlier reads later chunks
+    [InlineData(5, 1, 3)]               // sound 5 s later reads earlier chunks, clamped to the recording
+    public void Audio_chunks_cover_the_sync_shift_and_a_margin(double delay, int first, int last)
+    {
+        var plan = ExportPlan.For(Media(), 9.5, 11)!;
+        Assert.Equal((first, last), ExportPlan.AudioChunks(Media(), plan, delay));
+    }
+
+    [Fact]
+    public void Lossless_args_cut_both_streams_on_the_real_timestamps()
+    {
+        var a = string.Join(' ', ExportService.LosslessArgs("v", "a", "o", 100, 106.5, -1.5));
+        Assert.Contains("-copyts -i v -itsoffset -1.5 -i a", a);
+        Assert.Contains("-ss 99.999 -to 106.5", a);
     }
 
     [Fact]
@@ -198,6 +216,42 @@ public sealed class ExportEditEndToEndTests : IDisposable
         var info = await Ff.ProbeAsync((await ExportService.RunAsync(job, null, default)).Path);
         Assert.True(info!.HasAudio);
         Assert.InRange(info.Duration, 5.5, 6.6);
+    }
+
+    private static async Task<Dictionary<string, (double Start, double End)>> StreamsAsync(string path)
+    {
+        var r = await Ff.RunAsync(Ff.Ffprobe, ["-v", "error", "-show_entries", "stream=codec_type,start_time,duration", "-of", "csv=p=0", path]);
+        var inv = System.Globalization.CultureInfo.InvariantCulture;
+        return r.StdOut.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Select(l => l.Split(',')).Where(p => p[0] is "video" or "audio")
+            .ToDictionary(p => p[0], p => (double.Parse(p[1], inv), double.Parse(p[1], inv) + double.Parse(p[2], inv)));
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(-1.8)]                  // the broken clip: the picture froze for 1.8 s and the end had no sound
+    [InlineData(1.8)]
+    public async Task Lossless_starts_both_streams_together_and_ends_exactly_on_b(double delay)
+    {
+        var job = Job(Copy, new ExportSpan(O + 3.5, O + 8.2)) with { AudioDelay = delay };
+        var s = await StreamsAsync((await ExportService.RunAsync(job, null, default)).Path);
+        Assert.InRange(s["video"].Start, 0, 0.12);                  // the keyframe of the chunk at O + 3
+        Assert.InRange(s["audio"].Start, 0, 0.12);
+        Assert.InRange(s["video"].End, 5.05, 5.35);                 // B = 5.2 s after that keyframe
+        Assert.InRange(s["audio"].End, 5.05, 5.35);
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(-1.8)]                  // the tail ran out: only the chunks of the picture were read
+    [InlineData(1.8)]
+    public async Task A_cut_inside_the_recording_keeps_all_its_sound_under_any_sync(double delay)
+    {
+        var job = Job(X264, new ExportSpan(O + 4, O + 8.9)) with { AudioDelay = delay };
+        var s = await StreamsAsync((await ExportService.RunAsync(job, null, default)).Path);
+        Assert.InRange(s["video"].End - s["video"].Start, 4.75, 5.05);
+        Assert.InRange(s["audio"].Start, 0, 0.1);
+        Assert.InRange(s["audio"].End, 4.75, 5.05);
     }
 
     [Fact]

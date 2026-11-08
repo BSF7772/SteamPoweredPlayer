@@ -36,14 +36,14 @@ public static class ExportSpans
     }
 
     /// <summary>
-    /// One plan per output segment, in order. Lossless spans are snapped first and merged when they share a chunk, so a chunk is
-    /// never written twice; a plan's <see cref="ExportPlan.Start"/>..<see cref="ExportPlan.End"/> is then the snapped range.
+    /// One plan per output segment, in order. Lossless spans start on the keyframe before their start and keep their exact end, then
+    /// merge when they overlap, so a frame is never written twice.
     /// </summary>
     public static IReadOnlyList<ExportPlan> Plans(SessionMedia media, IEnumerable<ExportSpan> spans, bool lossless)
     {
         var plans = Normalize(spans).Select(s => ExportPlan.For(media, s.Start, s.End)).OfType<ExportPlan>().ToList();
         if (!lossless) return plans;
-        var snapped = Normalize(plans.Select(p => new ExportSpan(p.SnappedStart, p.SnappedEnd)));
+        var snapped = Normalize(plans.Select(p => new ExportSpan(p.SnappedStart, p.End)));
         return [.. snapped.Select(s => ExportPlan.For(media, s.Start, s.End)).OfType<ExportPlan>()];
     }
 

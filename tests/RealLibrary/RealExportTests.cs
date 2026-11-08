@@ -38,7 +38,7 @@ public sealed class RealExportTests(ITestOutputHelper output) : IDisposable
     private async Task CheckAsync(string label, SessionMedia media, double start, double end, string root, bool strictVideo = false)
     {
         var plan = ExportPlan.For(media, start, end)!;
-        foreach (var (name, s, expected) in new[] { ("lossless", Copy, plan.SnappedEnd - plan.SnappedStart), ("encoded", X264, plan.End - plan.Start) })
+        foreach (var (name, s, expected) in new[] { ("lossless", Copy, plan.End - plan.SnappedStart), ("encoded", X264, plan.End - plan.Start) })
         {
             var sw = Stopwatch.StartNew();
             var r = await ExportService.RunAsync(new ExportJob(media, [new ExportSpan(start, end)], s, new EditSettings(), _out, label + "-" + name, root), null, default);

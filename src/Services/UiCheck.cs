@@ -392,19 +392,39 @@ internal static partial class UiCheck
 
             // ---- the ladder
             var edits = Find("PlayerEdits") is { ActualHeight: > 0 };
-            Add(CheckResult.From(edits, $"{id}.edits-visible", "Edits card is on screen under the video", edits ? "visible" : "hidden"));
+            Add(CheckResult.From(edits, $"{id}.edits-visible", "Audio sync row is on screen under the video", edits ? "visible" : "hidden"));
             Press("ExportTier-medium");
             Press("ExportEngine-Auto");
+            Press("ExportTier-quality");                                // redraws the card with the folder set above
+            Press("ExportTier-medium");
+            var folderShown = Text("PlayerExportFolderText").EndsWith(dir, StringComparison.Ordinal);
+            Add(CheckResult.From(folderShown, $"{id}.export-folder-text", "The export folder is written on the card", folderShown ? "shown" : "not shown"));
             var expected = FastEncoder.Core.Encoders.BestGpu is null ? "Medium · CPU" : "Medium · GPU";
             Add(CheckResult.From(Text("PlayerExportChoice").StartsWith(expected, StringComparison.Ordinal), $"{id}.ladder-medium", "Medium on Auto uses the GPU when there is one", expected));
             Press("ExportTier-ultra-quality");
             var cpuOnly = Text("PlayerExportChoice").StartsWith("Ultra quality · CPU", StringComparison.Ordinal) && Find("ExportEngine-Gpu") is Control { IsEnabled: false };
             Add(CheckResult.From(cpuOnly, $"{id}.ladder-cpu-only", "Ultra quality is CPU only, its GPU switch is off", cpuOnly ? "CPU, switch off" : Text("PlayerExportChoice")));
-            Press("ExportSpecial-trim");
-            var trim = Find("PlayerExportSpeed") is Control { IsEnabled: false };
-            Add(CheckResult.From(trim, $"{id}.ladder-trim", "Trim only turns speed and sound off", trim ? "off" : "still on"));
             Press("ExportTier-medium");
             Press("ExportEngine-Auto");
+
+            // ---- special presets slide out of a menu; Trim only and Compact are gone
+            var closed = Find("ExportSpecial-archive") is null or { ActualHeight: 0 };
+            if (Find("ExportSpecialExpander") is Expander expander) expander.IsExpanded = true;
+            var opened = await WaitFor(() => Find("ExportSpecial-target") is { ActualHeight: > 0 }, 3);
+            var removed = Find("ExportSpecial-trim") is null && Find("ExportSpecial-compact") is null;
+            Add(CheckResult.From(closed && opened && removed, $"{id}.special-menu", "Special presets are in a closed menu, without Trim only and Compact",
+                $"closed at first {closed}, opens {opened}, removed {removed}"));
+
+            // ---- the first export warns that the player's settings go into the file
+            AppServices.Settings.SkipPlayerSettingsWarning = false;
+            Press("PlayerExport");
+            var warned = await WaitFor(() => OpenDialog() is not null, 3);
+            var hasCheck = warned && Descendants(OpenDialog()).OfType<CheckBox>().Any();
+            OpenDialog()?.Hide();
+            await WaitFor(() => OpenDialog() is null, 3);
+            Add(CheckResult.From(warned && hasCheck && AppServices.Exports.Pending == 0, $"{id}.export-warning", "First export warns, with a Don't show again box; Cancel exports nothing",
+                $"dialog {warned}, box {hasCheck}, queued {AppServices.Exports.Pending}"));
+            AppServices.Settings.SkipPlayerSettingsWarning = true;
 
             // ---- estimate, detect
             var estimate = Find("PlayerEstimate");
@@ -413,43 +433,55 @@ internal static partial class UiCheck
             var detect = Find("PlayerDetectSync");
             var detected = detect is not null && Invoke(detect) && await WaitFor(() => Text("PlayerSyncStatus") is { Length: > 0 } t && !t.StartsWith("Analysing", StringComparison.Ordinal), 60);
             Add(CheckResult.From(detected, $"{id}.export-detect", "Detect button reports a verdict", detected ? "a verdict is shown" : "no verdict within 60 s"));
+            if (Find("PlayerSyncReset") is { } clear) Invoke(clear);
+            await Task.Delay(1200);
 
-            // ---- sync: heard live, kept for the game
-            var delayBefore = Text("PlayerAudioDelay");
+            // ---- sync: applied 1 s after the last change, with a ring and a check mark, kept for the game
+            var mpv = PlayerHost.Instance?.Mpv;
+            var box = Find("PlayerSyncBox") as NumberBox;
+            var before = mpv?.AudioDelay ?? double.NaN;
             Press("PlayerSyncLater");
             Press("PlayerSyncLater");
-            await Task.Delay(150);
-            var mpvDelay = Session() is not null && PlayerHost.Instance?.Mpv is { } m ? m.AudioDelay : double.NaN;
-            var nudged = Text("PlayerAudioDelay") != delayBefore;
-            Add(CheckResult.From(nudged && Math.Abs(mpvDelay - ParseDelay(Text("PlayerAudioDelay"))) < 0.005, $"{id}.sync-nudge", "Sync nudges reach the player live", $"{Text("PlayerAudioDelay")}, mpv {F(mpvDelay, "0.000")} s"));
+            await Task.Delay(100);
+            var ring = Find("PlayerSyncBusy") is { ActualHeight: > 0 };
+            var waited = Math.Abs((mpv?.AudioDelay ?? double.NaN) - before) < 0.0005;
             var game = (Page() as PlayerPage)?.CurrentGameId;
-            if (game is not null)
-            {
-                Press("PlayerApplySyncToGame");
-                Add(CheckResult.From(AppServices.Settings.GameAudioDelays.ContainsKey(game), $"{id}.sync-game", "Apply to game stores the delay", "in memory only during this check"));
-                Press("PlayerApplySyncToGame");
-                AppServices.Settings.GameAudioDelays.Remove(game);
-            }
+            var arrived = await WaitFor(() => Math.Abs((mpv?.AudioDelay ?? double.NaN) - 0.04) < 0.002, 2);
+            await Task.Delay(50);
+            var mark = Find("PlayerSyncApplied") is FontIcon { ActualHeight: > 0, Glyph: "\uE73E" };
+            var stored = game is null || (AppServices.Settings.GameAudioDelays.TryGetValue(game, out var kept0) && Math.Abs(kept0 - 0.04) < 0.002);
+            Add(CheckResult.From(ring && waited && arrived && mark && stored && box?.Value is 40, $"{id}.sync-nudge", "Sync waits 1 s, shows a ring then a check mark, reaches the player and the game",
+                $"ring {ring}, waited {waited}, arrived {arrived}, check {mark}, game {stored}, box {box?.Value}"));
+            if (box is not null) box.Value = 4321;
+            var slider = Find("PlayerSyncSlider") as Slider;
+            await Task.Delay(100);
+            Add(CheckResult.From(slider is { Maximum: 5000, Minimum: -5000, Value: 4321 }, $"{id}.sync-range", "A typed value is exact, and the slider reaches ±5 s", $"slider {slider?.Value} of {slider?.Maximum}"));
+
+            // ---- exports through the buttons, with the sound shifted: both must keep all their sound
+            if (box is not null) box.Value = -300;
+            await ExportButtonCheck(id, "save-clip", "PlayerSaveClip", "Save clip with sync -300 ms: from the keyframe to B exactly, sound all the way", dir, 2.9, 3.2, suffix: "");
+            await ExportButtonCheck(id, "export", "PlayerExport", "Export Medium with sync -300 ms (A = 1 s, B = 3 s), sound all the way", dir, 1.7, 2.3, suffix: "_M");
             if (Find("PlayerSyncReset") is { } reset) Invoke(reset);
+            await Task.Delay(1200);
 
-            // ---- exports through the buttons
-            await ExportButtonCheck(id, "save-clip", "PlayerSaveClip", "Save clip (lossless, snapped to chunks)", dir, 2, 6.5);
-            await ExportButtonCheck(id, "export", "PlayerExport", "Export Medium (A = 1 s, B = 3 s)", dir, 1.7, 2.3);
-
-            if (Find("PlayerExportSpeed") is ComboBox speed && Find("PlayerExportMute") is { } mute)
-            {
-                var one = speed.SelectedIndex;
-                speed.SelectedIndex = speed.Items.IndexOf("2×");
-                Invoke(mute);
-                await ExportButtonCheck(id, "export-speed", "PlayerExport", "Export at 2× with no sound", dir, 0.8, 1.2, audio: false);
-                speed.SelectedIndex = one;
-                Invoke(mute);
-            }
+            // ---- speed and sound come from the player's own controls
+            Session()?.SetSpeed(2);
+            Session()?.SetMute(true);
+            var noted = await WaitFor(() => Text("PlayerExportRange").Contains("2×, no sound", StringComparison.Ordinal), 3);
+            Add(CheckResult.From(noted, $"{id}.player-settings", "The card says the player's speed and mute go into the export", noted ? "shown" : Text("PlayerExportRange")));
+            await ExportButtonCheck(id, "export-speed", "PlayerExport", "Export with the player at 2× and muted", dir, 0.8, 1.2, audio: false);
+            Session()?.SetSpeed(1);
+            Session()?.SetMute(false);
+            await WaitFor(() => !Text("PlayerExportRange").Contains("no sound", StringComparison.Ordinal), 3);
 
             Press("ExportSpecial-target");
             if (Find("PlayerExportTargetMb") is NumberBox target) target.Value = 1;
-            await ExportButtonCheck(id, "export-fit", "PlayerExport", "Fit to size stays under 1 MB", dir, 1.7, 2.3, maxBytes: 1024 * 1024);
+            await ExportButtonCheck(id, "export-fit", "PlayerExport", "Fit to size stays under 1 MB, its name has no tier", dir, 1.7, 2.3, maxBytes: 1024 * 1024, suffix: "");
+            Press("ExportTier-ultra-performance");
+            await ExportButtonCheck(id, "export-up", "PlayerExport", "Ultra performance is named _UP", dir, 1.7, 2.3, suffix: "_UP");
             Press("ExportTier-medium");
+
+            await ShareCheck(id);
 
             var keep = Find("PlayerKeepAb");
             var kept = keep is not null && Invoke(keep) && await WaitFor(() => Text("PlayerExportRange").StartsWith("1 kept part", StringComparison.Ordinal), 3);
@@ -460,7 +492,42 @@ internal static partial class UiCheck
 
             var shot = Find("PlayerScreenshot");
             var shotTaken = shot is not null && Invoke(shot) && await WaitFor(() => Directory.EnumerateFiles(dir, "*.png").Any(f => new FileInfo(f).Length > 0), 5);
-            Add(CheckResult.From(shotTaken, $"{id}.screenshot", "Screenshot button saves a frame", shotTaken ? "a PNG was written" : "no PNG within 5 s"));
+            var toast = shotTaken && await WaitFor(() => Descendants(window.Content).OfType<InfoBar>().Any(b => b.Title == "Screenshot saved"), 3);
+            var buttons = Find("PlayerShare") is { } lowest && window.Content is FrameworkElement top
+                && lowest.TransformToVisual(top).TransformBounds(new Windows.Foundation.Rect(0, 0, lowest.ActualWidth, lowest.ActualHeight)).Bottom <= top.ActualHeight;
+            Add(CheckResult.From(buttons, $"{id}.export-buttons", "Screenshot and Share stay on screen, with the special menu open", buttons ? "inside the window" : "cut off"));
+            Add(CheckResult.From(shotTaken && toast, $"{id}.screenshot", "Screenshot button saves a frame and says so on the Player", $"PNG {shotTaken}, toast {toast}"));
+        }
+
+        private ContentDialog? OpenDialog() =>
+            window.Content.XamlRoot is { } root ? VisualTreeHelper.GetOpenPopupsForXamlRoot(root).Select(p => p.Child).OfType<ContentDialog>().FirstOrDefault() : null;
+
+        /// <summary>Share up to the sheet, which automation couldn't close: a small H.264 + AAC 720p file, removed afterwards.</summary>
+        private async Task ShareCheck(string id)
+        {
+            if (Environment.GetEnvironmentVariable("SPP_UICHECK_REAL_SHARE") == "1")
+            {
+                window.Activate();
+                Press("PlayerShare");                                   // the real sheet: it closes with the window
+                var provided = await WaitFor(() => ShareSheet.ClipProvided, 15);
+                Add(CheckResult.From(provided, $"{id}.share-real", "Windows' share window asks for the clip and gets it", provided ? "provided" : "not asked within 15 s"));
+                return;
+            }
+            string? shared = null;
+            ShareSheet.Intercept = p => shared = p;
+            try
+            {
+                Press("PlayerShare");
+                var ready = await WaitFor(() => shared is not null, 60);
+                var info = shared is null ? null : await FastEncoder.Core.Ff.ProbeAsync(shared);
+                var ok = info is { VideoCodec: "h264", AudioCodec: "aac", Fps: <= 30.5 } && Math.Min(info.Width, info.Height) <= 720;
+                Add(CheckResult.From(ready && ok, $"{id}.share", "Share makes a 720p30 H.264 + AAC copy for the share window",
+                    info is null ? "no file within 60 s" : $"{info.VideoCodec}/{info.AudioCodec} {info.Width}x{info.Height} {F(info.Fps, "0.#")} fps, {new FileInfo(shared!).Length / 1024} KiB"));
+                ShareSheet.Sweep();
+                var gone = shared is not null && !File.Exists(shared);
+                Add(CheckResult.From(gone, $"{id}.share-removed", "The shared copy is removed", gone ? "removed" : "still there"));
+            }
+            finally { ShareSheet.Intercept = null; }
         }
 
         /// <summary>Back in the Library: the exports just made are listed for the game. Then the temp folder goes.</summary>
@@ -488,7 +555,21 @@ internal static partial class UiCheck
             return double.TryParse(digits, System.Globalization.NumberStyles.AllowLeadingSign, System.Globalization.CultureInfo.InvariantCulture, out var ms) ? ms / 1000 : double.NaN;
         }
 
-        private async Task ExportButtonCheck(string id, string name, string automationId, string title, string dir, double minSeconds, double maxSeconds, bool audio = true, long? maxBytes = null)
+        /// <summary>Per stream: start and end in seconds.</summary>
+        private static async Task<Dictionary<string, (double Start, double End)>> Streams(string path)
+        {
+            var r = await FastEncoder.Core.Ff.RunAsync(FastEncoder.Core.Ff.Ffprobe, ["-v", "error", "-show_entries", "stream=codec_type,start_time,duration", "-of", "csv=p=0", path]);
+            var result = new Dictionary<string, (double, double)>();
+            foreach (var line in r.StdOut.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+            {
+                var p = line.Split(',');
+                if (p.Length >= 3 && double.TryParse(p[1], NumberStyles.Float, CultureInfo.InvariantCulture, out var start) && double.TryParse(p[2], NumberStyles.Float, CultureInfo.InvariantCulture, out var length))
+                    result[p[0]] = (start, start + length);
+            }
+            return result;
+        }
+
+        private async Task ExportButtonCheck(string id, string name, string automationId, string title, string dir, double minSeconds, double maxSeconds, bool audio = true, long? maxBytes = null, string? suffix = null)
         {
             var before = Directory.EnumerateFiles(dir, "*.mp4").ToHashSet();
             var button = Find(automationId);
@@ -503,7 +584,21 @@ internal static partial class UiCheck
             var bytes = output is null ? 0 : new FileInfo(output).Length;
             var ok = info is not null && info.HasAudio == audio && info.Duration >= minSeconds && info.Duration <= maxSeconds && (maxBytes is null || bytes <= maxBytes);
             var state = AppServices.Exports.Items.LastOrDefault()?.State.ToString() ?? "none";
-            Add(CheckResult.From(ok, $"{id}.{name}", title, info is null ? $"no output (queue item: {state})" : $"{F(info.Duration, "0.00")} s, audio {info.HasAudio}, {bytes / 1024} KiB"));
+            var detail = info is null ? $"no output (queue item: {state})" : $"{F(info.Duration, "0.00")} s, audio {info.HasAudio}, {bytes / 1024} KiB";
+            if (info is not null && audio)
+            {
+                var s = await Streams(output!);
+                var together = s.TryGetValue("video", out var v) && s.TryGetValue("audio", out var a) && Math.Abs(v.Start - a.Start) <= 0.12 && Math.Abs(v.End - a.End) <= 0.12;
+                ok &= together;
+                detail += together ? ", sound covers the picture" : ", SOUND AND PICTURE DIFFER: " + string.Join(" ", s.Select(kv => $"{kv.Key} {F(kv.Value.Start, "0.00")}..{F(kv.Value.End, "0.00")}"));
+            }
+            if (output is not null && suffix is not null)
+            {
+                var named = suffix.Length > 0 ? Path.GetFileNameWithoutExtension(output).EndsWith(suffix, StringComparison.Ordinal) : !Regex.IsMatch(Path.GetFileNameWithoutExtension(output), "_(UQ|Q|M|P|UP)$");
+                ok &= named;
+                if (!named) detail += ", wrong file name";
+            }
+            Add(CheckResult.From(ok, $"{id}.{name}", title, detail));
         }
 
         /// <summary>The transport controls (the volume slider or, when narrow, its button) and the timeline's zoom group.</summary>
