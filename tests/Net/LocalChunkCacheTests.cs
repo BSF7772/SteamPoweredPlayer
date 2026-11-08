@@ -61,27 +61,6 @@ public sealed class LocalChunkCacheTests : IDisposable
     }
 
     [Fact]
-    public async Task A_new_cap_deletes_nothing_at_once_and_applies_to_the_next_put()
-    {
-        var cache = await Open(cap: 1000);
-        await Put(cache, K(1), 400);
-        await Put(cache, K(2), 400);
-        cache.SetMaxBytes(500);
-        Assert.Equal(500, cache.MaxBytes);
-        Assert.Equal(800, cache.TotalBytes);
-        Assert.True(cache.Contains(K(1)));
-
-        await Put(cache, K(3), 100);                                     // trims the least recently used down to the new cap
-        Assert.False(cache.Contains(K(1)));
-        Assert.True(cache.TotalBytes <= 500);
-        Assert.True(cache.Contains(K(3)));
-
-        cache.SetMaxBytes(5000);
-        await Put(cache, K(4), 1000);
-        Assert.True(cache.Contains(K(2)));
-    }
-
-    [Fact]
     public async Task Put_then_lookup_returns_a_file_with_the_same_bytes()
     {
         var cache = await Open();

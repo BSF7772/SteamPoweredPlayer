@@ -42,25 +42,13 @@ public static class ChunkPlan
     public static IReadOnlyList<int> AroundMarkers(SessionMedia media, IEnumerable<double> markerSeconds, double marginSeconds)
     {
         ArgumentNullException.ThrowIfNull(markerSeconds);
-        return AroundMoments(media, markerSeconds.Select(t => (t, t)), marginSeconds, marginSeconds);
-    }
-
-    /// <summary>
-    /// The chunks from <paramref name="beforeSeconds"/> before each moment's start to <paramref name="afterSeconds"/> after its end
-    /// (media-axis seconds; a point has start = end), limited to chunks present in <paramref name="media"/>; sorted, no duplicates.
-    /// </summary>
-    public static IReadOnlyList<int> AroundMoments(SessionMedia media, IEnumerable<(double Start, double End)> moments, double beforeSeconds, double afterSeconds)
-    {
-        ArgumentNullException.ThrowIfNull(media);
-        ArgumentNullException.ThrowIfNull(moments);
-        ArgumentOutOfRangeException.ThrowIfNegative(beforeSeconds);
-        ArgumentOutOfRangeException.ThrowIfNegative(afterSeconds);
+        ArgumentOutOfRangeException.ThrowIfNegative(marginSeconds);
         var wanted = new SortedSet<int>();
-        foreach (var (start, end) in moments)
+        foreach (var t in markerSeconds)
         {
             // media.ChunkAt honours the axis shift (saved clips sit at their real tfdt, not at (N−1)·len).
-            var from = media.ChunkAt(start - beforeSeconds);
-            var to = media.ChunkAt(Math.Max(start, end) + afterSeconds);
+            var from = media.ChunkAt(t - marginSeconds);
+            var to = media.ChunkAt(t + marginSeconds);
             foreach (var c in media.Chunks().Where(c => c >= from && c <= to)) wanted.Add(c);
         }
         return [.. wanted];

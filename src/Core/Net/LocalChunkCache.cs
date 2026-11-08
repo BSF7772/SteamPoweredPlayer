@@ -62,7 +62,7 @@ public sealed partial class LocalChunkCache
     }
 
     private readonly string _dir;
-    private long _maxBytes;
+    private readonly long _maxBytes;
     private readonly object _gate = new();
     private readonly SemaphoreSlim _indexLock = new(1, 1);
     private readonly Dictionary<ChunkKey, Entry> _entries = [];
@@ -95,17 +95,7 @@ public sealed partial class LocalChunkCache
         return cache;
     }
 
-    public long MaxBytes => Interlocked.Read(ref _maxBytes);
-
-    /// <summary>
-    /// Takes a new cap. Nothing is deleted now: a lower cap trims the least recently used files of recordings not kept offline at
-    /// the next download (or the next start), a higher one just gives room.
-    /// </summary>
-    public void SetMaxBytes(long maxBytes)
-    {
-        ArgumentOutOfRangeException.ThrowIfNegative(maxBytes);
-        Interlocked.Exchange(ref _maxBytes, maxBytes);
-    }
+    public long MaxBytes => _maxBytes;
 
     /// <summary>Bytes of all complete cached files.</summary>
     public long TotalBytes
@@ -255,7 +245,7 @@ public sealed partial class LocalChunkCache
     {
         var any = false;
         HashSet<ChunkKey> undeletable = [];                              // held open elsewhere: skipped for the rest of this pass
-        while (_total > MaxBytes)
+        while (_total > _maxBytes)
         {
             ChunkKey? victim = null;
             var oldest = long.MaxValue;

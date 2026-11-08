@@ -52,9 +52,6 @@ public sealed class AppSettings
     /// <summary>Cap of the download cache; the least recently used chunks of unpinned recordings go first.</summary>
     public int DownloadCacheGb { get; set; } = 50;
 
-    /// <summary>Set by "Don't show again" on the metered-network notice (plan §4.3: that notice is all the app does about metered links).</summary>
-    public bool HideMeteredNotice { get; set; }
-
     public static string FilePath => Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "SteamPoweredPlayer", "settings.json");
 

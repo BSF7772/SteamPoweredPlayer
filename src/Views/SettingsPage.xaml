@@ -59,19 +59,6 @@
                     </Button>
                 </StackPanel>
             </Border>
-
-            <Border Style="{StaticResource Card}">
-                <StackPanel Spacing="6">
-                    <TextBlock Text="Download cache" Style="{StaticResource SectionTitle}" />
-                    <TextBlock Text="Chunks fetched from network libraries, kept so they play from this PC." Style="{StaticResource Caption}" />
-                    <NumberBox x:Name="CacheCapBox" AutomationProperties.AutomationId="SettingsCacheCap" Header="Size limit (GB)" Minimum="1" Maximum="4096" SmallChange="5" LargeChange="50"
-                               SpinButtonPlacementMode="Inline" ValueChanged="CacheCap_Changed" HorizontalAlignment="Left" Width="200" />
-                    <TextBlock x:Name="CacheSizeText" AutomationProperties.AutomationId="SettingsCacheSize" Style="{StaticResource Caption}" />
-                    <TextBlock x:Name="CacheFolderText" FontFamily="Cascadia Mono, Consolas" FontSize="13" IsTextSelectionEnabled="True" TextWrapping="Wrap" />
-                    <TextBlock Style="{StaticResource Caption}" TextWrapping="Wrap"
-                               Text="When the limit is reached the least recently used chunks go first, except recordings marked Keep offline. A lower limit takes effect at the next download." />
-                </StackPanel>
-            </Border>
         </StackPanel>
     </ScrollViewer>
 </Page>
