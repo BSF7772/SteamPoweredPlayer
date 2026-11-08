@@ -46,10 +46,29 @@ public sealed class FrameTimecode : ITimecodeFormatter
     /// <summary>A usable frame rate: <paramref name="fps"/> when it is a real rate, else <see cref="FallbackFps"/>.</summary>
     public static double Sanitize(double fps) => fps is > 1 and < 1000 ? fps : FallbackFps;
 
+    private static readonly double[] StandardRates = [24000.0 / 1001, 24, 25, 30000.0 / 1001, 30, 48, 50, 60000.0 / 1001, 60, 72, 90, 100, 120000.0 / 1001, 120, 144, 240];
+
+    /// <summary>
+    /// The stream's nominal rate: <see cref="Sanitize"/>d, then snapped to the nearest standard rate within 3 %. A variable-frame-rate clip
+    /// reports its average (mpv <c>container-fps</c> 59.09) while its pts steps are 1/59.94 s; numbering frames with the average repeats
+    /// one FF and skips another, numbering them with the nominal rate moves FF by exactly one per frame.
+    /// </summary>
+    public static double Nominal(double fps)
+    {
+        fps = Sanitize(fps);
+        var best = fps; var bestErr = fps * 0.03;
+        foreach (var r in StandardRates)
+        {
+            var err = Math.Abs(r - fps);
+            if (err <= bestErr) { best = r; bestErr = err; }
+        }
+        return best;
+    }
+
     /// <summary>The whole second and the 0-based frame within it of the frame that <paramref name="seconds"/> falls on.</summary>
     public static (long Whole, int Frame) Split(double seconds, double fps, double tolerance)
     {
-        fps = Sanitize(fps);
+        fps = Nominal(fps);
         if (!double.IsFinite(seconds) || seconds < 0) seconds = 0;
         var n = (long)Math.Floor(seconds * fps + tolerance);           // the frame number from the head
         var t = n / fps;                                                // that frame's ideal time

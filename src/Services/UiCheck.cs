@@ -306,6 +306,7 @@ internal static partial class UiCheck
             await Capture(id);
 
             await TransportBounds(id);
+            await RulerChecks(id);
 
             // +5 through the button
             var expected = PlaybackSession.Snap(s.Media!, mpv.TimePos + 5) - s.MediaStartSeconds;
@@ -376,6 +377,54 @@ internal static partial class UiCheck
                 aw.Resize(original);
                 await Task.Delay(300);
             }
+        }
+
+        /// <summary>
+        /// P4: the timeline ruler is present, has labels, and its labels neither overlap nor leave the ruler at 1x and at the deepest zoom
+        /// (the + button, repeatedly). Bounds come from the elements themselves, not from the layout maths.
+        /// </summary>
+        private async Task RulerChecks(string id)
+        {
+            var zoomOut = Find("TimelineZoomOut");
+            var zoomIn = Find("TimelineZoomIn");
+            if (zoomOut is null || zoomIn is null || Find("TimelineRuler") is not Canvas) { Add(CheckResult.Fail($"{id}.ruler", "Timeline ruler present", "no TimelineRuler canvas or zoom buttons")); return; }
+            for (var i = 0; i < 30 && zoomOut is Control { IsEnabled: true }; i++) Invoke(zoomOut);
+            await Task.Delay(300);
+            await RulerAt(id, "1x");
+            await Capture(id + "-ruler-1x");
+            for (var i = 0; i < 30 && zoomIn is Control { IsEnabled: true }; i++) Invoke(zoomIn);
+            await Task.Delay(300);
+            await RulerAt(id, "max zoom");
+            await Capture(id + "-ruler-max");
+            for (var i = 0; i < 30 && zoomOut is Control { IsEnabled: true }; i++) Invoke(zoomOut);
+            await Task.Delay(300);
+        }
+
+        private async Task RulerAt(string id, string label)
+        {
+            await Task.Delay(100);
+            if (Find("TimelineRuler") is not Canvas ruler || window.Content is not FrameworkElement root) { Add(CheckResult.Fail($"{id}.ruler-{label}", $"Ruler labels ({label})", "no TimelineRuler canvas")); return; }
+            var to = ruler.TransformToVisual(root);
+            var area = to.TransformBounds(new Windows.Foundation.Rect(0, 0, ruler.ActualWidth, ruler.ActualHeight));
+            var labels = ruler.Children.OfType<TextBlock>().Where(t => t.Visibility == Visibility.Visible && !string.IsNullOrEmpty(t.Text)).ToList();
+            var rects = labels.Select(t => (t.Text, B: t.TransformToVisual(root).TransformBounds(new Windows.Foundation.Rect(0, 0, t.ActualWidth, t.ActualHeight))))
+                .OrderBy(r => r.B.Left).ToList();
+            var problems = new List<string>();
+            double minGap = double.MaxValue;
+            for (var i = 1; i < rects.Count; i++)
+            {
+                var gap = rects[i].B.Left - rects[i - 1].B.Right;
+                minGap = Math.Min(minGap, gap);
+                if (gap <= 0) problems.Add($"\"{rects[i - 1].Text}\" and \"{rects[i].Text}\" overlap ({gap:0.0} px)");
+            }
+            // A label may slide in from the left edge; the right edge is clipped by the ruler's own clip, so only require that it starts inside.
+            foreach (var r in rects) if (r.B.Left > area.Right + 1 || r.B.Top < area.Top - 1 || r.B.Bottom > area.Bottom + 1) problems.Add($"\"{r.Text}\" outside the ruler");
+            var shown = ruler.ActualWidth > 0 && ruler.ActualHeight > 0;
+            var sample = string.Join(" ", rects.Take(4).Select(r => r.Text));
+            var ok = shown && rects.Count >= 2 && problems.Count == 0;
+            Add(CheckResult.From(ok, $"{id}.ruler-{label.Replace(' ', '-')}", $"Ruler shown, labels do not overlap ({label})",
+                $"{(shown ? $"{ruler.ActualWidth:0}x{ruler.ActualHeight:0} DIP" : "ruler has no size")}, {rects.Count} labels, min gap {(rects.Count > 1 ? minGap.ToString("0.0", CultureInfo.InvariantCulture) : "-")} px, e.g. {sample}"
+                + (problems.Count > 0 ? "; " + string.Join("; ", problems.Take(3)) : "")));
         }
 
         private async Task TransportBoundsAt(string id, string label, int pixelsW, int pixelsH)

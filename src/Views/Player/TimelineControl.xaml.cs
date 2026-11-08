@@ -69,7 +69,18 @@ public sealed partial class TimelineControl : UserControl
     public TimelineView View => _view;
 
     /// <summary>The stream's frame rate, for the preview's timecode.</summary>
-    public double Fps { get; set; } = FrameTimecode.FallbackFps;
+    public double Fps
+    {
+        get => _fps;
+        set
+        {
+            if (Math.Abs(value - _fps) < 1e-9) return;
+            _fps = value;
+            RebuildRuler();                                                   // the frame labels depend on the rate (cached otherwise)
+        }
+    }
+
+    private double _fps = FrameTimecode.FallbackFps;
 
     /// <summary>Sets everything that depends on the recording. Cheap to call again when a live session grew or was trimmed.</summary>
     public void Configure(double durationSeconds, double mediaStartSeconds, IReadOnlyList<(double Start, double End)> gaps,
@@ -141,8 +152,74 @@ public sealed partial class TimelineControl : UserControl
         if (filmChanged) RebuildFilm();
         RebuildGaps();
         RebuildLane();
+        RebuildRuler();
         SyncZoomBar();
         UpdateVisuals();
+    }
+
+    // ---- ruler (P4) -----------------------------------------------------------------------------------------------
+
+    private const double RulerHeight = 20, RulerMajorTick = 9, RulerMinorTick = 4;
+    private (double Start, double Length, double Width, double Fps, bool Hours) _rulerKey;
+    private double _rulerCharWidth;
+
+    /// <summary>The ruler's label elements (for the uicheck): every one is a <see cref="TextBlock"/> in <c>TimelineRuler</c>.</summary>
+    public IReadOnlyList<TextBlock> RulerLabels => Ruler.Children.OfType<TextBlock>().ToList();
+
+    private static void ApplyRulerFont(TextBlock tb)
+    {
+        if (Application.Current.Resources.TryGetValue("Timecode", out var st) && st is Style s) tb.Style = s;
+        tb.FontSize = 11;
+    }
+
+    /// <summary>Redraws ticks and labels. Cached on the window, width and rate, so a position tick (every frame) never gets here with new work.</summary>
+    private void RebuildRuler()
+    {
+        if (_view.Duration <= 0 || _width <= 0) { Ruler.Children.Clear(); _rulerKey = default; return; }
+        var hours = _view.Duration >= 3600;
+        var key = (_view.Start, _view.Length, _width, _fps, hours);
+        if (key == _rulerKey && Ruler.Children.Count > 0) return;
+        _rulerKey = key;
+
+        if (_rulerCharWidth <= 0)
+        {
+            var probe = new TextBlock { Text = "0" };
+            ApplyRulerFont(probe);
+            probe.Measure(new Windows.Foundation.Size(double.PositiveInfinity, double.PositiveInfinity));
+            _rulerCharWidth = Math.Max(5, probe.DesiredSize.Width);
+        }
+        var labelWidth = _rulerCharWidth * (hours ? 10 : 7);                  // widest label: H:MM:SS.FF / M:SS.FF
+        var layout = TimelineRuler.Layout(_view.Start, _view.End, _width, labelWidth, _fps);
+
+        var secondary = (Brush)Application.Current.Resources["TextFillColorSecondaryBrush"];
+        var tertiary = (Brush)Application.Current.Resources["TextFillColorTertiaryBrush"];
+        Ruler.Children.Clear();
+        var major = new GeometryGroup(); var minor = new GeometryGroup();
+        foreach (var t in layout.Ticks)
+        {
+            if (t.X < -0.5 || t.X > _width + 0.5) { /* off-screen: only its label may slide in */ }
+            else
+            {
+                var h = t.Major ? RulerMajorTick : RulerMinorTick;
+                (t.Major ? major : minor).Children.Add(new LineGeometry
+                {
+                    StartPoint = new Windows.Foundation.Point(Math.Round(t.X) + 0.5, RulerHeight - h),
+                    EndPoint = new Windows.Foundation.Point(Math.Round(t.X) + 0.5, RulerHeight),
+                });
+            }
+            if (t.Label is null) continue;
+            var label = new TextBlock { Text = t.Label, IsHitTestVisible = false };
+            ApplyRulerFont(label);
+            label.Foreground = secondary;
+            label.Measure(new Windows.Foundation.Size(double.PositiveInfinity, RulerHeight));
+            if (t.X + 3 + label.DesiredSize.Width > _width) continue;       // would be clipped at the right edge: it appears when it fits
+            AutomationProperties.SetAutomationId(label, "RulerLabel");
+            Canvas.SetLeft(label, t.X + 3);
+            Canvas.SetTop(label, 0);
+            Ruler.Children.Add(label);
+        }
+        Ruler.Children.Insert(0, new Microsoft.UI.Xaml.Shapes.Path { Data = minor, Stroke = tertiary, StrokeThickness = 1, IsHitTestVisible = false });
+        Ruler.Children.Insert(1, new Microsoft.UI.Xaml.Shapes.Path { Data = major, Stroke = secondary, StrokeThickness = 1, IsHitTestVisible = false });
     }
 
     private void UpdateVisuals()
@@ -190,6 +267,7 @@ public sealed partial class TimelineControl : UserControl
     private void Strip_SizeChanged(object sender, SizeChangedEventArgs e)
     {
         _clip.Rect = new Windows.Foundation.Rect(0, 0, e.NewSize.Width, e.NewSize.Height);
+        Ruler.Clip = new RectangleGeometry { Rect = new Windows.Foundation.Rect(0, 0, e.NewSize.Width, RulerHeight) };
         var changed = Math.Abs(e.NewSize.Width - _width) > 0.5;
         _width = e.NewSize.Width;
         if (changed) Redraw(force: true, trickplayChanged: false);
