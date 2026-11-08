@@ -108,3 +108,41 @@ public sealed class FrameTimecodeTests
         Assert.Single(widths);
     }
 }
+
+public sealed class FrameTimecodeNominalTests
+{
+    [Theory]
+    [InlineData(59.09, 60000.0 / 1001)]
+    [InlineData(59.94, 60000.0 / 1001)]
+    [InlineData(60, 60)]
+    [InlineData(30, 30)]
+    [InlineData(29.97, 30000.0 / 1001)]
+    [InlineData(55, 55)]
+    [InlineData(double.NaN, 60)]
+    public void Nominal_snaps_a_vfr_average_to_the_standard_rate(double reported, double expected) =>
+        Assert.Equal(expected, FrameTimecode.Nominal(reported), 6);
+
+    /// <summary>Real pts (ms-rounded, one frame apart) shown with whatever rate mpv reports: FF must advance by exactly one per frame.</summary>
+    [Theory]
+    [InlineData(59.09, 60000.0 / 1001)]
+    [InlineData(59.94, 60000.0 / 1001)]
+    [InlineData(60, 60)]
+    [InlineData(30, 30)]
+    [InlineData(29.97, 30000.0 / 1001)]
+    public void Frame_steps_advance_FF_by_one_even_when_the_reported_rate_is_a_vfr_average(double reported, double real)
+    {
+        foreach (var offset in new[] { 0.0, 0.003, 0.011, 0.0083 })
+        {
+            long prev = -1;
+            for (var n = 600; n < 600 + 180; n++)
+            {
+                var pts = Math.Round((n / real + offset) * 1000) / 1000;
+                var (whole, frame) = FrameTimecode.Split(pts, reported, FrameTimecode.ToleranceFrames);
+                var perSecond = (long)Math.Ceiling(FrameTimecode.Nominal(reported) - 1e-6);
+                var index = whole * perSecond + frame;
+                if (prev >= 0) Assert.True(index == prev + 1, $"fps {reported} offset {offset} n {n}: index {prev} -> {index}");
+                prev = index;
+            }
+        }
+    }
+}

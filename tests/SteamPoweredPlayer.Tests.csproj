@@ -22,6 +22,7 @@
     <!-- The Player page's pure helpers (no XAML): timecode and timeline zoom maths (plan 2026-11-07 F2-F4). -->
     <Compile Include="..\src\Views\Player\FrameTimecode.cs" Link="Player\Linked\FrameTimecode.cs" />
     <Compile Include="..\src\Views\Player\TimelineView.cs" Link="Player\Linked\TimelineView.cs" />
+    <Compile Include="..\src\Views\Player\TimelineRuler.cs" Link="Player\Linked\TimelineRuler.cs" />
     <!-- The Library page's pure helpers: cache strip layout (F9). -->
     <Compile Include="..\src\Views\LibraryPageCacheStrip.cs" Link="Library\Linked\LibraryPageCacheStrip.cs" />
   </ItemGroup>
