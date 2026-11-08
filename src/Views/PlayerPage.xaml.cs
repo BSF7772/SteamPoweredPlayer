@@ -452,11 +452,23 @@ public sealed partial class PlayerPage : Page
     /// </summary>
     private void OnLibraryDerivedChanged(object? sender, string relativeFolder)
     {
+        OnPlaylistDerivedChanged(sender, relativeFolder);
         if (_cleaned || _media is null || relativeFolder != _key || AppServices.Library is not { } lib) return;
-        _trick = lib.TrickplayFor(relativeFolder);
+        _trick =lib.TrickplayFor(relativeFolder);
         _trickQueriedAt = Stopwatch.GetTimestamp();
         RefreshMarkers(resetFilter: false);
         ConfigureTimeline();
+    }
+
+    /// <summary>
+    /// A recording's first sheet can appear after the playlist was built (a live session gets its tiles while Steam writes it):
+    /// a row still showing the glyph tries again for that recording only.
+    /// </summary>
+    private void OnPlaylistDerivedChanged(object? sender, string relativeFolder)
+    {
+        if (_cleaned) return;
+        var row = _playlist.FirstOrDefault(r => r.Key == relativeFolder);
+        if (row is not null && row.Thumb is null) _ = LoadPlaylistThumbsAsync([row], _playlistVersion);
     }
 
     private void OnTrimmed(CacheTrim t) => _ui.TryEnqueue(() =>

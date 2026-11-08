@@ -18,7 +18,7 @@ public sealed class TrickplayQueue : IDisposable
     private readonly CancellationTokenSource _cts = new();
     private readonly SemaphoreSlim _wake = new(0);
     private readonly object _lock = new();
-    private readonly Dictionary<string, int> _done = new(StringComparer.Ordinal);   // folder -> chunk count it was completed for
+    private readonly Dictionary<string, (int First, int Last, int Count)> _done = new(StringComparer.Ordinal);   // folder -> chunk range it was completed for
     private readonly HashSet<string> _failed = new(StringComparer.Ordinal);          // gave up for this process (no ffmpeg frames, bad data)
     private int _pauses;
     private int _kickPending;
@@ -110,7 +110,7 @@ public sealed class TrickplayQueue : IDisposable
             {
                 var opts = new TrickplayOptions(Mode: _mode());
                 var res = await Trickplay.GenerateAsync(data, KeyOf(job.Folder), job.Media, opts, null, run.Token).ConfigureAwait(false);
-                lock (_lock) _done[job.Folder] = job.Media.ChunkCount;
+                lock (_lock) _done[job.Folder] = SignatureOf(job.Media);
                 if (res.SheetsWritten > 0) _source.TrickplayUpdated(job.Folder);
             }
             catch (OperationCanceledException) when (!ct.IsCancellationRequested)
@@ -122,7 +122,12 @@ public sealed class TrickplayQueue : IDisposable
             catch (OperationCanceledException) { break; }
             catch (Exception e) when (e is IOException or UnauthorizedAccessException or InvalidOperationException or FileNotFoundException or ArgumentException)
             {
-                lock (_lock) _failed.Add(job.Folder);
+                // A recording Steam is still writing can fail for a moment (a chunk vanishes or is half written): retry at the next chunk, not never.
+                lock (_lock)
+                {
+                    if (job.Media.Live) _done[job.Folder] = SignatureOf(job.Media);
+                    else _failed.Add(job.Folder);
+                }
             }
             finally
             {
@@ -133,6 +138,9 @@ public sealed class TrickplayQueue : IDisposable
     }
 
     private sealed record Job(string Folder, SessionMedia Media);
+
+    /// <summary>What a job was done for: the chunk range, so growth at the tail and Steam's trim at the head both count as new work.</summary>
+    private static (int First, int Last, int Count) SignatureOf(SessionMedia m) => (m.Runs[0].First, m.Runs[^1].Last, m.ChunkCount);
 
     /// <summary>Selected game first, then newest first; live sessions wait (they are still growing).</summary>
     private Job? NextJob()
@@ -145,10 +153,11 @@ public sealed class TrickplayQueue : IDisposable
         {
             foreach (var r in index.Recordings)
             {
-                if (r.Live || !Trickplay.IsSafeKey(KeyOf(r.RelativeFolder))) continue;
+                if (!Trickplay.IsSafeKey(KeyOf(r.RelativeFolder))) continue;
                 if (_failed.Contains(r.RelativeFolder)) continue;
-                if (_source.GetMedia(r.RelativeFolder) is not { ChunkCount: > 0 } m) continue;
-                if (_done.TryGetValue(r.RelativeFolder, out var n) && n == m.ChunkCount) continue;
+                // A live session is built up to its second-newest chunk (the newest may still be growing); every new chunk is one more tile.
+                if (_source.GetMedia(r.RelativeFolder) is not { } full || TrickplayLive.Buildable(full) is not { } m) continue;
+                if (_done.TryGetValue(r.RelativeFolder, out var n) && n == SignatureOf(m)) continue;
                 todo.Add((r, m));
             }
         }
