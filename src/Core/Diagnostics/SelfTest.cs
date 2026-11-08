@@ -137,6 +137,7 @@ public static class SelfTest
                 await Step("play.live-eof", "EOF on a live session continues after growth", () => LiveEof(ct)).ConfigureAwait(false);
                 await Step("export.lossless", "Lossless 30 s export (RangeSource + ffmpeg -c copy)", () => Export(ct)).ConfigureAwait(false);
                 await Step("trickplay.sheets", "Trickplay sheets generated", () => TrickplayChecks(ct)).ConfigureAwait(false);
+                await Step("trickplay.live", "Trickplay follows a growing session", () => TrickplayLiveChecks(ct)).ConfigureAwait(false);
                 LaterPhases();
             }
         }
@@ -538,6 +539,41 @@ public static class SelfTest
             var ok = r.NewChunks == media.ChunkCount && r.Missing.Count == 0 && manifest?.Sheets.Count == 1 && jpegOk && index?.Count == media.ChunkCount;
             return CheckResult.From(ok, "trickplay.sheets", "Trickplay sheets generated",
                 $"{r.NewChunks}/{media.ChunkCount} tiles in {r.SheetsWritten} sheet ({w}x{h}), {r.Missing.Count} missing, {F(r.Elapsed.TotalMilliseconds)} ms, decode {r.UsedMode}");
+        }
+
+        /// <summary>A session that is still being written: every chunk but the open newest one gets a tile within one chunk interval of its arrival.</summary>
+        private async Task<CheckResult> TrickplayLiveChecks(CancellationToken ct)
+        {
+            const double budgetMs = 3000;      // one chunk interval
+            var folder = _s.Build(SyntheticVariant.Live);
+            var data = DataFolder.Open(_s.Scratch("data-live"), _s.RecordingRoot);
+            var first = await MediaOf(folder, ct).ConfigureAwait(false);
+            var start = TrickplayLive.Buildable(first);
+            var r0 = start is null ? null : await Trickplay.GenerateAsync(data, "live", start, new TrickplayOptions(DecodeMode.Cpu), null, ct).ConfigureAwait(false);
+
+            var worst = 0.0;
+            var cpu = 0.0;
+            var tiles = 0;
+            var grown = 0;
+            for (var n = first.ChunkCount + 1; n <= first.ChunkCount + 4; n++)
+            {
+                _s.AddChunk(folder, n);
+                var t0 = System.Diagnostics.Stopwatch.GetTimestamp();
+                var media = await MediaOf(folder, ct).ConfigureAwait(false);
+                var buildable = TrickplayLive.Buildable(media);
+                if (buildable is null) break;
+                var r = await Trickplay.GenerateAsync(data, "live", buildable, new TrickplayOptions(DecodeMode.Cpu), null, ct).ConfigureAwait(false);
+                var ms = System.Diagnostics.Stopwatch.GetElapsedTime(t0).TotalMilliseconds;
+                worst = Math.Max(worst, ms);
+                cpu += r.Elapsed.TotalMilliseconds;
+                tiles += r.NewChunks;
+                if (r.NewChunks == 1) grown++;
+            }
+            var index = TrickplayIndex.TryLoad(data, "live");
+            var ok = r0 is { NewChunks: > 0 } && grown == 4 && worst < budgetMs && index?.Count == first.ChunkCount + 3;
+            return CheckResult.From(ok, "trickplay.live", "Trickplay follows a growing session",
+                $"{r0?.NewChunks ?? 0} tiles at start, then {grown}/4 new chunks each got one tile (worst latency {F(worst)} ms of {F(budgetMs)}, {F(tiles > 0 ? cpu / tiles : 0)} ms CPU per tile), index {index?.Count ?? 0} tiles",
+                number: worst, unit: "ms");
         }
 
         // ---- later phases ---------------------------------------------------------------------------------------------
