@@ -191,6 +191,51 @@
                             </Button>
                         </StackPanel>
                     </Grid>
+                    <!-- edits for the export: visible, under the video (plan 4.2); hidden in fullscreen -->
+                    <Border x:Name="EditsCard" AutomationProperties.AutomationId="PlayerEdits" Style="{StaticResource Card}" Padding="12,8">
+                        <StackPanel Spacing="6">
+                            <Grid ColumnSpacing="8">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="Auto" />
+                                    <ColumnDefinition Width="Auto" />
+                                    <ColumnDefinition Width="Auto" />
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+                                <TextBlock x:Name="EditsTitle" Text="Export edits" Style="{StaticResource BodyStrongTextBlockStyle}" VerticalAlignment="Center" />
+                                <ComboBox x:Name="SpeedBox" Grid.Column="1" AutomationProperties.AutomationId="PlayerExportSpeed" MinWidth="86" IsTabStop="False" VerticalAlignment="Center"
+                                          ToolTipService.ToolTip="Speed of the exported file" SelectionChanged="ExportOption_SelectionChanged" />
+                                <TextBlock Grid.Column="2" Text="Volume" Style="{StaticResource Caption}" VerticalAlignment="Center" />
+                                <Slider x:Name="VolumeEditSlider" Grid.Column="3" AutomationProperties.AutomationId="PlayerExportVolume" Minimum="0" Maximum="200" Value="100" StepFrequency="5"
+                                        VerticalAlignment="Center" MinWidth="80" ValueChanged="VolumeEdit_ValueChanged" IsTabStop="False" ToolTipService.ToolTip="Volume of the exported file, in %" />
+                                <ToggleButton x:Name="MuteEditToggle" Grid.Column="4" AutomationProperties.AutomationId="PlayerExportMute" Content="No sound" Click="ExportOption_Changed" IsTabStop="False" />
+                                <ToggleButton x:Name="FixDriftToggle" Grid.Column="5" AutomationProperties.AutomationId="PlayerExportFixDrift" Content="Fix timing drift" IsChecked="True" Click="ExportOption_Changed" IsTabStop="False"
+                                              ToolTipService.ToolTip="Even out capture jitter so the sound stays with the picture" />
+                            </Grid>
+                            <Grid ColumnSpacing="8">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="Auto" />
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
+                                    <ColumnDefinition Width="Auto" />
+                                    <ColumnDefinition Width="Auto" />
+                                    <ColumnDefinition Width="Auto" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+                                <TextBlock x:Name="AudioDelayText" AutomationProperties.AutomationId="PlayerAudioDelay" Style="{StaticResource Timecode}" Text="Sync 0 ms" VerticalAlignment="Center" MinWidth="86" />
+                                <Slider x:Name="SyncSlider" Grid.Column="1" AutomationProperties.AutomationId="PlayerSyncSlider" Minimum="-1000" Maximum="1000" StepFrequency="10" Value="0" VerticalAlignment="Center"
+                                        MinWidth="80" ValueChanged="SyncSlider_ValueChanged" IsTabStop="False" ToolTipService.ToolTip="Audio delay, heard live while you play" />
+                                <Button Grid.Column="2" AutomationProperties.AutomationId="PlayerSyncEarlier" Content="−20" Click="NudgeEarlier_Click" IsTabStop="False" ToolTipService.ToolTip="Sound 20 ms earlier" />
+                                <Button Grid.Column="3" AutomationProperties.AutomationId="PlayerSyncLater" Content="+20" Click="NudgeLater_Click" IsTabStop="False" ToolTipService.ToolTip="Sound 20 ms later" />
+                                <Button Grid.Column="4" Content="Reset" Click="NudgeReset_Click" IsTabStop="False" />
+                                <Button x:Name="DetectButton" Grid.Column="5" AutomationProperties.AutomationId="PlayerDetectSync" Content="Detect" Click="Detect_Click" IsTabStop="False" />
+                                <ToggleButton x:Name="ApplyToGameToggle" Grid.Column="6" AutomationProperties.AutomationId="PlayerApplySyncToGame" Content="Apply to game" Click="ApplyToGame_Toggled" IsTabStop="False"
+                                              ToolTipService.ToolTip="Use this delay for every recording of this game" />
+                            </Grid>
+                            <TextBlock x:Name="SyncStatusText" AutomationProperties.AutomationId="PlayerSyncStatus" Style="{StaticResource Caption}" TextWrapping="Wrap" Visibility="Collapsed" />
+                        </StackPanel>
+                    </Border>
                 </StackPanel>
             </Grid>
         </Border>
@@ -198,7 +243,7 @@
         <!-- ============================================ events + export -->
         <Grid x:Name="RightPanel" Grid.Column="2" RowSpacing="12">
             <Grid.RowDefinitions>
-                <RowDefinition Height="*" />
+                <RowDefinition Height="*" MinHeight="120" />
                 <RowDefinition Height="Auto" />
             </Grid.RowDefinitions>
 
@@ -265,62 +310,40 @@
                         <HyperlinkButton x:Name="ExportFolderButton" AutomationProperties.AutomationId="PlayerExportFolder" HorizontalAlignment="Right" Padding="4,0" FontSize="12"
                                          Content="Folder…" Click="ExportFolder_Click" IsTabStop="False" />
                     </Grid>
-                    <ScrollViewer MaxHeight="340" VerticalScrollBarVisibility="Auto" HorizontalScrollMode="Disabled" IsTabStop="False">
+                    <ScrollViewer x:Name="ExportScroll" VerticalScrollBarVisibility="Auto" HorizontalScrollMode="Disabled" IsTabStop="False">
                         <StackPanel Spacing="8" Padding="0,0,12,0">
-                            <ComboBox x:Name="ExportPresetBox" AutomationProperties.AutomationId="PlayerExportPreset" HorizontalAlignment="Stretch" IsTabStop="False"
-                                      SelectionChanged="ExportPreset_SelectionChanged" />
+                            <TextBlock Style="{StaticResource Caption}" TextWrapping="Wrap" Text="Pick how much time to spend. Left = best picture and smallest file for its quality; right = fastest." />
+                            <Grid x:Name="TierGrid" ColumnSpacing="4" />
+                            <Grid>
+                                <TextBlock Style="{StaticResource Caption}" Text="◀ quality" />
+                                <TextBlock Style="{StaticResource Caption}" Text="speed ▶" HorizontalAlignment="Right" />
+                            </Grid>
+                            <Grid x:Name="EngineGrid" ColumnSpacing="4" />
+                            <TextBlock x:Name="ChoiceInfoText" AutomationProperties.AutomationId="PlayerExportChoice" Style="{StaticResource Caption}" TextWrapping="Wrap" />
+                            <TextBlock Style="{StaticResource Caption}" Text="Special purpose" Margin="0,4,0,0" />
+                            <Grid x:Name="SpecialGrid" ColumnSpacing="4" RowSpacing="4" />
                             <NumberBox x:Name="TargetSizeBox" AutomationProperties.AutomationId="PlayerExportTargetMb" Header="Target size (MB)" Value="10" Minimum="1" Maximum="100000"
                                        SpinButtonPlacementMode="Compact" Visibility="Collapsed" ValueChanged="TargetSize_ValueChanged" />
 
-                            <Expander Header="Cuts" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch" IsTabStop="False">
-                                <StackPanel Spacing="8">
-                                    <TextBlock Style="{StaticResource Caption}" TextWrapping="Wrap" Text="Set A and B, then keep that part. Only kept parts are exported." />
-                                    <StackPanel Orientation="Horizontal" Spacing="8">
-                                        <Button x:Name="KeepAbButton" AutomationProperties.AutomationId="PlayerKeepAb" Content="Keep A–B" Click="KeepAb_Click" IsTabStop="False" />
-                                        <Button x:Name="HighlightsButton" AutomationProperties.AutomationId="PlayerHighlights" Content="Highlights" Click="Highlights_Click" IsTabStop="False"
-                                                ToolTipService.ToolTip="Keep 5 s before and 3 s after each marker" />
-                                        <Button x:Name="ClearKeptButton" Content="Clear" Click="ClearKept_Click" IsTabStop="False" Visibility="Collapsed" />
-                                    </StackPanel>
-                                    <ItemsControl x:Name="KeptList" IsTabStop="False">
-                                        <ItemsControl.ItemTemplate>
-                                            <DataTemplate x:DataType="local:KeptSpanRow">
-                                                <Grid>
-                                                    <TextBlock Text="{x:Bind Text}" Style="{StaticResource Timecode}" VerticalAlignment="Center" />
-                                                    <Button HorizontalAlignment="Right" Padding="6,2" Tag="{x:Bind Self}" Click="RemoveKept_Click" IsTabStop="False" ToolTipService.ToolTip="Remove">
-                                                        <FontIcon Glyph="&#xE711;" FontSize="10" />
-                                                    </Button>
-                                                </Grid>
-                                            </DataTemplate>
-                                        </ItemsControl.ItemTemplate>
-                                    </ItemsControl>
-                                </StackPanel>
-                            </Expander>
-
-                            <Expander x:Name="EditExpander" Header="Speed and sound" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch" IsTabStop="False">
-                                <StackPanel x:Name="EditPanel" Spacing="6">
-                                    <ComboBox x:Name="SpeedBox" AutomationProperties.AutomationId="PlayerExportSpeed" Header="Speed" HorizontalAlignment="Stretch" IsTabStop="False"
-                                              SelectionChanged="ExportOption_SelectionChanged" />
-                                    <Slider x:Name="VolumeEditSlider" AutomationProperties.AutomationId="PlayerExportVolume" Header="Volume" Minimum="0" Maximum="200" Value="100" StepFrequency="5"
-                                            ValueChanged="VolumeEdit_ValueChanged" IsTabStop="False" />
-                                    <ToggleSwitch x:Name="MuteEditToggle" AutomationProperties.AutomationId="PlayerExportMute" OnContent="No sound" OffContent="Keep sound" Toggled="ExportOption_Changed" IsTabStop="False" />
-                                    <ToggleSwitch x:Name="FixDriftToggle" AutomationProperties.AutomationId="PlayerExportFixDrift" OnContent="Fix timing drift" OffContent="Keep original timing" IsOn="True"
-                                                  Toggled="ExportOption_Changed" IsTabStop="False" />
-                                </StackPanel>
-                            </Expander>
-
-                            <Expander Header="Audio sync" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch" IsTabStop="False">
-                                <StackPanel Spacing="8">
-                                    <TextBlock x:Name="AudioDelayText" AutomationProperties.AutomationId="PlayerAudioDelay" Style="{StaticResource Timecode}" Text="Audio delay 0 ms" />
-                                    <StackPanel Orientation="Horizontal" Spacing="6">
-                                        <Button Content="−20 ms" Click="NudgeEarlier_Click" IsTabStop="False" ToolTipService.ToolTip="Sound earlier" />
-                                        <Button Content="+20 ms" Click="NudgeLater_Click" IsTabStop="False" ToolTipService.ToolTip="Sound later" />
-                                        <Button Content="Reset" Click="NudgeReset_Click" IsTabStop="False" />
-                                        <Button x:Name="DetectButton" AutomationProperties.AutomationId="PlayerDetectSync" Content="Detect" Click="Detect_Click" IsTabStop="False" />
-                                    </StackPanel>
-                                    <TextBlock x:Name="SyncStatusText" AutomationProperties.AutomationId="PlayerSyncStatus" Style="{StaticResource Caption}" TextWrapping="Wrap" />
-                                    <ToggleSwitch x:Name="ApplyToGameToggle" AutomationProperties.AutomationId="PlayerApplySyncToGame" OnContent="Applied to this game" OffContent="Apply to this game" Toggled="ApplyToGame_Toggled" IsTabStop="False" />
-                                </StackPanel>
-                            </Expander>
+                            <TextBlock Style="{StaticResource Caption}" Text="Cuts: set A and B, then keep that part. Only kept parts are exported." TextWrapping="Wrap" Margin="0,4,0,0" />
+                            <StackPanel Orientation="Horizontal" Spacing="6">
+                                <Button x:Name="KeepAbButton" AutomationProperties.AutomationId="PlayerKeepAb" Content="Keep A–B" Click="KeepAb_Click" IsTabStop="False" />
+                                <Button x:Name="HighlightsButton" AutomationProperties.AutomationId="PlayerHighlights" Content="Highlight reel" Click="Highlights_Click" IsTabStop="False"
+                                        ToolTipService.ToolTip="Keep 5 s before and 3 s after each marker" />
+                                <Button x:Name="ClearKeptButton" Content="Clear" Click="ClearKept_Click" IsTabStop="False" Visibility="Collapsed" />
+                            </StackPanel>
+                            <ItemsControl x:Name="KeptList" IsTabStop="False">
+                                <ItemsControl.ItemTemplate>
+                                    <DataTemplate x:DataType="local:KeptSpanRow">
+                                        <Grid>
+                                            <TextBlock Text="{x:Bind Text}" Style="{StaticResource Timecode}" VerticalAlignment="Center" />
+                                            <Button HorizontalAlignment="Right" Padding="6,2" Tag="{x:Bind Self}" Click="RemoveKept_Click" IsTabStop="False" ToolTipService.ToolTip="Remove">
+                                                <FontIcon Glyph="&#xE711;" FontSize="10" />
+                                            </Button>
+                                        </Grid>
+                                    </DataTemplate>
+                                </ItemsControl.ItemTemplate>
+                            </ItemsControl>
 
                             <ToggleSwitch x:Name="ChaptersToggle" AutomationProperties.AutomationId="PlayerExportChapters" OnContent="Markers as chapters" OffContent="No chapters" IsOn="True" IsTabStop="False" />
                             <Grid>

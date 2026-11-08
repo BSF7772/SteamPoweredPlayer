@@ -916,6 +916,7 @@ public sealed partial class PlayerPage : Page
         try { _appWindow?.SetPresenter(fs ? AppWindowPresenterKind.FullScreen : AppWindowPresenterKind.Default); }
         catch (Exception e) when (e is System.Runtime.InteropServices.COMException or InvalidOperationException) { return; }      // the window is closing
         ApplyFullscreenState(fs);
+        FitExportLayout();
         // A presenter change can leave the keyboard focus nowhere; Windows moves it around for a moment after the change, so claim it again
         // once things have settled (a one-shot timer, not polling).
         Focus(FocusState.Programmatic);
@@ -1185,7 +1186,7 @@ public sealed partial class PlayerPage : Page
             case (int)VirtualKey.A: SetAbPoint('A'); break;
             case (int)VirtualKey.B: SetAbPoint('B'); break;
             case (int)VirtualKey.S: _ = TakeScreenshotAsync(); break;
-            case (int)VirtualKey.E when Down(VirtualKey.Control): if (SelectedPreset is { } exportPreset) _ = EnqueueAsync(exportPreset); break;
+            case (int)VirtualKey.E when Down(VirtualKey.Control): _ = EnqueueAsync(_exportChoice); break;
             case (int)VirtualKey.N: NextEvent(); break;
             case (int)VirtualKey.P: PreviousEvent(); break;
             case (int)VirtualKey.Home: if (_session?.Media is not null) RunSeek(() => _host!.SeekAsync(_session.MediaStartSeconds)); break;

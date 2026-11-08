@@ -34,8 +34,11 @@ public sealed class AppSettings
     /// <summary>Null until the user picks it on the first export (plan: no default folder).</summary>
     public string? ExportFolder { get; set; }
 
-    /// <summary>FastEncoder preset id of the last export.</summary>
+    /// <summary>The last chosen ladder tier or special preset id; an unknown one falls back to the default tier.</summary>
     public string? ExportPreset { get; set; }
+
+    /// <summary>The ladder's engine switch: Auto, Cpu or Gpu.</summary>
+    public string ExportEngine { get; set; } = "Auto";
 
     /// <summary>The user's FastEncoder.exe, chosen the first time "Open in FastEncoder" is used.</summary>
     public string? FastEncoderPath { get; set; }

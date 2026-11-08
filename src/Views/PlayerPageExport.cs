@@ -5,6 +5,7 @@ using System.Globalization;
 using FastEncoder.Core;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
+using Microsoft.UI.Xaml.Controls.Primitives;
 using SteamPoweredPlayer.Core.Export;
 using SteamPoweredPlayer.Core.Playback;
 using SteamPoweredPlayer.Services;
@@ -20,17 +21,20 @@ public sealed record KeptSpanRow(ExportSpan Span, string Text)
 }
 
 /// <summary>
-/// The Player's Export card: what to keep (kept spans, else the A–B range, else the whole recording), a FastEncoder preset, speed and
-/// sound, audio sync, and the queue. Exports live in <see cref="AppServices.Exports"/>, so they outlive this page.
+/// The Player's Export card: what to keep (kept spans, else the A–B range, else the whole recording), the approved quality ladder or a special preset, speed
+/// and sound, audio sync, and the queue. Exports live in <see cref="AppServices.Exports"/>, so they outlive this page.
 /// </summary>
 public sealed partial class PlayerPage
 {
-    private const string DefaultExportPreset = "balanced";
     private const double NudgeSeconds = 0.02;
-    private static readonly double[] ExportSpeeds = [0.5, 1, 1.25, 1.5, 2, 3, 4, 8];
+    private static readonly double[] ExportSpeeds = [0.25, 0.5, 0.75, 1, 1.25, 1.5, 2, 3, 4];
     private static bool s_encodersDetected;
 
     private readonly ObservableCollection<KeptSpanRow> _kept = [];
+    private readonly Dictionary<string, ToggleButton> _choiceButtons = [];
+    private readonly Dictionary<LadderEngine, ToggleButton> _engineButtons = [];
+    private string _exportChoice = ExportLadder.DefaultId;
+    private LadderEngine _engine = LadderEngine.Auto;
     private bool _exportUiReady;
     private bool _exportSubscribed;
     private double _audioDelay;
@@ -59,12 +63,89 @@ public sealed partial class PlayerPage
             catch (Exception e) when (e is InvalidOperationException or IOException or System.ComponentModel.Win32Exception) { }
             ExportButton.IsEnabled = true;
         }
-        var offered = Presets.All.ToList();
-        ExportPresetBox.ItemsSource = offered.Select(p => $"{p.Emoji}  {p.Name}").ToList();
-        ExportPresetBox.Tag = offered;
-        var wanted = AppServices.Settings.ExportPreset ?? DefaultExportPreset;
-        ExportPresetBox.SelectedIndex = Math.Max(0, offered.FindIndex(p => p.Id == wanted));
+        if (ExportLadder.IsKnown(AppServices.Settings.ExportPreset)) _exportChoice = AppServices.Settings.ExportPreset!;
+        if (Enum.TryParse<LadderEngine>(AppServices.Settings.ExportEngine, out var engine)) _engine = engine;
+        BuildChoiceTiles();
+        SizeChanged += (_, _) => FitExportLayout();
+        FitExportLayout();
         UpdateExportUi();
+    }
+
+    private static ToggleButton ChoiceTile(string automationId, params (string Text, double Size, bool Strong)[] lines)
+    {
+        var panel = new StackPanel { HorizontalAlignment = HorizontalAlignment.Center };
+        foreach (var (text, size, strong) in lines)
+            panel.Children.Add(new TextBlock
+            {
+                Text = text, FontSize = size, TextAlignment = TextAlignment.Center, TextWrapping = TextWrapping.Wrap,
+                FontWeight = strong ? Microsoft.UI.Text.FontWeights.SemiBold : Microsoft.UI.Text.FontWeights.Normal,
+            });
+        var tile = new ToggleButton { Content = panel, Padding = new Thickness(3, 6, 3, 6), HorizontalAlignment = HorizontalAlignment.Stretch, VerticalAlignment = VerticalAlignment.Stretch, IsTabStop = false };
+        Microsoft.UI.Xaml.Automation.AutomationProperties.SetAutomationId(tile, automationId);
+        return tile;
+    }
+
+    /// <summary>The approved mockup: five tiers from quality to speed, the engine switch, and the special presets.</summary>
+    private void BuildChoiceTiles()
+    {
+        for (var i = 0; i < ExportLadder.Tiers.Count; i++)
+        {
+            var tier = ExportLadder.Tiers[i];
+            TierGrid.ColumnDefinitions.Add(new ColumnDefinition());
+            var lines = new List<(string, double, bool)> { (tier.Name, 11, true), (tier.Tagline, 10, false) };
+            if (tier.CpuOnly) lines.Add(("CPU only", 10, false));
+            if (tier.Id == ExportLadder.DefaultId) lines.Add(("default", 10, true));
+            var tile = ChoiceTile("ExportTier-" + tier.Id, [.. lines]);
+            tile.Click += (_, _) => SelectExportChoice(tier.Id);
+            Grid.SetColumn(tile, i);
+            TierGrid.Children.Add(tile);
+            _choiceButtons[tier.Id] = tile;
+        }
+        (LadderEngine Engine, string Label)[] engines = [(LadderEngine.Auto, "Auto (GPU if present)"), (LadderEngine.Cpu, "CPU"), (LadderEngine.Gpu, "GPU")];
+        EngineGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(2, GridUnitType.Star) });
+        EngineGrid.ColumnDefinitions.Add(new ColumnDefinition());
+        EngineGrid.ColumnDefinitions.Add(new ColumnDefinition());
+        for (var i = 0; i < engines.Length; i++)
+        {
+            var engine = engines[i].Engine;
+            var tile = ChoiceTile("ExportEngine-" + engine, (engines[i].Label, 11, false));
+            tile.Click += (_, _) => { _engine = engine; AppServices.Settings.ExportEngine = engine.ToString(); AppServices.Settings.Save(); OptionChanged(); };
+            Grid.SetColumn(tile, i);
+            EngineGrid.Children.Add(tile);
+            _engineButtons[engine] = tile;
+        }
+        SpecialGrid.ColumnDefinitions.Add(new ColumnDefinition());
+        SpecialGrid.ColumnDefinitions.Add(new ColumnDefinition());
+        SpecialGrid.ColumnDefinitions.Add(new ColumnDefinition());
+        SpecialGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        SpecialGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        for (var i = 0; i < ExportLadder.SpecialIds.Count; i++)
+        {
+            var id = ExportLadder.SpecialIds[i];
+            if (Presets.Get(id) is not { } preset) continue;
+            var tile = ChoiceTile("ExportSpecial-" + id, ($"{preset.Emoji} {preset.Name}", 11, false));
+            ToolTipService.SetToolTip(tile, preset.Tagline);
+            tile.Click += (_, _) => SelectExportChoice(id);
+            Grid.SetColumn(tile, i % 3);
+            Grid.SetRow(tile, i / 3);
+            SpecialGrid.Children.Add(tile);
+            _choiceButtons[id] = tile;
+        }
+    }
+
+    private void SelectExportChoice(string id)
+    {
+        _exportChoice = id;
+        AppServices.Settings.ExportPreset = id;
+        AppServices.Settings.Save();
+        OptionChanged();
+    }
+
+    /// <summary>The edits leave a short window to the video, and the export card never squeezes the Events list away.</summary>
+    private void FitExportLayout()
+    {
+        EditsCard.Visibility = !_fullscreen && ActualHeight is 0 or >= 680 ? Visibility.Visible : Visibility.Collapsed;
+        if (RightPanel.ActualHeight > 0) ExportScroll.MaxHeight = Math.Max(150, RightPanel.ActualHeight - 120 - 12 - 190);
     }
 
     private void SubscribeExports()
@@ -88,7 +169,7 @@ public sealed partial class PlayerPage
         _kept.Clear();
         Timeline.SetKept([]);
         _syncCts?.Cancel();
-        SyncStatusText.Text = "";
+        SetSyncStatus("");
         EstimateText.Text = "";
         var game = _entry?.GameId;
         SetAudioDelay(game is not null && AppServices.Settings.GameAudioDelays.TryGetValue(game, out var d) ? d : 0);
@@ -96,9 +177,6 @@ public sealed partial class PlayerPage
     }
 
     // ---- what the job would be ------------------------------------------------------------------------------------------
-
-    private Preset? SelectedPreset =>
-        ExportPresetBox.Tag is List<Preset> offered && ExportPresetBox.SelectedIndex is >= 0 and var i && i < offered.Count ? offered[i] : null;
 
     private IReadOnlyList<ExportSpan> ExportSelection()
     {
@@ -108,9 +186,9 @@ public sealed partial class PlayerPage
         return ExportPlan.Whole(_media) is { } whole ? [new ExportSpan(whole.SnappedStart, whole.SnappedEnd)] : [];
     }
 
-    private EncodeSettings BuildSettings(Preset preset)
+    private EncodeSettings BuildSettings(string choice)
     {
-        var s = preset.Build();
+        var s = ExportLadder.Tier(choice) is { } tier ? ExportLadder.Build(tier, _engine, Encoders.BestGpu) : Presets.Get(choice)!.Build();
         if (s.TargetSize && double.IsFinite(TargetSizeBox.Value) && TargetSizeBox.Value > 0) s.TargetMB = TargetSizeBox.Value;
         return s;
     }
@@ -119,17 +197,17 @@ public sealed partial class PlayerPage
     {
         Speed = SpeedBox.SelectedIndex >= 0 ? ExportSpeeds[SpeedBox.SelectedIndex] : 1,
         Volume = VolumeEditSlider.Value / 100,
-        Mute = MuteEditToggle.IsOn,
-        FixSync = FixDriftToggle.IsOn,
+        Mute = MuteEditToggle.IsChecked == true,
+        FixSync = FixDriftToggle.IsChecked == true,
     };
 
-    private ExportJob? BuildJob(Preset preset, string folder)
+    private ExportJob? BuildJob(string choice, string folder)
     {
         if (_media is null) return null;
         var spans = ExportSelection();
         if (spans.Count == 0) return null;
         var chapters = ChaptersToggle.IsOn ? _lane.Select(l => new ExportChapter(l.Source.StartSeconds, l.Title)).ToList() : [];
-        return new ExportJob(_media, spans, BuildSettings(preset), BuildEdit(), folder,
+        return new ExportJob(_media, spans, BuildSettings(choice), BuildEdit(), folder,
             ExportPaths.SafeStem($"{GameText.Text} {DateTime.Now:yyyy-MM-dd HH-mm-ss}"), AppServices.Steam.RecordingsPath, _audioDelay, chapters);
     }
 
@@ -141,14 +219,28 @@ public sealed partial class PlayerPage
         ClearKeptButton.Visibility = _kept.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
         HighlightsButton.IsEnabled = _lane.Count > 0;
 
-        var preset = SelectedPreset;
-        var lossless = preset?.Id == "trim";
-        TargetSizeBox.Visibility = preset?.Id == "target" ? Visibility.Visible : Visibility.Collapsed;
+        var lossless = _exportChoice == "trim";
+        var gpu = Encoders.BestGpu;
+        var tier = ExportLadder.Tier(_exportChoice);
+        foreach (var (id, button) in _choiceButtons) button.IsChecked = id == _exportChoice;
+        foreach (var (engine, button) in _engineButtons)
+        {
+            button.IsChecked = engine == _engine;
+            button.IsEnabled = tier is not null && (engine != LadderEngine.Gpu || (gpu is not null && !tier.CpuOnly));
+        }
+        if (tier is not null)
+        {
+            var usesGpu = ExportLadder.UsesGpu(tier, _engine, gpu);
+            var nvenc = gpu?.Id.EndsWith("_nvenc", StringComparison.Ordinal) == true;
+            ChoiceInfoText.Text = $"{tier.Name} · {(usesGpu ? "GPU" : "CPU")}: " + (usesGpu ? (nvenc ? tier.GpuInfo : gpu!.Label) : tier.CpuInfo);
+        }
+        else if (Presets.Get(_exportChoice) is { } special) ChoiceInfoText.Text = $"{special.Name}: {special.Tagline}";
+        TargetSizeBox.Visibility = _exportChoice == "target" ? Visibility.Visible : Visibility.Collapsed;
         SpeedBox.IsEnabled = VolumeEditSlider.IsEnabled = MuteEditToggle.IsEnabled = FixDriftToggle.IsEnabled = !lossless;
-        EditExpander.Header = lossless ? "Speed and sound (not with Trim only)" : "Speed and sound";
+        EditsTitle.Text = lossless ? "Export edits (sync only with Trim only)" : "Export edits";
 
         var plans = _media is null ? [] : ExportSpans.Plans(_media, ExportSelection(), lossless);
-        var ready = plans.Count > 0 && preset is not null;
+        var ready = plans.Count > 0;
         ExportButton.IsEnabled = ready;
         SaveClipButton.IsEnabled = ready;
         DetectButton.IsEnabled = ready;
@@ -176,16 +268,6 @@ public sealed partial class PlayerPage
         if (!_exportUiReady) return;
         EstimateText.Text = "";
         UpdateExportUi();
-    }
-
-    private void ExportPreset_SelectionChanged(object sender, SelectionChangedEventArgs e)
-    {
-        if (SelectedPreset is { } p && p.Id != AppServices.Settings.ExportPreset)
-        {
-            AppServices.Settings.ExportPreset = p.Id;
-            AppServices.Settings.Save();
-        }
-        OptionChanged();
     }
 
     private void TargetSize_ValueChanged(NumberBox sender, NumberBoxValueChangedEventArgs args) => OptionChanged();
@@ -237,10 +319,22 @@ public sealed partial class PlayerPage
     private void SetAudioDelay(double seconds)
     {
         _audioDelay = Math.Round(seconds, 3);
-        AudioDelayText.Text = string.Create(CultureInfo.InvariantCulture, $"Audio delay {_audioDelay * 1000:+0;-0;0} ms");
+        AudioDelayText.Text = string.Create(CultureInfo.InvariantCulture, $"Sync {_audioDelay * 1000:+0;-0;0} ms");
+        if (Math.Abs(SyncSlider.Value - _audioDelay * 1000) > 0.5) SyncSlider.Value = _audioDelay * 1000;
         _host?.Mpv?.SetAudioDelay(_audioDelay);                         // hear it live
         var game = _entry?.GameId;
-        ApplyToGameToggle.IsOn = game is not null && AppServices.Settings.GameAudioDelays.TryGetValue(game, out var saved) && Math.Abs(saved - _audioDelay) < 0.0005;
+        ApplyToGameToggle.IsChecked = game is not null && AppServices.Settings.GameAudioDelays.TryGetValue(game, out var saved) && Math.Abs(saved - _audioDelay) < 0.0005;
+    }
+
+    private void SyncSlider_ValueChanged(object sender, RangeBaseValueChangedEventArgs e)
+    {
+        if (Math.Abs(e.NewValue / 1000 - _audioDelay) > 0.0005) SetAudioDelay(e.NewValue / 1000);
+    }
+
+    private void SetSyncStatus(string text)
+    {
+        SyncStatusText.Text = text;
+        SyncStatusText.Visibility = text.Length > 0 ? Visibility.Visible : Visibility.Collapsed;
     }
 
     private void NudgeEarlier_Click(object sender, RoutedEventArgs e) => SetAudioDelay(_audioDelay - NudgeSeconds);
@@ -253,9 +347,7 @@ public sealed partial class PlayerPage
     {
         if (_entry?.GameId is not { } game) return;
         var delays = AppServices.Settings.GameAudioDelays;
-        var saved = delays.TryGetValue(game, out var old) && Math.Abs(old - _audioDelay) < 0.0005;
-        if (ApplyToGameToggle.IsOn == saved) return;                    // SetAudioDelay moved the switch: nothing to store
-        if (ApplyToGameToggle.IsOn) delays[game] = _audioDelay;
+        if (ApplyToGameToggle.IsChecked == true) delays[game] = _audioDelay;
         else delays.Remove(game);
         AppServices.Settings.Save();
     }
@@ -268,8 +360,8 @@ public sealed partial class PlayerPage
         using var cts = new CancellationTokenSource();
         _syncCts = cts;
         DetectButton.Content = "Cancel";
-        SyncStatusText.Text = "Analysing…";
-        var progress = new Progress<double>(f => SyncStatusText.Text = $"Analysing…  {f:P0}");
+        SetSyncStatus("Analysing…");
+        var progress = new Progress<double>(f => SetSyncStatus($"Analysing…  {f:P0}"));
         try
         {
             var result = await Task.Run(() => ExportService.DetectSyncAsync(media, span, f => ((IProgress<double>)progress).Report(f), cts.Token), cts.Token);
@@ -278,22 +370,22 @@ public sealed partial class PlayerPage
             {
                 case SyncVerdict.Fix:
                     SetAudioDelay(advice.AudioDelay);
-                    SyncStatusText.Text = string.Create(CultureInfo.InvariantCulture, $"Sound was {advice.AudioLate * 1000:+0;-0} ms off: corrected. Listen, then nudge if needed.");
+                    SetSyncStatus(string.Create(CultureInfo.InvariantCulture, $"Sound was {advice.AudioLate * 1000:+0;-0} ms off: corrected. Listen, then nudge if needed."));
                     break;
                 case SyncVerdict.InSync:
-                    SyncStatusText.Text = "In sync: nothing to change.";
+                    SetSyncStatus("In sync: nothing to change.");
                     break;
                 default:
-                    SyncStatusText.Text = "Low confidence: not applied. Nudge by ear if it sounds off.";
+                    SetSyncStatus("Low confidence: not applied. Nudge by ear if it sounds off.");
                     break;
             }
         }
-        catch (OperationCanceledException) { SyncStatusText.Text = ""; }
-        catch (ChunkGoneException gone) { SyncStatusText.Text = ExportService.DescribeGone(media, gone); }
+        catch (OperationCanceledException) { SetSyncStatus(""); }
+        catch (ChunkGoneException gone) { SetSyncStatus(ExportService.DescribeGone(media, gone)); }
         catch (Exception ex) when (ex is IOException or InvalidOperationException or UnauthorizedAccessException or System.ComponentModel.Win32Exception)
         {
             PlayerLog.Write("sync detect failed: " + ex.GetType().Name);
-            SyncStatusText.Text = "Couldn't analyse this range: " + ex.Message;
+            SetSyncStatus("Couldn't analyse this range: " + ex.Message);
         }
         finally
         {
@@ -307,7 +399,7 @@ public sealed partial class PlayerPage
     private async void Estimate_Click(object sender, RoutedEventArgs e)
     {
         if (_estimateCts is { } running) { running.Cancel(); return; }
-        if (SelectedPreset is not { } preset || BuildJob(preset, Path.GetTempPath()) is not { } job) return;
+        if (BuildJob(_exportChoice, Path.GetTempPath()) is not { } job) return;
         using var cts = new CancellationTokenSource();
         _estimateCts = cts;
         EstimateButton.Content = "Cancel";
@@ -357,18 +449,18 @@ public sealed partial class PlayerPage
 
     private async void Export_Click(object sender, RoutedEventArgs e)
     {
-        if (SelectedPreset is { } preset) await EnqueueAsync(preset);
+        await EnqueueAsync(_exportChoice);
     }
 
     /// <summary>Save clip: lossless, with the markers as chapters, whatever the preset box says.</summary>
     private async void SaveClip_Click(object sender, RoutedEventArgs e)
     {
-        if (Presets.Get("trim") is { } trim) await EnqueueAsync(trim);
+        await EnqueueAsync("trim");
     }
 
-    private async Task EnqueueAsync(Preset preset)
+    private async Task EnqueueAsync(string choice)
     {
-        if (await ExportFolderAsync() is not { } folder || BuildJob(preset, folder) is not { } job) return;
+        if (await ExportFolderAsync() is not { } folder || BuildJob(choice, folder) is not { } job) return;
         AppServices.Exports.Enqueue(job, job.Stem);
     }
 

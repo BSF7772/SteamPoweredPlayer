@@ -23,7 +23,8 @@ public static class ExportSelfChecks
         var start = media.ChunkStartSeconds(media.FirstChunk!.Value) + 3;
         var failed = new List<string>();
         var ranges = new List<string>();
-        foreach (var preset in Presets.All)
+        var choices = AllChoices();
+        foreach (var preset in choices)
         {
             var settings = preset.Build();
             if (settings.TargetSize) settings.TargetMB = 1;
@@ -44,7 +45,23 @@ public static class ExportSelfChecks
             }
         }
         return CheckResult.From(failed.Count == 0, "export.presets", "Every export preset encodes (range, audio, target size, colour range)",
-            failed.Count == 0 ? $"{Presets.All.Count} presets; " + string.Join(", ", ranges.Distinct()) : string.Join("; ", failed));
+            failed.Count == 0 ? $"{choices.Count} choices; " + string.Join(", ", ranges.Distinct()) : string.Join("; ", failed));
+    }
+
+    private sealed record Choice(string Id, Func<EncodeSettings> Build);
+
+    /// <summary>Every ladder tier on each engine this machine has, every special preset, and FastEncoder's other presets.</summary>
+    private static List<Choice> AllChoices()
+    {
+        var choices = new List<Choice>();
+        foreach (var tier in ExportLadder.Tiers)
+        {
+            choices.Add(new(tier.Id + "-cpu", () => ExportLadder.Build(tier, LadderEngine.Cpu, Encoders.BestGpu)));
+            if (ExportLadder.UsesGpu(tier, LadderEngine.Gpu, Encoders.BestGpu))
+                choices.Add(new(tier.Id + "-gpu", () => ExportLadder.Build(tier, LadderEngine.Gpu, Encoders.BestGpu)));
+        }
+        choices.AddRange(Presets.All.Select(p => new Choice(p.Id, p.Build)));
+        return choices;
     }
 
     /// <summary>A session whose clicks land 300 ms after its flashes must be measured, fixed by an export, and measure as in sync afterwards.</summary>
