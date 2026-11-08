@@ -202,6 +202,62 @@ public sealed class ChunkDownloaderTests : IDisposable
     }
 
     [Fact]
+    public async Task Queue_fetches_only_the_chosen_chunks_and_continue_gets_the_rest()
+    {
+        var cache = await Cache();
+        var files = new Flaky();
+        var q = new DownloadQueue(cache, files);
+        var part = q.Enqueue("net-x", Remote1(), [2, 3, 99]);            // 99 does not exist on the server: ignored
+        await DrainAsync(q);
+        Assert.Equal(DownloadItemState.Done, part.State);
+        Assert.True(part.IsPartial);
+        Assert.Equal(6, files.Opened.Count);                             // 2 inits + chunks 2 and 3, both streams
+        Assert.DoesNotContain(files.Opened, p => p.Contains("00001") || p.Contains("00004") || p.Contains("00005"));
+        var coverage = DownloadCoverage.Of(Media(), c => cache.Contains(new ChunkKey("net-x", "clip_1_20260101_000000", 0, c)) && cache.Contains(new ChunkKey("net-x", "clip_1_20260101_000000", 1, c)));
+        Assert.True(coverage.IsPartial);
+        Assert.Equal(2, coverage.Have);
+
+        var rest = q.Enqueue("net-x", Remote1());                        // Continue: the whole recording, minus what is cached
+        await DrainAsync(q);
+        Assert.Equal(DownloadItemState.Done, rest.State);
+        Assert.False(rest.IsPartial);
+        Assert.Equal(12, files.Opened.Count);                            // each file fetched exactly once
+        AssertIdentical();
+    }
+
+    [Fact]
+    public async Task Queue_counts_the_data_fetched_in_total_and_per_download()
+    {
+        var q = new DownloadQueue(await Cache(), new Flaky());
+        var a = q.Enqueue("net-x", Remote1(), [1]);
+        await DrainAsync(q);
+        Assert.Equal(2 * 50 + 2 * 1001, a.BytesFetched);
+        Assert.Equal(a.BytesFetched, q.TotalBytesFetched);
+
+        var b = q.Enqueue("net-x", Remote1());                           // replaces a: its data stays in the total, cached files are not counted twice
+        await DrainAsync(q);
+        Assert.Equal(2 * (1002 + 1003 + 1004 + 1005), b.BytesFetched);
+        Assert.Equal(a.BytesFetched + b.BytesFetched, q.TotalBytesFetched);
+    }
+
+    [Fact]
+    public async Task Queue_keeps_the_data_of_an_attempt_the_server_dropped()
+    {
+        var files = new Switchable();
+        var q = new DownloadQueue(await Cache(), files, new JumpingTime());
+        var item = q.Enqueue("net-x", Remote1());
+        await DrainAsync(q);
+        Assert.Equal(DownloadItemState.CannotReach, item.State);
+        Assert.Equal(0, q.TotalBytesFetched);
+
+        files.Down = false;
+        q.NetworkChanged();
+        await DrainAsync(q);
+        Assert.Equal(DownloadItemState.Done, item.State);
+        Assert.Equal(2 * (50 + 1001 + 1002 + 1003 + 1004 + 1005), q.TotalBytesFetched);
+    }
+
+    [Fact]
     public async Task Queue_resumes_on_a_network_change_after_giving_up()
     {
         var files = new Switchable();
