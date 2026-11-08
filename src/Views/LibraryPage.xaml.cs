@@ -367,7 +367,11 @@ public sealed partial class LibraryPage : Page
 
         var spans = _sessions.Select(SpanOf).ToList();
         var layout = CacheStripLayout.Build(spans, w, TimeZoneInfo.Local, DateTimeOffset.UtcNow);
-        const double top = 18, barH = 36;
+        // markers get a lane above the bar, the ruler stays alone below it; no markers, no lane
+        const double barH = 36, markerLaneH = 22;
+        var hasMarkers = _sessions.Any(s => AppServices.Library?.MarkersFor(s) is { Count: > 0 });
+        var top = 18 + (hasMarkers ? markerLaneH : 0);
+        StripCanvas.Height = top + barH + 58;
         var dim = new SolidColorBrush(Windows.UI.Color.FromArgb(0x33, 0x80, 0x80, 0x80));
         var caption = (Style)Application.Current.Resources["Caption"];
 
@@ -489,14 +493,14 @@ public sealed partial class LibraryPage : Page
                 Pulse(dot);
             }
 
-            // markers sit in their own lane under the block, at their wall-clock time (marker offsets are on the tfdt axis)
+            // markers sit in their own lane above the block, at their wall-clock time (marker offsets are on the tfdt axis)
             var shift = AppServices.Library?.GetMedia(s.RelativeFolder)?.AxisShiftSeconds ?? 0;
             foreach (var m in AppServices.Library?.MarkersFor(s) ?? [])
             {
                 var mx = CacheStripLayout.XOf(b, s.StartUtc + TimeSpan.FromSeconds(m.OffsetSeconds - shift));
                 var glyph = new TextBlock { Text = m.Glyph, FontSize = 14, Tag = s };
                 ToolTipService.SetToolTip(glyph, $"{m.Label} · {Clock(s.StartUtc + TimeSpan.FromSeconds(m.OffsetSeconds - shift))}");
-                Place(glyph, mx - 9, top + barH + 6);
+                Place(glyph, Math.Clamp(mx - 9, 0, Math.Max(0, w - 18)), top - markerLaneH);
                 StripCanvas.Children.Add(glyph);
             }
         }
