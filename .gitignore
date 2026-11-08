@@ -25,3 +25,7 @@ spikes/**/out/
 # local secrets and settings
 .env
 *.secret
+
+# maintainer feedback and screenshots (real content, local only)
+TMP/
+*.feedback
