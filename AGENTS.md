@@ -18,7 +18,7 @@ Requirements every change must serve:
 7. Cuts, auto sync and speed-up, exactly like FastEncoder.
 8. Android companion: secure SMB (3.1.1, encryption), read-only access to the library, editing and exporting on the device.
 
-**Status: Phase 3 fixed after the maintainer's second test (`phase3.feedback`), waiting for a re-test. Phase 4 started on the maintainer's word (2026-11-08): steps 1 to 3 in `android/`, tested on the development emulator, real SMB included (plan §5 "Phase 4 progress").** The approved plan lives in `.hermes/plans/`; don't start a phase the maintainer hasn't
+**Status: Phase 3's third-round fixes are in and checked by an independent frame and audio verifier, waiting for the maintainer's test. Phase 4 steps 1 to 8 are in `android/`, tested on the development emulator with real recordings over real SMB, waiting for the maintainer's first run on the phone (Settings > Install on phone; plan §5 "Phase 4 progress").** The approved plan lives in `.hermes/plans/`; don't start a phase the maintainer hasn't
 approved. Spikes (`spikes/NNN-name/`) are throwaway and must end with a `Verdict:` line.
 
 ## Commands
@@ -37,7 +37,7 @@ tools\bootstrap.ps1 -Android -Emulator   # adds the emulator and its system imag
 tools\emu.ps1 start                      # create the AVD when missing, boot headless (-Window for a window); also: check, stop, delete
 cd android; .\gradlew connectedItestAndroidTest         # instrumented tests on the running emulator, as app.steampoweredplayer.itest
 tools\deploy-phone.ps1                   # what Settings' Install on phone runs: build, install over USB, start; -Serial emulator-5554 -IdSuffix .deploytest to test without touching the real app
-tools\emu-download.ps1 -Folder <media folder in the share> -ShareRoot <share's folder> -Cut network   # real download with the saved credentials, compared by SHA-256; also -Cut kill, unreachable, none
+tools\emu-download.ps1 -Recording <recording, for example clips/clip_...> -Folder <media folder in the share> -ShareRoot <share's folder> -Cut network   # real download with the saved credentials, compared by SHA-256; also -Cut kill, unreachable, none
 ```
 Never uninstall `app.steampoweredplayer` from the emulator or wipe its AVD: its data holds server passwords the maintainer typed, which can't be exported. Update it with `adb install -r`.
 The emulator can't prove real-phone decode and encode speed, codec quirks, heat, Wi-Fi roaming or a hardware-backed Keystore: never report those as verified from it. It reaches the host's SMB server at `10.0.2.2`.
