@@ -129,6 +129,9 @@ public sealed class PlaybackSession : IAsyncDisposable
     /// <summary>Position moved (sequential play). Not raised while a reload is pending. Raised on the player's thread.</summary>
     public event Action<double>? PositionChanged;
 
+    /// <summary>True while a back-step walks over earlier frames to read their times, until the frame it wants is loaded: nothing of that should show. Raised on a background thread.</summary>
+    public event Action<bool>? BackStepWalking;
+
     /// <summary>mpv reached EOF of the loaded window (not raised during a reload). <see cref="CacheFollower"/> decides what happens.</summary>
     public event Action<double>? ReachedEnd;
 
@@ -346,11 +349,23 @@ public sealed class PlaybackSession : IAsyncDisposable
         }
     }
 
+    private bool _walked;                                 // the pump's own: this back-step's probe has walked
+
     private async Task DoReloadAsync(PendingReload req)
+    {
+        try { await DoReloadCoreAsync(req).ConfigureAwait(false); }
+        finally
+        {
+            if (_walked) { _walked = false; SafeInvoke(BackStepWalking, false); }
+        }
+    }
+
+    private async Task DoReloadCoreAsync(PendingReload req)
     {
         double? shown = null;
         if (req.Back > 0)
         {
+            _walked = false;
             var exact = await TryExactBackAsync(req).ConfigureAwait(false);
             if (exact is { } e)
             {
@@ -470,6 +485,8 @@ public sealed class PlaybackSession : IAsyncDisposable
                 var atHead = wanted <= start;
                 var from = Snap(media, wanted);
                 lock (_gate) EnsureWindow(from, false);
+                _walked = true;
+                SafeInvoke(BackStepWalking, true);
                 if (!await _player.LoadAsync(_edl, from, false, EndLimitOf(media), ct).ConfigureAwait(false)) return null;
                 var first = _player.TimePos;
                 if (!double.IsFinite(first)) return null;

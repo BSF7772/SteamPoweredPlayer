@@ -152,6 +152,19 @@ public sealed unsafe class MpvD3D11Renderer : IDisposable
         _wake.Set();
     }
 
+    private volatile bool _hold;
+
+    /// <summary>While true the screen keeps its picture: a back-step's walk over earlier frames isn't shown. Setting it false draws the current frame.</summary>
+    public bool HoldPicture
+    {
+        get => _hold;
+        set
+        {
+            _hold = value;
+            if (!value) RequestRedraw();
+        }
+    }
+
     /// <summary>Draw the current frame again (e.g. after a window-state change while paused).</summary>
     public void RequestRedraw()
     {
@@ -193,6 +206,12 @@ public sealed unsafe class MpvD3D11Renderer : IDisposable
         p[1] = new() { Type = MpvConst.RenderBlockForTargetTime, Data = (nint)(&noBlock) };     // Present(1) already paces us
         p[2] = default;
         MpvNative.mpv_render_context_render(_rc, p);
+        if (_hold)
+        {
+            // mpv still gets its frame rendered and reported, or its frame steps would wait on us; the screen keeps what it shows.
+            MpvNative.mpv_render_context_report_swap(_rc);
+            return;
+        }
 
         var r = _sc.Present(1, PresentFlags.None);
         var now = Stopwatch.GetTimestamp();

@@ -153,6 +153,24 @@ public sealed class PlaybackSessionFrameBackTests
         Assert.Equal(60 - 3 * frame, p.Loads[^1].Start, 6);
     }
 
+    [Fact]
+    public async Task The_walk_over_earlier_frames_is_announced_and_always_ended()
+    {
+        var (s, p, pts) = await OpenAtAsync(100);
+        var seen = new List<bool>();
+        s.BackStepWalking += w => { lock (seen) seen.Add(w); };
+        await s.StepBackAsync(1 / 59.094);                   // no frame list yet: this one walks
+        Assert.Equal([true, false], seen);
+        await s.StepBackAsync(1 / 59.094);                   // the list covers it: no walk, nothing to hide
+        Assert.Equal([true, false], seen);
+
+        s.FrameProbeTimeout = TimeSpan.FromMilliseconds(20);
+        p.SilentSteps = 100;
+        await s.SeekAsync(pts[300] - 0.0003);
+        await s.StepBackAsync(1 / 59.094);                   // a walk that times out ends too
+        Assert.Equal([true, false, true, false], seen);
+    }
+
     private static async Task WaitForLoads(FakeMpvPlayer p, int count)
     {
         for (var i = 0; i < 400 && p.Loads.Count < count; i++) await Task.Delay(5);

@@ -92,6 +92,7 @@ public sealed class PlayerHost
                 DeviceLost?.Invoke();
             };
             var session = Session = new PlaybackSession(mpv);
+            session.BackStepWalking += walking => renderer.HoldPicture = walking;
             Follower = new CacheFollower(session);
             Metrics.Measured += s =>
                 PlayerLog.Write(string.Create(CultureInfo.InvariantCulture, $"metric {s.Kind.ToString().ToLowerInvariant()} -> first frame {s.Milliseconds:0.0} ms (decode {_appliedMode})"));
