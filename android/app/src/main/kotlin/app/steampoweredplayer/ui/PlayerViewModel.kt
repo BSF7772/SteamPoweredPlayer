@@ -40,6 +40,7 @@ import app.steampoweredplayer.export.ExportRequest
 import app.steampoweredplayer.export.ExportSpan
 import app.steampoweredplayer.export.ExportSpans
 import app.steampoweredplayer.export.Exports
+import app.steampoweredplayer.export.FrameTables
 import app.steampoweredplayer.export.LadderEngine
 import app.steampoweredplayer.export.SourceFormat
 import app.steampoweredplayer.export.SpanRequest
@@ -125,6 +126,8 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
     private var entry: RecordingEntry? = null
     private var details: RecordingDetails? = null
     private var full: SessionMedia? = null
+
+    @Volatile private var frameTables: FrameTables? = null
     private var cache: LocalChunkCache? = null
     private var libraryKey = ""
     private val available = HashSet<Int>()
@@ -189,6 +192,7 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
         val media = loaded.media(folder.path)
         if (media.chunkCount == 0) throw IOException("Steam no longer has this recording.")
         full = media
+        frameTables = FrameTables(folder)
         val markerSet = withContext(Dispatchers.IO) { repo.markers(loaded) }
         val visible = Markers.place(markerSet.markers, media).visible
             .map { MarkerUi(it, MarkerKinds.classify(it.entry)) }.filter { MarkerKinds.showOnLane(it.kind) }
@@ -331,7 +335,7 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
         val e = engine ?: MpvEngine(getApplication(), settings.decodeMode).also { engine = it }
         e.attachSurface(surface)
         if (session == null) {
-            session = PlaybackSession(e, viewModelScope).also { s ->
+            session = PlaybackSession(e, viewModelScope, frameTimes = { chunk -> frameTables?.of(chunk) }).also { s ->
                 s.onPosition = ::onPosition
                 s.onReachedEnd = ::onReachedEnd
                 s.onReloaded = { _, t -> onReloaded(t) }
@@ -667,6 +671,14 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
                 audioDelay = ui.edit.audioDelay, chapters = chapters, share = share,
             ),
         )
+    }
+
+    /** What a Save clip weighs: it stores the whole chunks of each kept range, each chunk once. */
+    fun saveClipBytes(): Long {
+        val media = full ?: return 0
+        val plans = ExportSpans.plans(media, exportSpans())
+        val chunks = plans.flatMap { it.firstChunk..it.lastChunk }.filter(media::contains).distinct().size
+        return (_ui.value.bytesPerSecond * chunks * media.segmentSeconds).toLong()
     }
 
     /** The output's length with the kept ranges and, for a re-encode, the speed. */

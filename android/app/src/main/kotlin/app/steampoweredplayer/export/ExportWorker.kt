@@ -50,6 +50,8 @@ class ExportWorker(context: Context, params: WorkerParameters) : CoroutineWorker
         val displayName = request.stem + ExportLadder.fileSuffix(request.choice) + ".mp4"
         return try {
             stage(request, "Starting", 0.0)
+            // Exports run one at a time, so any other working folder was left by a process that got killed. Only the app's own cache is touched.
+            withContext(Dispatchers.IO) { app.cacheDir.listFiles { f -> f.name.startsWith("export-") }.orEmpty().forEach { it.deleteRecursively() } }
             val work = File(app.cacheDir, "export-${request.id}").apply { mkdirs() }
             try {
                 val output = File(work, "out.mp4")

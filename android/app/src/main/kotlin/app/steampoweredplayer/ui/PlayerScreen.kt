@@ -478,7 +478,7 @@ private fun ExportPanel(vm: PlayerViewModel, ui: PlayerUi, entry: RecordingEntry
     val seconds = vm.outputSeconds(choice)
     val plan = tier?.let { ExportLadder.plan(it, ui.exportEngine, ui.encoders, ui.sourceWidth, ui.sourceHeight, ui.sourceFps, seconds, target) }
     val summary = when {
-        tier == null -> "${"%.1f".format(seconds)} s · about ${Formatter.formatShortFileSize(context, (ui.bytesPerSecond * seconds).toLong())} · no re-encode"
+        tier == null -> "${"%.1f".format(seconds)} s · about ${Formatter.formatShortFileSize(context, vm.saveClipBytes())} · no re-encode"
         plan == null -> "No encoder on this phone can do this at ${ui.sourceWidth}x${ui.sourceHeight} on this engine."
         else -> "${"%.1f".format(seconds)} s · ${plan.width}x${plan.height} ${codecName(plan.mime)} · about ${Formatter.formatShortFileSize(context, ExportLadder.estimateBytes(plan, seconds))}"
     }

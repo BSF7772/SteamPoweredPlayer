@@ -2,9 +2,7 @@
 package app.steampoweredplayer.ui
 
 import android.Manifest
-import android.content.Intent
 import android.content.pm.PackageManager
-import android.net.Uri
 import android.os.Build
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -68,9 +66,7 @@ fun AppRoot(openRequest: OpenRequest? = null, onOpenRequestHandled: () -> Unit =
     // The share sheet for an export that asked for it. It carries the file of the tier the user chose.
     LaunchedEffect(Unit) {
         Exports.shareRequests.collect { record ->
-            val uri = Uri.parse(record.uri ?: return@collect)
-            val send = Intent(Intent.ACTION_SEND).setType("video/mp4").putExtra(Intent.EXTRA_STREAM, uri).addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-            context.startActivity(Intent.createChooser(send, record.displayName))
+            shareFile(context, record.uri ?: return@collect, record.displayName)
         }
     }
 

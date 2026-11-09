@@ -83,6 +83,7 @@ class LibraryViewModel(app: Application) : AndroidViewModel(app) {
     fun open(profile: ServerProfile) {
         settings.activeProfileId = profile.id
         val lib = Library(getApplication(), profile)
+        if (library?.profile?.id != profile.id) watcher?.cancel()                     // change notify follows the server in use
         library = lib
         _ui.update { it.copy(profile = profile) }
         viewModelScope.launch(Dispatchers.IO) { lib.index()?.cached()?.let(::publish) }

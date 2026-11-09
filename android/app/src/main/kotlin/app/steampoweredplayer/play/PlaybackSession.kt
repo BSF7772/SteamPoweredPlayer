@@ -8,7 +8,6 @@ import kotlin.math.max
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withTimeoutOrNull
 
 /** What [PlaybackSession] needs from mpv; a fake stands in for it in unit tests. */
 interface PlayerEngine {
@@ -36,16 +35,17 @@ enum class ReloadCause { Open, Seek, Policy, EndOfWindow, Loop }
  * Every seek and back-step is `loadfile start=`, never an mpv seek: a revisited chunk breaks decode (S2). While a reload runs, new seeks only replace the
  * pending target. `pause` is the user's intent kept here, not read from mpv: `keep-open` pauses mpv at EOF and mpv keeps `pause` across loads.
  *
- * Frame back: mpv can't step back across a chunk and Steam's timestamps are irregular, so the previous frame's real time comes from stepping forward from a few
- * frames earlier. Repeated presses keep moving across chunk boundaries: a slow probe costs that one press its exactness and never turns exact steps off, nothing
- * here pauses an engine that's already paused (that cancels a step in flight), and a load that lands on the frame it left steps further.
+ * Frame back: mpv can't step back across a chunk and Steam's timestamps are irregular, so the previous frame's real time comes from the chunk's own table, and one load
+ * lands on it with nothing else shown. Repeated presses keep moving across chunk boundaries, nothing here pauses an engine that's already paused (that cancels a step in
+ * flight), and a nominal step that lands on the frame it left steps further.
  */
 class PlaybackSession(
     private val engine: PlayerEngine,
     private val scope: CoroutineScope,
     private val url: (String) -> String = { it },
     private val windowCount: Int = EdlWindow.DEFAULT_COUNT,
-    private val frameProbeTimeoutMillis: Long = 500,
+    /** Each frame's real time in a chunk, from its moof; null when the chunk's table can't be read. Without it frame back steps nominal frames. */
+    private val frameTimes: ((Int) -> DoubleArray?)? = null,
 ) {
     private data class Pending(
         val position: Double,
@@ -74,7 +74,6 @@ class PlaybackSession(
     private var pending: Pending? = null
     private var pumping = false
     private var waiters = ArrayList<CompletableDeferred<Unit>>()
-    private var frames: List<Double>? = null
 
     /** Position moved during sequential play; not while a reload is pending. On the engine's thread. */
     var onPosition: ((Double) -> Unit)? = null
@@ -107,7 +106,6 @@ class PlaybackSession(
             media = newMedia
             window = emptyList()
             userPaused = !play
-            frames = null
         }
         return enqueue(Pending(start ?: newMedia.startSeconds, ReloadCause.Open, true, play))
     }
@@ -153,7 +151,6 @@ class PlaybackSession(
     /** Swaps in a new set of chunks without reloading: more got downloaded. */
     fun replaceMedia(newMedia: SessionMedia) = synchronized(gate) {
         media = newMedia
-        frames = null
     }
 
     fun reload(mediaSeconds: Double, cause: ReloadCause, force: Boolean = true) = enqueue(Pending(mediaSeconds, cause, force, null))
@@ -314,62 +311,33 @@ class PlaybackSession(
         }
     }
 
-    /** (where to load, the frame's real time) for the frame [req].back frames before the one on screen; null when that isn't known this time. */
-    private suspend fun exactBack(req: Pending): Pair<Double, Double>? {
-        val m: SessionMedia
-        var known: List<Double>?
-        synchronized(gate) {
-            m = media ?: return null
-            known = frames
-        }
+    /**
+     * (where to load, the frame's real time) for the frame [req].back frames before the one on screen, from the chunks' own tables. Nothing is loaded to find it, so no
+     * earlier frame is ever shown on the way. Null when a table isn't there or the screen isn't on a frame of it: the caller then steps one nominal frame.
+     */
+    private fun exactBack(req: Pending): Pair<Double, Double>? {
+        val table = frameTimes ?: return null
+        val m = synchronized(gate) { media } ?: return null
         val t = engine.timePos
-        val frame = req.frame
         if (!t.isFinite()) return null
-        val tolerance = 0.25 * frame
-        var at = known?.let { nearest(it, t, tolerance) } ?: -1
-        if (at < req.back) {
-            var margin = PROBE_MARGIN_FRAMES
-            while (true) {
-                val wanted = t - (req.back + margin) * frame
-                val atHead = wanted <= m.startSeconds
-                val from = snap(m, wanted)
-                val script = synchronized(gate) {
-                    ensureWindow(from, false)
-                    edl
-                }
-                if (!engine.load(script, from, false, endLimitOf(m))) return null
-                val first = engine.timePos
-                if (!first.isFinite()) return null
-                val list = arrayListOf(first)
-                val cap = req.back + margin + 24
-                while (list.last() < t - tolerance && list.size < cap) list.add(step(list.last()) ?: return null)
-                at = nearest(list, t, tolerance)
-                if (at >= req.back || atHead && at >= 0) {
-                    known = list
-                    synchronized(gate) { frames = list }
-                    break
-                }
-                if (atHead || margin >= MAX_PROBE_MARGIN_FRAMES) return null
-                margin *= 2                                                           // a chunk's first frame can lie further off the grid than the margin
-            }
+        val all = m.chunks()
+        val here = all.indexOfFirst { it >= m.chunkAt(t) }.let { if (it < 0) all.lastIndex else it }
+        val tolerance = 0.25 * req.frame
+        var from = max(0, here - 1)
+        val to = minOf(all.lastIndex, here + 1)                                       // a chunk's frames run a little past the grid
+        var times = emptyList<Double>()
+        var at: Int
+        while (true) {
+            val parts = (from..to).map { table(all[it]) ?: return null }
+            times = parts.flatMap { p -> p.asList() }.filter { it >= m.startSeconds - START_TOLERANCE }.sorted()
+            at = nearest(times, t, tolerance)
+            if (at < 0) return null
+            if (at >= req.back || from == 0) break
+            from--
         }
-        val list = known ?: return null
         val k = max(0, at - req.back)
-        if (k >= list.size) return null
-        val gap = if (k > 0) list[k] - list[k - 1] else frame
-        return (list[k] - 0.25 * gap) to list[k]                                      // mpv shows the first frame at or after the start
-    }
-
-    private suspend fun step(last: Double): Double? {
-        val next = CompletableDeferred<Double>()
-        val listener: (Double) -> Unit = { v -> if (v.isFinite() && v > last + 1e-6) next.complete(v) }
-        engine.addTimeListener(listener)
-        return try {
-            engine.frameStep()
-            withTimeoutOrNull(frameProbeTimeoutMillis) { next.await() }
-        } finally {
-            engine.removeTimeListener(listener)
-        }
+        val gap = if (k > 0) times[k] - times[k - 1] else req.frame
+        return (times[k] - 0.25 * gap) to times[k]                                    // mpv shows the first frame at or after the start
     }
 
     private fun onTimePos(t: Double) {
@@ -427,8 +395,7 @@ class PlaybackSession(
         const val DEFAULT_FRAME_SECONDS = 1.0 / 60
         const val END_MARGIN_SECONDS = 0.05
         const val GAP_TAIL_MARGIN_SECONDS = 0.3
-        private const val PROBE_MARGIN_FRAMES = 12
-        private const val MAX_PROBE_MARGIN_FRAMES = 48
+        private const val START_TOLERANCE = 0.001
         private const val MAX_FURTHER_LOADS = 4
         private const val LOOP_EDGE_SECONDS = 0.02
 

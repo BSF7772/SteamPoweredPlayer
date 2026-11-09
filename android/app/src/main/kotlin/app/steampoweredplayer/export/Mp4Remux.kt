@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 package app.steampoweredplayer.export
 
+import app.steampoweredplayer.data.FolderNames
 import java.io.ByteArrayOutputStream
 import java.io.DataOutputStream
 import java.io.File
@@ -190,6 +191,34 @@ object Fmp4Chunk {
 
     private const val MAX_MOOF_BYTES = 16L * 1024 * 1024
     private const val SAMPLE_NON_SYNC = 0x00010000L
+}
+
+/**
+ * The real time of each frame of a recording's chunks on ffmpeg's and mpv's axis, read from their `moof` boxes, for frame stepping. Keeps the last few chunks. Thread-safe.
+ * A chunk that isn't there or can't be read gives null.
+ */
+class FrameTables(private val folder: File) {
+    private val cache = object : LinkedHashMap<Int, DoubleArray>(CACHED_CHUNKS, 0.75f, true) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<Int, DoubleArray>?) = size > CACHED_CHUNKS
+    }
+    private var init: InitSegment? = null
+
+    @Synchronized
+    fun of(chunk: Int): DoubleArray? {
+        cache[chunk]?.let { return it }
+        return try {
+            val parsed = init ?: InitSegment.parse(File(folder, FolderNames.initFile(0)).readBytes()).also { init = it }
+            val file = File(folder, FolderNames.chunkFile(0, chunk))
+            if (!file.exists()) return null
+            Mp4Track(parsed, Fmp4Chunk.samples(file, parsed), true).sourceSeconds().also { it.sort() }.also { cache[chunk] = it }
+        } catch (_: IOException) {
+            null
+        }
+    }
+
+    private companion object {
+        const val CACHED_CHUNKS = 8
+    }
 }
 
 /** One track to store: samples in decode order, with their init segment, and the length of its last sample in ticks. */

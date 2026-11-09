@@ -90,6 +90,9 @@ object ExportSpans {
     }
 
     fun outputSeconds(plans: Iterable<ExportPlan>, speed: Double): Double = plans.sumOf { it.end - it.start } / max(0.01, speed)
+
+    /** True when the frames reach the expected length, within half a second or 5 %, whichever is more. Its sound runs to the end either way, so nothing else would tell. */
+    fun isWholePicture(lastFrameSeconds: Double, expected: Double): Boolean = lastFrameSeconds >= expected - max(0.5, expected * 0.05)
 }
 
 object ExportChapters {

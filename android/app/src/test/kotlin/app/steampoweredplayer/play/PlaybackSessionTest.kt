@@ -82,14 +82,21 @@ class PlaybackSessionTest {
 
     private fun media(chunks: Int = 10) = SessionMedia("/m", listOf(SegmentRun(1, chunks)))
 
-    private fun session(engine: PlayerEngine) = PlaybackSession(engine, scope, frameProbeTimeoutMillis = 100)
+    /** Each chunk's frames, as the moof tables give them: a chunk's frames start on its first one, a little past the grid. */
+    private fun tables(all: DoubleArray, media: SessionMedia): (Int) -> DoubleArray? = { chunk ->
+        all.filter { media.chunkAt(it - 0.040 - 0.002).toInt() == chunk || (chunk == 1 && it < 0.042) }.toDoubleArray()
+    }
+
+    private fun session(engine: FakeEngine, media: SessionMedia) = PlaybackSession(engine, scope, frameTimes = tables(engine.framesAt, media))
+
+    private fun plain(engine: PlayerEngine) = PlaybackSession(engine, scope)
 
     private suspend fun kotlinx.coroutines.CompletableDeferred<Unit>.ok() = withTimeout(10_000) { await() }
 
     @Test fun frame_back_keeps_moving_across_chunk_boundaries() = runBlocking {
         val all = frames(6)
         val engine = FakeEngine(all)
-        val s = session(engine)
+        val s = session(engine, media(6))
         val start = all.indexOfFirst { it >= 9.1 }
         s.open(media(6), all[start], play = false).ok()
         repeat(450) { s.stepBack(frame).ok() }                                        // past three chunk starts
@@ -101,7 +108,7 @@ class PlaybackSessionTest {
     @Test fun each_frame_back_lands_on_the_real_previous_frame() = runBlocking {
         val all = frames(3)
         val engine = FakeEngine(all)
-        val s = session(engine)
+        val s = session(engine, media(3))
         val start = all.indexOfFirst { it >= 3.2 }
         s.open(media(3), all[start], play = false).ok()
         for (k in 1..30) {
@@ -113,7 +120,7 @@ class PlaybackSessionTest {
     @Test fun presses_during_a_reload_add_up() = runBlocking {
         val all = frames(3)
         val engine = FakeEngine(all)
-        val s = session(engine)
+        val s = session(engine, media(3))
         val start = all.indexOfFirst { it >= 4.0 }
         s.open(media(3), all[start], play = false).ok()
         val waits = List(5) { s.stepBack(frame) }
@@ -124,7 +131,7 @@ class PlaybackSessionTest {
     @Test fun nothing_pauses_an_engine_that_is_already_paused() = runBlocking {
         val all = frames(3)
         val engine = FakeEngine(all)
-        val s = session(engine)
+        val s = session(engine, media(3))
         s.open(media(3), 3.5, play = false).ok()
         s.setPause(true)
         repeat(5) { s.stepBack(frame).ok() }
@@ -132,22 +139,53 @@ class PlaybackSessionTest {
         assertEquals(0, engine.pauseCalls)
     }
 
-    @Test fun a_probe_timeout_costs_one_press_and_exact_steps_come_back() = runBlocking {
+    @Test fun a_press_without_a_table_steps_nominally_and_the_next_is_exact_again() = runBlocking {
         val all = frames(3)
         val engine = FakeEngine(all)
-        val s = session(engine)
+        val m = media(3)
+        var tableMissing = true
+        val real = tables(all, m)
+        val s = PlaybackSession(engine, scope, frameTimes = { c -> if (tableMissing) null else real(c) })
         val start = all.indexOfFirst { it >= 3.5 }
-        s.open(media(3), all[start], play = false).ok()
-        repeat(6) {
-            engine.dropNextSteps = 1                                                  // the step's report never comes, repeatedly
-            s.stepBack(frame).ok()
-        }
-        assertTrue(s.currentPosition < all[start])
-        engine.dropNextSteps = 0
+        s.open(m, all[start], play = false).ok()
+        s.stepBack(frame).ok()
+        assertTrue(engine.timePos < all[start])
+        tableMissing = false
         val before = engine.timePos
         s.stepBack(frame).ok()
-        val i = all.indexOfFirst { abs(it - before) < 1e-9 }
-        assertEquals(all[i - 1], engine.timePos, 1e-9)
+        assertEquals(all[all.indexOfFirst { abs(it - before) < 1e-9 } - 1], engine.timePos, 1e-9)
+    }
+
+    @Test fun a_back_step_loads_once_and_shows_nothing_on_the_way() = runBlocking {
+        val all = frames(3)
+        val engine = FakeEngine(all)
+        val s = session(engine, media(3))
+        val start = all.indexOfFirst { it >= 3.2 }
+        s.open(media(3), all[start], play = false).ok()
+        val loads = engine.loads
+        var steps = 0
+        engine.addTimeListener { steps++ }
+        s.stepBack(frame).ok()
+        assertEquals(loads + 1, engine.loads)
+        assertEquals(0, steps)
+    }
+
+    @Test fun a_finishing_load_leaves_the_position_of_queued_presses_alone() = runBlocking {
+        val all = frames(3)
+        val engine = FakeEngine(all)
+        val s = session(engine, media(3))
+        val start = all.indexOfFirst { it >= 4.0 }
+        s.open(media(3), all[start], play = false).ok()
+        val waits = List(12) { s.stepBack(frame) }
+        var last = s.currentPosition
+        while (s.isReloading) {
+            val now = s.currentPosition
+            assertTrue("went forward: $last then $now", now <= last + 1e-9)
+            last = now
+            kotlinx.coroutines.delay(1)
+        }
+        waits.forEach { it.ok() }
+        assertEquals(all[start - 12], engine.timePos, 1e-9)
     }
 
     @Test fun a_load_that_lands_on_the_same_frame_steps_further() = runBlocking {
@@ -161,7 +199,7 @@ class PlaybackSessionTest {
             }
             override fun frameStep() = Unit
         }
-        val s = session(engine)
+        val s = plain(engine)
         s.open(media(1), 1.5, play = false).ok()
         s.stepBack(frame).ok()
         assertTrue("still at ${engine.timePos}", engine.timePos < 1.5 - 0.01 || s.currentPosition < 1.5 - 4 * frame)
@@ -170,7 +208,7 @@ class PlaybackSessionTest {
     @Test fun at_the_head_frame_back_stays_put() = runBlocking {
         val all = frames(1)
         val engine = FakeEngine(all)
-        val s = session(engine)
+        val s = session(engine, media(1))
         s.open(media(1), all[3], play = false).ok()
         repeat(6) { s.stepBack(frame).ok() }
         assertEquals(all[0], engine.timePos, 1e-9)
@@ -178,7 +216,7 @@ class PlaybackSessionTest {
 
     @Test fun seeks_during_a_reload_keep_only_the_latest_target() = runBlocking {
         val engine = FakeEngine(frames(10))
-        val s = session(engine)
+        val s = plain(engine)
         s.open(media(), 1.0).ok()
         val before = engine.loads
         val a = s.seek(5.0)
@@ -200,7 +238,7 @@ class PlaybackSessionTest {
 
     @Test fun a_saved_clips_end_limit_goes_to_the_engine() = runBlocking {
         val engine = FakeEngine(frames(4))
-        val s = session(engine)
+        val s = plain(engine)
         val clip = SessionMedia("/m", listOf(SegmentRun(1, 4)), startLimitSeconds = 1.0, endLimitSeconds = 10.5)
         s.open(clip).ok()
         assertEquals(1.0, engine.loadStarts.last(), 0.0)
@@ -209,7 +247,7 @@ class PlaybackSessionTest {
 
     @Test fun a_loop_reloads_at_a_when_the_position_reaches_b() = runBlocking {
         val engine = FakeEngine(frames(4))
-        val s = session(engine)
+        val s = plain(engine)
         s.open(media(4), 1.0).ok()
         s.setLoop(2.0, 4.0)
         engine.tick(3.0)
@@ -221,7 +259,7 @@ class PlaybackSessionTest {
 
     @Test fun a_seek_outside_the_loop_plays_on() = runBlocking {
         val engine = FakeEngine(frames(4))
-        val s = session(engine)
+        val s = plain(engine)
         s.open(media(4), 1.0).ok()
         s.setLoop(2.0, 4.0)
         s.seek(6.0).ok()
@@ -235,7 +273,7 @@ class PlaybackSessionTest {
 
     @Test fun each_load_says_whether_to_play() = runBlocking {
         val engine = FakeEngine(frames(4))
-        val s = session(engine)
+        val s = plain(engine)
         s.open(media(4), 1.0, play = false).ok()
         assertFalse(engine.lastPlay)
         s.setPause(false)
@@ -245,7 +283,7 @@ class PlaybackSessionTest {
 
     @Test fun the_end_is_reported_once_and_a_reload_clears_it() = runBlocking {
         val engine = FakeEngine(frames(2))
-        val s = session(engine)
+        val s = plain(engine)
         var ended = 0
         s.onReachedEnd = { ended++ }
         s.open(media(2), 1.0).ok()

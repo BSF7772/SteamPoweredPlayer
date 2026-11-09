@@ -16,6 +16,7 @@ import app.steampoweredplayer.data.FirstFragment
 import app.steampoweredplayer.data.FolderNames
 import app.steampoweredplayer.data.SessionMedia
 import app.steampoweredplayer.data.readNBytesCompat
+import app.steampoweredplayer.export.FrameTables
 import java.io.File
 import kotlin.coroutines.resume
 import kotlinx.coroutines.CoroutineScope
@@ -68,6 +69,8 @@ class RealPlaybackTest {
         }
     }
 
+    private fun session() = PlaybackSession(engine, scope, frameTimes = FrameTables(File(media.folder))::of)
+
     private fun loadMedia(folder: File): SessionMedia {
         val names = folder.list().orEmpty().toList()
         val chunks = ChunkScan.complete(names) { n -> File(folder, n).inputStream().use { ChunkHeads.classify(it.readNBytesCompat(ChunkHeads.HEAD_LENGTH)) } }
@@ -82,7 +85,7 @@ class RealPlaybackTest {
     private suspend fun kotlinx.coroutines.CompletableDeferred<Unit>.ok() = withTimeout(30_000) { await() }
 
     @Test fun opens_seeks_and_plays_real_chunks() = runBlocking {
-        val s = PlaybackSession(engine, scope)
+        val s = session()
         val t0 = SystemClock.elapsedRealtime()
         s.open(media, play = false).ok()
         val open = SystemClock.elapsedRealtime() - t0
@@ -117,7 +120,7 @@ class RealPlaybackTest {
     }
 
     @Test fun what_a_reload_costs() = runBlocking {
-        val s = PlaybackSession(engine, scope)
+        val s = session()
         val chunk = media.chunks()[1]
         s.open(media, media.chunkStartSeconds(chunk), play = false).ok()
         for (into in listOf(0.0, 0.0, 0.5, 1.0, 2.0, 2.9, 0.0, 2.9)) {
@@ -129,7 +132,7 @@ class RealPlaybackTest {
     }
 
     @Test fun frame_back_crosses_chunk_boundaries() = runBlocking {
-        val s = PlaybackSession(engine, scope)
+        val s = session()
         // 0.2 s past a chunk's start, so that 200 frames cross two boundaries.
         val chunk = media.chunks().last()
         val start = media.chunkStartSeconds(chunk) + 0.2
@@ -153,7 +156,7 @@ class RealPlaybackTest {
     }
 
     @Test fun frame_back_presses_at_a_fixed_rate_do_not_get_stuck() = runBlocking {
-        val s = PlaybackSession(engine, scope)
+        val s = session()
         val chunk = media.chunks().last()
         val start = media.chunkStartSeconds(chunk) + 0.2
         s.open(media, start, play = false).ok()
@@ -171,23 +174,16 @@ class RealPlaybackTest {
     }
 
     @Test fun forward_step_then_back_returns_to_the_same_frame() = runBlocking {
-        val s = PlaybackSession(engine, scope)
+        val s = session()
         s.open(media, media.chunkStartSeconds(media.chunks()[1]) + 1.0, play = false).ok()
         val start = engine.timePos
-        val listener = CompletableList()
-        engine.addTimeListener(listener)
         s.frameStep()
         withTimeout(5_000) { while (engine.timePos <= start) delay(5) }
         val next = engine.timePos
         s.stepBack().ok()
-        engine.removeTimeListener(listener)
         assertEquals(start, engine.timePos, 1e-4)
         Log.i(TAG, "step: ${"%.6f".format(next - start)} s forward, back to the same frame")
         s.close()
-    }
-
-    private class CompletableList : (Double) -> Unit {
-        override fun invoke(p1: Double) = Unit
     }
 
     private companion object {

@@ -117,6 +117,31 @@ class ReEncoder(private val context: Context, private val fastDecode: Boolean) {
             thread.quitSafely()
             work.deleteRecursively()
         }
+        val expected = ExportSpans.outputSeconds(plans, edits.speed)
+        val last = lastFrameSeconds(output)
+        if (!ExportSpans.isWholePicture(last, expected)) {
+            output.delete()
+            Log.w(TAG, "picture ends at $last of $expected s")
+            throw IOException("The picture came out shorter than the kept range. Nothing was saved.")
+        }
+    }
+
+    /** The time of the file's last frame, by its own samples. */
+    private fun lastFrameSeconds(file: File): Double {
+        val extractor = android.media.MediaExtractor()
+        try {
+            extractor.setDataSource(file.path)
+            val track = (0 until extractor.trackCount).first { extractor.getTrackFormat(it).getString(MediaFormat.KEY_MIME)!!.startsWith("video/") }
+            extractor.selectTrack(track)
+            var last = 0L
+            while (extractor.sampleTime >= 0) {
+                last = max(last, extractor.sampleTime)
+                extractor.advance()
+            }
+            return last / 1e6
+        } finally {
+            extractor.release()
+        }
     }
 
     private fun item(media: SessionMedia, p: ExportPlan, plan: EncodePlan, edits: ReEncodeEdits, file: File): EditedMediaItem {

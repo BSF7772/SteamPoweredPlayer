@@ -104,6 +104,14 @@ class LosslessEditsTest {
         assertEquals(3 to 5, ExportPlan.audioChunks(media, plan, -3.0))               // earlier: later sound
     }
 
+    @Test fun a_picture_well_short_of_the_kept_length_is_not_whole() {
+        assertTrue(ExportSpans.isWholePicture(9.6, 10.0))                             // half a second is allowed
+        assertTrue(!ExportSpans.isWholePicture(9.4, 10.0))
+        assertTrue(ExportSpans.isWholePicture(95.5, 100.0))                           // 5 % once that's more
+        assertTrue(!ExportSpans.isWholePicture(94.0, 100.0))
+        assertTrue(!ExportSpans.isWholePicture(0.0, 2.0))
+    }
+
     @Test fun chapters_follow_the_cuts_and_start_at_zero() {
         val media = SessionMedia("/m", listOf(SegmentRun(1, 10)))
         val plans = ExportSpans.plans(media, listOf(ExportSpan(3.0, 6.0), ExportSpan(9.0, 12.0)))

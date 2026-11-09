@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 package app.steampoweredplayer.ui
 
+import android.content.ClipData
 import android.content.Intent
 import android.net.Uri
 import android.text.format.DateUtils
@@ -95,7 +96,12 @@ private fun open(context: android.content.Context, uri: String) {
     context.startActivity(Intent(Intent.ACTION_VIEW).setDataAndType(Uri.parse(uri), "video/mp4").addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION))
 }
 
-private fun share(context: android.content.Context, uri: String, name: String) {
-    val send = Intent(Intent.ACTION_SEND).setType("video/mp4").putExtra(Intent.EXTRA_STREAM, Uri.parse(uri)).addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+private fun share(context: android.content.Context, uri: String, name: String) = shareFile(context, uri, name)
+
+/** The share sheet for a finished export. The clip data gives the sheet the file's name. */
+fun shareFile(context: android.content.Context, uri: String, name: String) {
+    val stream = Uri.parse(uri)
+    val send = Intent(Intent.ACTION_SEND).setType("video/mp4").putExtra(Intent.EXTRA_STREAM, stream).putExtra(Intent.EXTRA_TITLE, name).addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+    send.clipData = ClipData(name, arrayOf("video/mp4"), ClipData.Item(stream))
     context.startActivity(Intent.createChooser(send, name))
 }
