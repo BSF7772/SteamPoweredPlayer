@@ -17,6 +17,7 @@ import app.steampoweredplayer.data.Marker
 import app.steampoweredplayer.data.Markers
 import app.steampoweredplayer.data.RecordingDetails
 import app.steampoweredplayer.data.RecordingEntry
+import app.steampoweredplayer.data.RecordingRepository
 import app.steampoweredplayer.data.RemoteFileGone
 import app.steampoweredplayer.data.ServerProfile
 import app.steampoweredplayer.data.SessionMedia
@@ -140,6 +141,8 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
     private var lastUiPosition = Double.NaN
     private var trick: TrickplayIndex? = null
     private var trickDir: File? = null
+    private var openedAt = 0L
+    private var reloadRetried = false
     private var speedBytes = 0L
     private var speedTime = 0L
     private var syncJob: Job? = null
@@ -151,6 +154,7 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
     /** Opens a recording once; a rotation keeps what's there. */
     fun open(profile: ServerProfile, entry: RecordingEntry, layout: LibraryLayout?, fromScan: Boolean, title: String, startAt: Double?) {
         if (this.entry != null) return
+        openedAt = android.os.SystemClock.elapsedRealtime()
         this.profile = profile
         this.entry = entry
         libraryKey = DownloadRoutes.libraryKey(profile)
@@ -178,13 +182,14 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
         val chunkCache = withContext(Dispatchers.IO) { Downloads.cache(app) }
         cache = chunkCache
         // What's stored opens at once and offline; the share then says what changed.
-        val loaded = withContext(Dispatchers.IO) {
+        val stored = withContext(Dispatchers.IO) { repo.stored(entry.key) }
+        val loaded = stored ?: withContext(Dispatchers.IO) {
             try {
                 repo.load(entry, checkHeads = fromScan)
             } catch (e: RemoteFileGone) {
-                repo.stored(entry.key) ?: throw IOException("Steam no longer has this recording.")
+                throw IOException("Steam no longer has this recording.")
             } catch (e: IOException) {
-                repo.stored(entry.key) ?: throw IOException("Can't reach the server, and this recording hasn't been opened on this phone yet.")
+                throw IOException("Can't reach the server, and this recording hasn't been opened on this phone yet.")
             }
         }
         details = loaded
@@ -193,15 +198,7 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
         if (media.chunkCount == 0) throw IOException("Steam no longer has this recording.")
         full = media
         frameTables = FrameTables(folder)
-        val markerSet = withContext(Dispatchers.IO) { repo.markers(loaded) }
-        val visible = Markers.place(markerSet.markers, media).visible
-            .map { MarkerUi(it, MarkerKinds.classify(it.entry)) }.filter { MarkerKinds.showOnLane(it.kind) }
-        withContext(Dispatchers.IO) {
-            repo.trickplay(entry.key)?.let {
-                trick = TrickplayIndex(it, media.axisShiftSeconds)
-                trickDir = repo.trickDir(entry.key)
-            }
-        }
+        val visible = withContext(Dispatchers.IO) { markersAndTrickplay(repo, loaded, media) }
         val bytesPerSecond = if (entry.durationSeconds > 0) entry.sizeBytes / entry.durationSeconds else 0.0
         val encoders = withContext(Dispatchers.Default) { DeviceEncoders.list() }
         _ui.update {
@@ -222,6 +219,36 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
         waitingAt = target
         fetch(media.chunkAt(target).toInt())
         startWhenPossible()
+        if (stored != null) {
+            viewModelScope.launch(Dispatchers.IO) { refreshFromShare(repo, entry, fromScan, folder) }
+        }
+    }
+
+    /** The share's newer facts about a recording that's already open: Steam may have trimmed it, and the desktop may have made its markers or thumbnails since. */
+    private suspend fun refreshFromShare(repo: RecordingRepository, entry: RecordingEntry, fromScan: Boolean, folder: File) {
+        val fresh = try {
+            repo.load(entry, checkHeads = fromScan)
+        } catch (_: IOException) {
+            return                                                                    // offline, or gone from the share: what's on the phone still plays
+        }
+        val media = fresh.media(folder.path)
+        if (media.chunkCount == 0) return
+        details = fresh
+        full = media
+        val visible = markersAndTrickplay(repo, fresh, media)
+        withContext(Dispatchers.Main) {
+            _ui.update { it.copy(start = media.startSeconds, end = media.endSeconds, markers = visible) }
+            publishDownloaded()
+        }
+    }
+
+    private fun markersAndTrickplay(repo: RecordingRepository, d: RecordingDetails, media: SessionMedia): List<MarkerUi> {
+        repo.trickplay(d.key)?.let {
+            trick = TrickplayIndex(it, media.axisShiftSeconds)
+            trickDir = repo.trickDir(d.key)
+        }
+        return Markers.place(repo.markers(d).markers, media).visible
+            .map { MarkerUi(it, MarkerKinds.classify(it.entry)) }.filter { MarkerKinds.showOnLane(it.kind) }
     }
 
     private fun refreshAvailable(c: LocalChunkCache, folder: File, media: SessionMedia) {
@@ -387,15 +414,28 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     private fun onReloaded(target: Double) {
-        _ui.update { it.copy(position = target, decoder = engine?.hwdecCurrent()) }
+        if (openedAt != 0L) {
+            Log.i(TAG, "first frame ${android.os.SystemClock.elapsedRealtime() - openedAt} ms after opening, ${availableSnapshot().size} chunks here")
+            openedAt = 0
+        }
+        reloadRetried = false
+        // A load that finishes while the playhead waits for another chunk says nothing about where the playhead is.
+        _ui.update { it.copy(position = if (waitingAt == null) target else it.position, error = null, decoder = engine?.hwdecCurrent()) }
     }
 
     private fun onReloadFailed(failure: Exception) {
         Log.w(TAG, "reload failed: ${failure.javaClass.simpleName}")
+        val s = session
+        if (s != null && !reloadRetried) {                                            // a slow load isn't a broken recording: once more before saying so
+            reloadRetried = true
+            s.reload(s.currentPosition, ReloadCause.Seek)
+            return
+        }
         _ui.update { it.copy(error = "Couldn't play this part: ${failure.message}") }
     }
 
     private fun onPosition(t: Double) {
+        if (waitingAt != null) return
         if (abs(t - lastUiPosition) >= POSITION_STEP || lastUiPosition.isNaN()) {
             lastUiPosition = t
             _ui.update { it.copy(position = t, atEnd = false) }
@@ -704,7 +744,18 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
         if (entry != null && !ui.loading) updateEdit { it.copy(resumeSeconds = ui.position.takeIf { p -> p < ui.end - 2 }) }
     }
 
+    /** A long recording's window of chunks was only for watching: leaving stops it, unless it's kept offline or an export is waiting for those chunks. A small recording finishes. */
+    private fun stopWatchingFetch() {
+        val e = entry ?: return
+        val media = full ?: return
+        if (FetchPolicy.selection(media, e.sizeBytes, media.firstChunk ?: 1).size >= media.chunkCount) return
+        if (cache?.isPinned(libraryKey, e.key) == true) return
+        val exporting = Exports.active.value?.request?.recording == e.key || Exports.queued.value.any { it.recording == e.key }
+        if (!exporting) Downloads.cancel(getApplication(), e.key)
+    }
+
     override fun onCleared() {
+        stopWatchingFetch()
         saveResume()
         syncJob?.cancel()
         session?.close()

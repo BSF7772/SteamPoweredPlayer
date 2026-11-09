@@ -271,6 +271,26 @@ class PlaybackSessionTest {
         assertTrue(s.isLoopEngaged)
     }
 
+    @Test fun a_pause_during_a_load_outlives_the_load() = runBlocking {
+        val all = frames(4)
+        val real = FakeEngine(all)
+        lateinit var s: PlaybackSession
+        var pauseDuringLoad = false
+        val engine = object : PlayerEngine by real {
+            override suspend fun load(edl: String, startSeconds: Double, play: Boolean, endSeconds: Double?): Boolean {
+                if (pauseDuringLoad) s.setPause(true)
+                return real.load(edl, startSeconds, play, endSeconds)
+            }
+        }
+        s = plain(engine)
+        s.open(media(4), 1.0, play = true).ok()
+        pauseDuringLoad = true
+        val before = real.pauseCalls
+        s.seek(5.0).ok()
+        assertTrue(s.isPaused)
+        assertTrue("told the engine {real.pauseCalls - before} times", real.pauseCalls - before >= 2)   // once when asked, once after the load that started playing
+    }
+
     @Test fun each_load_says_whether_to_play() = runBlocking {
         val engine = FakeEngine(frames(4))
         val s = plain(engine)

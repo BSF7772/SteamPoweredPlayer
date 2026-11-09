@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 package app.steampoweredplayer.ui
 
+import android.app.Application
 import android.graphics.BitmapFactory
 import android.text.format.Formatter
 import android.view.SurfaceHolder
@@ -67,6 +68,9 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.lifecycle.compose.LifecycleEventEffect
 import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.ViewModelProvider
+import androidx.lifecycle.ViewModelStore
+import androidx.lifecycle.ViewModelStoreOwner
 import androidx.lifecycle.viewmodel.compose.viewModel
 import app.steampoweredplayer.data.RecordingEntry
 import app.steampoweredplayer.data.ServerProfile
@@ -92,7 +96,16 @@ private enum class Panel { None, Edit, Sync, Export }
 
 @Composable
 fun PlayerScreen(profile: ServerProfile, entry: RecordingEntry, title: String, library: LibraryUi, askForNotifications: () -> Unit, onBack: () -> Unit) {
-    val vm: PlayerViewModel = viewModel(key = "player-" + entry.relativeFolder)
+    // One player per opening of this screen: leaving it closes mpv and stops what it was fetching. Rotation keeps it, as the activity handles that itself.
+    val application = LocalContext.current.applicationContext as Application
+    val store = remember(entry.relativeFolder) { ViewModelStore() }
+    DisposableEffect(store) { onDispose { store.clear() } }
+    val owner = remember(store) {
+        object : ViewModelStoreOwner {
+            override val viewModelStore = store
+        }
+    }
+    val vm: PlayerViewModel = viewModel(owner, factory = ViewModelProvider.AndroidViewModelFactory.getInstance(application))
     val ui by vm.ui.collectAsState()
     LaunchedEffect(entry.relativeFolder) {
         vm.open(profile, entry, library.layout, library.source == app.steampoweredplayer.data.LibrarySource.Scan, title, null)
@@ -219,10 +232,13 @@ private fun VideoArea(vm: PlayerViewModel, ui: PlayerUi, scrub: Double?, modifie
                 Text(
                     if (ui.waitingOffline) {
                         "Can't reach the server: waiting for a network"
-                    } else if (ui.downloadBytesPerSecond > 0) {
-                        "Downloading ${ui.downloadPercent} % · ${Formatter.formatShortFileSize(context, ui.downloadBytesPerSecond)}/s"
                     } else {
-                        "Downloading ${ui.downloadPercent} %"
+                        // A long recording only fetches what's ahead of the playhead, so its share of the whole can sit at 0 %.
+                        listOfNotNull(
+                            "Downloading",
+                            ui.downloadPercent.takeIf { it > 0 }?.let { "$it %" },
+                            ui.downloadBytesPerSecond.takeIf { it > 0 }?.let { "${Formatter.formatShortFileSize(context, it)}/s" },
+                        ).joinToString(" · ")
                     },
                     color = Color.White,
                 )
@@ -267,7 +283,7 @@ private fun TrickTile(sheet: File, tile: TrickplayTile) {
         }
     }
     val image = bitmap
-    Canvas(Modifier.size(tile.width.dp, tile.height.dp)) {
+    Canvas(Modifier.size(BUBBLE_WIDTH, BUBBLE_WIDTH * tile.height.toFloat() / tile.width.coerceAtLeast(1))) {
         if (image != null) {
             drawImage(image, IntOffset(tile.x, tile.y), IntSize(tile.width, tile.height), dstSize = IntSize(size.width.toInt(), size.height.toInt()))
         }
@@ -350,7 +366,7 @@ private fun Controls(vm: PlayerViewModel, ui: PlayerUi) {
     Row(Modifier.fillMaxWidth().padding(vertical = 2.dp), horizontalArrangement = Arrangement.SpaceEvenly, verticalAlignment = Alignment.CenterVertically) {
         ControlButton("⏮") { vm.previousEvent() }
         ControlButton("◁|") { vm.frameBack() }
-        ControlButton(if (ui.atEnd) "↻" else if (ui.paused) "▶" else "⏸", big = true) { vm.togglePause() }
+        ControlButton(if (ui.atEnd) "↻" else if (ui.paused) "▶" else "❚❚", big = true) { vm.togglePause() }
         ControlButton("|▷") { vm.frameForward() }
         ControlButton("⏭") { vm.nextEvent() }
         ControlButton(if (ui.loopA == null) "A" else if (ui.loopB == null) "B" else "A✕B") { vm.loopButton() }
@@ -368,7 +384,7 @@ private fun ControlButton(label: String, big: Boolean = false, onClick: () -> Un
         Modifier.size(if (big) 56.dp else 44.dp).clickable(onClick = onClick),
         contentAlignment = Alignment.Center,
     ) {
-        Text(label, color = Color.White, style = if (big) MaterialTheme.typography.headlineMedium else MaterialTheme.typography.titleMedium)
+        Text(label, color = Color.White, style = if (big) MaterialTheme.typography.titleLarge else MaterialTheme.typography.titleMedium)
     }
 }
 
@@ -525,6 +541,7 @@ private fun TierTile(emoji: String, name: String, tagline: String, selected: Boo
 }
 
 private val SIDE_PANEL_WIDTH = 340.dp
+private val BUBBLE_WIDTH = 128.dp
 private const val MAX_LISTED_EVENTS = 200
 private const val MAX_STEM = 120
 private const val FLASH_MILLIS = 700L

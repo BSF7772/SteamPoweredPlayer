@@ -180,7 +180,7 @@ class MpvEngine(context: Context, decode: DecodeMode) : PlayerEngine {
     private companion object {
         const val TAG = "SppMpv"
         const val LOG_WARN = 30
-        const val LOAD_TIMEOUT_MILLIS = 10_000L
+        const val LOAD_TIMEOUT_MILLIS = 20_000L
         const val DEMUXER_FORWARD_BYTES = 48L * 1024 * 1024
         const val DEMUXER_BACK_BYTES = 16L * 1024 * 1024
     }

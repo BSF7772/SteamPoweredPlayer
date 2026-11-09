@@ -271,6 +271,9 @@ class PlaybackSession(
             if (pending == null) position = if (shown != null && target == req.position) shown else target   // a queued request owns the position until it runs
         }
         if (!engine.load(script, target, play, end)) throw IOException("mpv did not deliver a first frame for the reload.")
+        // The user may have paused or resumed while it loaded; a load only knows what was wanted when it started.
+        val wanted = synchronized(gate) { userPaused }
+        if (wanted == play) engine.setPause(wanted)
 
         if (req.back > 0 && shown == null) target = stepPastSameFrame(req, target, end)
 
