@@ -137,8 +137,17 @@ class ExportWorker(context: Context, params: WorkerParameters) : CoroutineWorker
         val plan = ExportLadder.plan(tier, request.engine, DeviceEncoders.list(), width, height, fps, seconds, request.targetMegabytes)
             ?: throw IOException("This phone has no encoder for ${tier.name} at ${width}x$height on the chosen engine.")
         val edits = ReEncodeEdits(request.speed, request.volumePercent, request.muted, request.audioDelay)
+        val encoder = ReEncoder(app, AppSettings(app).fastReencode)
         withContext(Dispatchers.IO) {
-            ReEncoder(app, AppSettings(app).fastReencode).run(media, spans, plan, edits, File(work, "parts"), output) { f -> stageBlocking(request, "Encoding", 0.2 + f * 0.79) }
+            encoder.run(media, spans, plan, edits, File(work, "parts"), output) { f -> stageBlocking(request, "Encoding", 0.2 + f * 0.79) }
+            val megabytes = request.targetMegabytes
+            if (tier.id == ExportLadder.TARGET_ID && megabytes != null) {
+                ExportLadder.retryForSize(plan, (megabytes * 1024 * 1024).toLong(), output.length())?.let { again ->
+                    Log.i(TAG, "over the size budget: encoding again at ${again.videoBitsPerSecond} b/s")
+                    output.delete()
+                    encoder.run(media, spans, again, edits, File(work, "parts"), output) { f -> stageBlocking(request, "Fitting the size", 0.2 + f * 0.79) }
+                }
+            }
         }
     }
 

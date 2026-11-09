@@ -76,6 +76,15 @@ class ExportLadderTest {
         assertTrue("$bytes", bytes in (9L * 1024 * 1024)..(10L * 1024 * 1024))
     }
 
+    @Test fun an_overshoot_of_fit_to_size_gets_a_lower_rate_and_a_hit_gets_none() {
+        val p = plan(ExportLadder.TARGET_ID, target = 2.0)!!
+        val budget = 2L * 1024 * 1024
+        assertNull(ExportLadder.retryForSize(p, budget, budget))
+        assertNull(ExportLadder.retryForSize(p, budget, budget * 102 / 100))
+        val again = ExportLadder.retryForSize(p, budget, budget * 3 / 2)!!
+        assertEquals(p.videoBitsPerSecond * 2 / 3 * 0.95, again.videoBitsPerSecond.toDouble(), 10.0)
+    }
+
     @Test fun scaling_keeps_the_shape_on_even_numbers() {
         assertEquals(1280 to 720, ExportLadder.scaled(2560, 1440, 720))
         assertEquals(1720 to 720, ExportLadder.scaled(3440, 1440, 720))

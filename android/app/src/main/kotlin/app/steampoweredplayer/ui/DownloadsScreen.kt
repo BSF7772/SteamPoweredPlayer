@@ -48,6 +48,7 @@ fun DownloadsScreen(library: LibraryUi) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val progress by Downloads.progress.collectAsState()
+    val notice by Downloads.meteredNotice.collectAsState()
     val infos by remember { WorkManager.getInstance(context).getWorkInfosByTagFlow(Downloads.TAG_ALL) }.collectAsState(emptyList())
     var version by remember { mutableIntStateOf(0) }
     var recordings by remember { mutableStateOf<List<LocalChunkCache.CachedRecording>>(emptyList()) }
@@ -70,7 +71,6 @@ fun DownloadsScreen(library: LibraryUi) {
 
     LazyColumn(Modifier.fillMaxSize().safeDrawingPadding(), contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
         item { BrandHeader("Downloads", "${Formatter.formatShortFileSize(context, total)} on this phone of $cap GB") }
-        val notice = Downloads.meteredNotice.value
         if (notice) item { MeteredNotice() }
         if (queued.isNotEmpty()) item { Text("Queue", style = MaterialTheme.typography.titleSmall) }
         items(queued, key = { "q" + it.first }) { (recording, state) ->

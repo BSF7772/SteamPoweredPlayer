@@ -8,7 +8,8 @@
   Needs a running emulator (tools\emu.ps1 start), the debug app installed with a saved server, and a recording big enough to outlast the cut
   (about a minute: `adb emu network speed` doesn't slow SMB here). Fails with exit code 1 when any file differs or is missing.
 
-.PARAMETER Folder     Media folder inside the share, with forward slashes (for example .../video/bg_...).
+.PARAMETER Folder     Media folder inside the share, with forward slashes (for example .../video/bg_...): what the download is compared with.
+.PARAMETER Recording  The recording as the library names it (clips/clip_... or video/bg_...). The script opens it in the debug app, which fetches it: keep it under 1 GB, or only the part ahead of the playhead comes.
 .PARAMETER ShareRoot  The share's folder on this PC, to compare with.
 .PARAMETER Cut        none, network (off for 25 s), kill (the app's process), or unreachable (firewall the host; needs a debuggable emulator image).
 .PARAMETER CutAfterSeconds  How long the transfer runs before the cut.
@@ -16,6 +17,7 @@
 [CmdletBinding()]
 param(
     [Parameter(Mandatory)][string]$Folder,
+    [Parameter(Mandatory)][string]$Recording,
     [Parameter(Mandatory)][string]$ShareRoot,
     [ValidateSet('none', 'network', 'kill', 'unreachable')][string]$Cut = 'none',
     [int]$CutAfterSeconds = 15,
@@ -27,14 +29,17 @@ $ErrorActionPreference = 'Stop'
 . (Join-Path $PSScriptRoot 'env.ps1')
 
 $pkg = 'app.steampoweredplayer'
-$receiver = "$pkg/.net.DevDownloadReceiver"
-$recording = $Folder.TrimEnd('/').Split('/')[-1]
+$recordingName = $Recording.TrimEnd('/').Split('/')[-1]
 $source = Join-Path $ShareRoot ($Folder -replace '/', '\')
 if (-not (Test-Path -LiteralPath $source -PathType Container)) { throw "source folder not found: $source" }
 
 function Get-ChunkDir {
-    $lib = adb shell run-as $pkg ls no_backup/chunks | Where-Object { $_ -match '^[0-9a-f-]{36}$' } | Select-Object -First 1
-    "no_backup/chunks/$lib/$recording"
+    # Cached under the library's id once the app knows it, under the profile's before that.
+    foreach ($lib in (adb shell run-as $pkg ls no_backup/chunks | Where-Object { $_ -match '^[0-9a-f-]{36}$' })) {
+        $hit = adb shell run-as $pkg ls "no_backup/chunks/$lib" | Where-Object { $_ -eq $recordingName }
+        if ($hit) { return "no_backup/chunks/$lib/$recordingName" }
+    }
+    return ''
 }
 
 function Clear-Download {
@@ -71,8 +76,8 @@ function Show-Transitions {
 Clear-Download
 adb logcat -c
 Open-App
-Start-Sleep -Seconds 2
-adb shell am broadcast -n $receiver --es folder $Folder | Out-Null
+Start-Sleep -Seconds 6     # the library has to be there for the link to find the recording
+adb shell am start -a android.intent.action.VIEW -d "spp://recording/$Recording" $pkg | Out-Null
 
 if ($Cut -ne 'none') {
     Start-Sleep -Seconds $CutAfterSeconds

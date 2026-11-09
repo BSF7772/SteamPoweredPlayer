@@ -108,6 +108,16 @@ object ExportLadder {
         return max(MIN_BITS.toDouble(), total * 0.97 - audioKbps * 1000).toLong()
     }
 
+    /**
+     * A second try for Fit to size: phone encoders treat a bitrate as a wish, so the first file can overshoot. Null when it's within 3 % over the budget. The new
+     * rate aims 5 % under the budget, in proportion to what the first try really produced.
+     */
+    fun retryForSize(plan: EncodePlan, targetBytes: Long, actualBytes: Long): EncodePlan? {
+        if (actualBytes <= targetBytes * 103 / 100 || actualBytes <= 0) return null
+        val scaled = (plan.videoBitsPerSecond.toDouble() * targetBytes / actualBytes * 0.95).toLong()
+        return plan.copy(videoBitsPerSecond = scaled.coerceAtLeast(MIN_BITS).toInt())
+    }
+
     /** What the file will weigh. */
     fun estimateBytes(plan: EncodePlan, outputSeconds: Double): Long = ((plan.videoBitsPerSecond + plan.audioBitsPerSecond) / 8.0 * outputSeconds).toLong()
 

@@ -19,13 +19,14 @@ import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
@@ -107,15 +108,14 @@ fun PlayerScreen(profile: ServerProfile, entry: RecordingEntry, title: String, l
     var panel by remember { mutableStateOf(Panel.None) }
     var scrub by remember { mutableStateOf<Double?>(null) }
 
-    Column(Modifier.fillMaxSize().background(Color.Black).safeDrawingPadding()) {
+    val topBar: @Composable () -> Unit = {
         Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp), verticalAlignment = Alignment.CenterVertically) {
             TextButton(onBack) { Text("‹ Back", color = Color.White) }
             Text(ui.title, Modifier.weight(1f), color = Color.White, maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.titleSmall)
             TextButton({ vm.togglePin() }) { Text(if (ui.pinned) "📌 Kept" else "📌 Keep", color = Color.White) }
         }
-        VideoArea(vm, ui, scrub) { scrub = it }
-        Timeline(vm, ui) { scrub = it }
-        Controls(vm, ui)
+    }
+    val panels: @Composable (Modifier) -> Unit = { modifier ->
         ui.error?.let { Text(it, Modifier.padding(8.dp), color = Brand.Live, style = MaterialTheme.typography.bodySmall) }
         Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
             PanelTab("✂️ Edit", panel == Panel.Edit) { panel = if (panel == Panel.Edit) Panel.None else Panel.Edit }
@@ -125,15 +125,36 @@ fun PlayerScreen(profile: ServerProfile, entry: RecordingEntry, title: String, l
                 vm.loadSourceFormat()
             }
         }
-        Column(
-            Modifier.weight(1f).fillMaxWidth().verticalScroll(rememberScrollState()).padding(horizontal = 12.dp, vertical = 8.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
+        Column(modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             when (panel) {
                 Panel.None -> EventsPanel(vm, ui)
                 Panel.Edit -> EditPanel(vm, ui)
                 Panel.Sync -> SoundPanel(vm, ui)
                 Panel.Export -> ExportPanel(vm, ui, entry, library)
+            }
+        }
+    }
+    BoxWithConstraints(Modifier.fillMaxSize().background(Color.Black).safeDrawingPadding()) {
+        if (maxWidth > maxHeight) {
+            // Sideways: the picture as big as the height allows, everything else scrolling beside it.
+            Row(Modifier.fillMaxSize()) {
+                Box(Modifier.weight(1f).fillMaxHeight(), contentAlignment = Alignment.Center) {
+                    VideoArea(vm, ui, scrub, Modifier.fillMaxHeight().aspectRatio(16f / 9f, matchHeightConstraintsFirst = true)) { scrub = it }
+                }
+                Column(Modifier.width(SIDE_PANEL_WIDTH).fillMaxHeight().verticalScroll(rememberScrollState())) {
+                    topBar()
+                    Timeline(vm, ui) { scrub = it }
+                    Controls(vm, ui)
+                    panels(Modifier)
+                }
+            }
+        } else {
+            Column(Modifier.fillMaxSize()) {
+                topBar()
+                VideoArea(vm, ui, scrub, Modifier.fillMaxWidth().aspectRatio(16f / 9f)) { scrub = it }
+                Timeline(vm, ui) { scrub = it }
+                Controls(vm, ui)
+                panels(Modifier.weight(1f).verticalScroll(rememberScrollState()))
             }
         }
     }
@@ -145,12 +166,12 @@ private fun PanelTab(text: String, selected: Boolean, onClick: () -> Unit) {
 }
 
 @Composable
-private fun VideoArea(vm: PlayerViewModel, ui: PlayerUi, scrub: Double?, onScrub: (Double?) -> Unit) {
+private fun VideoArea(vm: PlayerViewModel, ui: PlayerUi, scrub: Double?, modifier: Modifier, onScrub: (Double?) -> Unit) {
     var width by remember { mutableStateOf(1) }
     var dragFrom by remember { mutableStateOf(0.0) }
     var doubleTapFlash by remember { mutableStateOf<String?>(null) }
     Box(
-        Modifier.fillMaxWidth().aspectRatio(16f / 9f).background(Color.Black)
+        modifier.background(Color.Black)
             .onSizeChanged { width = it.width }
             .pointerInput(Unit) {
                 detectTapGestures(
@@ -503,6 +524,7 @@ private fun TierTile(emoji: String, name: String, tagline: String, selected: Boo
     }
 }
 
+private val SIDE_PANEL_WIDTH = 340.dp
 private const val MAX_LISTED_EVENTS = 200
 private const val MAX_STEM = 120
 private const val FLASH_MILLIS = 700L

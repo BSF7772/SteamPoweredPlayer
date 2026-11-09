@@ -2,6 +2,7 @@
 package app.steampoweredplayer
 
 import android.content.Intent
+import android.content.pm.ActivityInfo
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -32,6 +33,10 @@ class MainActivity : ComponentActivity() {
     private fun requestIn(intent: Intent?): OpenRequest? {
         val uri = intent?.data ?: return null
         if (uri.scheme != "spp" || uri.host != "recording") return null
+        when (uri.getQueryParameter("orientation")) {
+            "landscape" -> requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE
+            "portrait" -> requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
+        }
         return OpenRequest(uri.path.orEmpty().trim('/'), uri.getQueryParameter("action"))
     }
 }
