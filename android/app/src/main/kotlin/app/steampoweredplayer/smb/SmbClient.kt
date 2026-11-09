@@ -68,6 +68,16 @@ object SmbClient {
         }
     }
 
+    /** The server's share names, as the signed-in user may see them. Needs only the host and the credentials. */
+    @Throws(IOException::class)
+    fun shares(profile: ServerProfile, password: String): List<String> = try {
+        val host = if (profile.host.contains(':') && !profile.host.startsWith("[")) "[${profile.host}]" else profile.host
+        val port = if (profile.port == ServerProfile.DEFAULT_PORT) "" else ":${profile.port}"
+        SmbFile("smb://$host$port/", context(profile, password)).use { server -> server.list().toList() }
+    } catch (e: CIFSException) {
+        throw IOException(e.message ?: e.javaClass.simpleName, e)
+    }
+
     /**
      * Negotiated dialect, cipher and signing. jcifs 3.0.4 has no public API for them and its impl classes are package-private, so this uses
      * reflection, which the pinned version keeps stable. Replace it when upstream has an accessor.

@@ -3,8 +3,11 @@ package app.steampoweredplayer
 
 import android.content.Intent
 import android.content.pm.ActivityInfo
+import android.graphics.Color
+import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
+import androidx.activity.SystemBarStyle
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.runtime.getValue
@@ -19,7 +22,10 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        enableEdgeToEdge()
+        // Our bars draw behind the system's: no scrim, or three-button navigation gets a darker strip of its own under the app's navigation bar.
+        val clear = SystemBarStyle.auto(Color.TRANSPARENT, Color.TRANSPARENT)
+        enableEdgeToEdge(statusBarStyle = clear, navigationBarStyle = clear)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) window.isNavigationBarContrastEnforced = false
         openRequest = requestIn(intent)
         setContent { SppTheme { AppRoot(openRequest) { openRequest = null } } }
     }

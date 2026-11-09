@@ -7,14 +7,21 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import app.steampoweredplayer.AppSettings
 import app.steampoweredplayer.Library
+import app.steampoweredplayer.data.ConnectionDebounce
+import app.steampoweredplayer.data.ConnectionPhase
 import app.steampoweredplayer.data.GameEntry
 import app.steampoweredplayer.data.LibraryIndexStatus
 import app.steampoweredplayer.data.LibraryLayout
 import app.steampoweredplayer.data.LibrarySnapshot
 import app.steampoweredplayer.data.LibrarySource
 import app.steampoweredplayer.data.RecordingEntry
+import app.steampoweredplayer.data.RemoteFileGone
 import app.steampoweredplayer.data.ServerProfile
 import app.steampoweredplayer.data.chooseEndpoint
+import app.steampoweredplayer.data.key
+import app.steampoweredplayer.net.DownloadRequest
+import app.steampoweredplayer.net.DownloadRoutes
+import app.steampoweredplayer.net.Downloads
 import app.steampoweredplayer.net.LinkMonitor
 import app.steampoweredplayer.smb.SmbClient
 import java.io.IOException
@@ -42,8 +49,12 @@ data class LibraryUi(
     val layout: LibraryLayout? = null,
     val games: List<GameRow> = emptyList(),
     val refreshing: Boolean = false,
+    val connection: ConnectionPhase = ConnectionPhase.Connecting,
+    /** Something the share itself answered, or that needs the user. A lost connection isn't one: that's [connection]. */
     val message: String? = null,
     val artVersion: Int = 0,
+    /** Goes up when what's kept on the phone changed. */
+    val keptVersion: Int = 0,
 )
 
 /** The library screen's state: the first reachable profile, the index, and change notify on the share, which replaces polling. */
@@ -55,9 +66,10 @@ class LibraryViewModel(app: Application) : AndroidViewModel(app) {
     private var watcher: Job? = null
     private var refreshJob: Job? = null
     private val link = LinkMonitor(app)
+    private val debounce = ConnectionDebounce { android.os.SystemClock.elapsedRealtime() }
 
     init {
-        viewModelScope.launch { link.changes.collect { refresh() } }
+        viewModelScope.launch { link.changes.collect { refresh(fromUser = true) } }
         reload()
     }
 
@@ -69,10 +81,12 @@ class LibraryViewModel(app: Application) : AndroidViewModel(app) {
             if (profiles.isEmpty()) {
                 library = null
                 watcher?.cancel()
+                refreshJob?.cancel()
                 _ui.value = LibraryUi()
                 return@launch
             }
             val preferred = profiles.firstOrNull { it.id == settings.activeProfileId }
+            preferred?.let { p -> _ui.update { it.copy(profile = p) } }                // the name is there at once, while the probes below take their time
             val chosen = withContext(Dispatchers.IO) {
                 preferred?.takeIf { SmbClient.reachable(it) } ?: chooseEndpoint(profiles) { SmbClient.reachable(it) } ?: preferred ?: profiles.first()
             }
@@ -83,29 +97,47 @@ class LibraryViewModel(app: Application) : AndroidViewModel(app) {
     fun open(profile: ServerProfile) {
         settings.activeProfileId = profile.id
         val lib = Library(getApplication(), profile)
-        if (library?.profile?.id != profile.id) watcher?.cancel()                     // change notify follows the server in use
+        if (library?.profile?.id != profile.id) {
+            watcher?.cancel()                                                         // change notify follows the server in use
+            refreshJob?.cancel()                                                      // a refresh of the old server says nothing about this one
+        }
         library = lib
-        _ui.update { it.copy(profile = profile) }
-        viewModelScope.launch(Dispatchers.IO) { lib.index()?.cached()?.let(::publish) }
+        debounce.begin()
+        _ui.update { it.copy(profile = profile, connection = debounce.phase, message = null) }
+        viewModelScope.launch(Dispatchers.IO) { lib.index()?.cached()?.let { publish(it, keepConnection = true) } }
         refresh()
     }
 
-    fun refresh() {
+    /** [fromUser] is a deliberate try: the refresh button, Retry, or a network that just came back, which gets a failed connection a fresh window. */
+    fun refresh(fromUser: Boolean = false) {
         val lib = library ?: return
         if (refreshJob?.isActive == true) return
+        if (fromUser && debounce.phase == ConnectionPhase.Failed) {
+            debounce.begin()
+            _ui.update { it.copy(connection = debounce.phase) }
+        }
         refreshJob = viewModelScope.launch {
             _ui.update { it.copy(refreshing = true) }
             val index = withContext(Dispatchers.IO) { lib.index() }                   // opens the vault and makes the SMB context
             if (index == null) {
-                _ui.update { it.copy(refreshing = false, message = "No password is saved for this server.") }
+                debounce.succeeded()
+                _ui.update { it.copy(refreshing = false, connection = debounce.phase, message = "No password is saved for this server.") }
                 return@launch
             }
-            val snapshot = withContext(Dispatchers.IO) { index.refresh() }
-            publish(snapshot)
+            var snapshot = withContext(Dispatchers.IO) { index.refresh() }
+            // Reachable-looking failures come and go during a network switch: inside the window they're just a connection still coming up.
+            while (snapshot.unreachable && debounce.failed() == ConnectionPhase.Connecting) {
+                _ui.update { it.copy(connection = debounce.phase) }
+                Log.i(TAG, "not connected yet")
+                delay(CONNECT_RETRY_MILLIS)
+                snapshot = withContext(Dispatchers.IO) { index.refresh() }
+            }
+            if (!snapshot.unreachable) debounce.succeeded()
+            publish(snapshot, keepConnection = false)
             _ui.update { it.copy(refreshing = false) }
             val layout = snapshot.layout
             val found = snapshot.index
-            if (found != null && layout != null) {
+            if (found != null && layout != null && !snapshot.unreachable) {
                 val profile = withContext(Dispatchers.IO) { Library.rememberLibraryId(getApplication(), lib.profile, found.libraryId) }
                 if (profile != lib.profile) {
                     library = Library(getApplication(), profile)
@@ -142,7 +174,7 @@ class LibraryViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    private fun publish(snapshot: LibrarySnapshot) {
+    private fun publish(snapshot: LibrarySnapshot, keepConnection: Boolean) {
         val index = snapshot.index
         val rows = if (index == null) {
             emptyList()
@@ -154,7 +186,54 @@ class LibraryViewModel(app: Application) : AndroidViewModel(app) {
             }.sortedByDescending { it.newest }
         }
         _ui.update {
-            it.copy(source = snapshot.source, status = snapshot.status, layout = snapshot.layout ?: it.layout, games = rows.ifEmpty { it.games }, message = snapshot.message)
+            it.copy(
+                source = snapshot.source, status = snapshot.status, layout = snapshot.layout ?: it.layout, games = rows.ifEmpty { it.games },
+                message = if (keepConnection) it.message else snapshot.message.takeUnless { snapshot.unreachable },
+                connection = if (keepConnection) it.connection else debounce.phase,
+            )
+        }
+    }
+
+    /**
+     * Keeping a recording offline: its original files come to the phone and stay there when the cache needs room. Nothing is re-encoded. Letting go leaves the files where they are,
+     * for the cache to reclaim when it needs to.
+     */
+    fun setKeptOffline(entry: RecordingEntry, keep: Boolean) {
+        val lib = library ?: return
+        val profile = lib.profile
+        val layout = _ui.value.layout
+        viewModelScope.launch(Dispatchers.IO) {
+            val app = getApplication<Application>()
+            val cache = Downloads.cache(app)
+            val libraryKey = DownloadRoutes.libraryKey(profile)
+            if (!keep) {
+                cache.unpin(libraryKey, entry.key)
+            } else {
+                cache.pin(libraryKey, entry.key)
+                try {
+                    val repo = lib.recordings(layout)
+                    val details = repo.stored(entry.key) ?: repo.load(entry, checkHeads = false)
+                    val media = details.media(cache.folderOf(libraryKey, entry.key).path)
+                    Downloads.fetch(app, DownloadRequest(profile.id, entry.key, details.mediaFolder, media.chunks(), media.firstChunk ?: 1))
+                } catch (_: RemoteFileGone) {
+                    cache.unpin(libraryKey, entry.key)
+                    _ui.update { it.copy(message = "Steam no longer has this recording.") }
+                } catch (_: IOException) {
+                    Log.i(TAG, "kept offline, to download when the server is back")
+                }
+            }
+            _ui.update { it.copy(keptVersion = it.keptVersion + 1) }
+        }
+    }
+
+    /** Frees the phone of a recording's files. The recording stays on the server. */
+    fun removeFromPhone(entry: RecordingEntry) {
+        val profile = library?.profile ?: return
+        viewModelScope.launch(Dispatchers.IO) {
+            val app = getApplication<Application>()
+            Downloads.cancel(app, entry.key)
+            Downloads.cache(app).remove(DownloadRoutes.libraryKey(profile), entry.key)
+            _ui.update { it.copy(keptVersion = it.keptVersion + 1) }
         }
     }
 
@@ -166,5 +245,6 @@ class LibraryViewModel(app: Application) : AndroidViewModel(app) {
         const val TAG = "SppLibrary"
         const val SETTLE_MILLIS = 2_000L
         const val RETRY_MILLIS = 60_000L
+        const val CONNECT_RETRY_MILLIS = 2_000L
     }
 }

@@ -13,7 +13,7 @@ class AppSettings(context: Context) {
         set(value) = prefs.edit().putString("decode", value.name).apply()
 
     var cacheGigabytes: Int
-        get() = prefs.getInt("cache_gb", DEFAULT_CACHE_GIGABYTES)
+        get() = prefs.getInt("cache_gb", app.steampoweredplayer.data.CacheLimit.DEFAULT_GIGABYTES)
         set(value) = prefs.edit().putInt("cache_gb", value).apply()
 
     var exportChoice: String
@@ -36,8 +36,4 @@ class AppSettings(context: Context) {
     var activeProfileId: String?
         get() = prefs.getString("active_profile", null)
         set(value) = prefs.edit().putString("active_profile", value).apply()
-
-    private companion object {
-        const val DEFAULT_CACHE_GIGABYTES = 20
-    }
 }

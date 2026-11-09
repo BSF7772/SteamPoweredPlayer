@@ -7,33 +7,40 @@ import android.os.Build
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.consumeWindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
+import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
-import androidx.compose.runtime.collectAsState
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -41,14 +48,19 @@ import app.steampoweredplayer.AppSettings
 import app.steampoweredplayer.data.RecordingEntry
 import app.steampoweredplayer.data.ServerProfile
 import app.steampoweredplayer.export.Exports
-import app.steampoweredplayer.ui.theme.Brand
 
-enum class Tab(val label: String, val emoji: String) { Library("Library", "🎮"), Downloads("Downloads", "⬇️"), Exports("Exports", "🎬"), Settings("Settings", "⚙️") }
+enum class Tab(val label: String, val icon: () -> ImageVector) {
+    Library("Library", { SppIcons.Library }),
+    Downloads("Downloads", { SppIcons.Download }),
+    Exports("Exports", { SppIcons.Movie }),
+    Settings("Settings", { SppIcons.Settings }),
+}
 
 /** A screen above the tabs. */
 sealed interface Route {
     data class Game(val row: GameRow) : Route
-    data class Player(val entry: RecordingEntry, val title: String) : Route
+    data class Player(val entry: RecordingEntry, val title: String, val openExport: Boolean = false) : Route
+    data object ServerEditor : Route
 }
 
 /** A request to open a recording from outside, for the debug build's deep link. */
@@ -59,6 +71,7 @@ fun AppRoot(openRequest: OpenRequest? = null, onOpenRequestHandled: () -> Unit =
     val library: LibraryViewModel = viewModel()
     val servers: ServersViewModel = viewModel()
     val ui by library.ui.collectAsState()
+    val serverState by servers.state.collectAsState()
     var tab by remember { mutableStateOf(Tab.Library) }
     val stack = remember { mutableStateListOf<Route>() }
     val context = LocalContext.current
@@ -68,6 +81,12 @@ fun AppRoot(openRequest: OpenRequest? = null, onOpenRequestHandled: () -> Unit =
         Exports.shareRequests.collect { record ->
             shareFile(context, record.uri ?: return@collect, record.displayName)
         }
+    }
+
+    // The server list changed in the editor: the library follows. Only a real change, or every visit to a tab would look like a reconnect.
+    val serverIds = serverState.profiles.map { it.id }
+    LaunchedEffect(serverState.loaded, serverIds) {
+        if (serverState.loaded && serverIds.toSet() != library.ui.value.profiles.map { it.id }.toSet()) library.reload()
     }
 
     // The notification permission, asked once, when the first thing that shows progress is there to ask for.
@@ -88,62 +107,83 @@ fun AppRoot(openRequest: OpenRequest? = null, onOpenRequestHandled: () -> Unit =
         if (hit != null) {
             stack.clear()
             stack.add(Route.Game(hit.first))
-            stack.add(Route.Player(hit.second, hit.second.title ?: hit.first.game.name))
+            stack.add(Route.Player(hit.second, hit.second.title ?: hit.first.game.name, openExport = request.action == "export"))
             onOpenRequestHandled()
         }
     }
 
     val top = stack.lastOrNull()
-    BackHandler(enabled = top != null) { stack.removeAt(stack.lastIndex) }
+    val pop: () -> Unit = { if (stack.isNotEmpty()) stack.removeAt(stack.lastIndex) }
+    val startAddingServer: () -> Unit = {
+        servers.add()
+        stack.add(Route.ServerEditor)
+    }
+    BackHandler(enabled = top != null) { pop() }
 
     when (top) {
         is Route.Player -> {
             val profile: ServerProfile? = ui.profile
             if (profile == null) {
-                stack.removeAt(stack.lastIndex)
+                LaunchedEffect(Unit) { pop() }
             } else {
-                PlayerScreen(profile, top.entry, top.title, ui, askForNotifications) { stack.removeAt(stack.lastIndex) }
+                PlayerScreen(profile, top.entry, top.title, ui, top.openExport, askForNotifications, onBack = { pop() }, onViewExports = {
+                    stack.clear()
+                    tab = Tab.Exports
+                })
             }
         }
-        is Route.Game -> GameScreen(top.row, ui, library, onBack = { stack.removeAt(stack.lastIndex) }) { entry, title -> stack.add(Route.Player(entry, title)) }
+        is Route.Game -> GameScreen(top.row, ui, library, onBack = { pop() }) { entry, title, export -> stack.add(Route.Player(entry, title, openExport = export)) }
+        Route.ServerEditor -> ServerEditorScreen(servers, onClose = { pop() })
         null -> Scaffold(
             containerColor = MaterialTheme.colorScheme.background,
+            // The top app bars bring their own status bar inset, so the only padding the scaffold gives is the navigation bar's real height.
+            contentWindowInsets = WindowInsets(0),
             bottomBar = {
                 NavigationBar(containerColor = MaterialTheme.colorScheme.surfaceContainer) {
                     Tab.entries.forEach { t ->
-                        NavigationBarItem(selected = t == tab, onClick = { tab = t }, icon = { Text(t.emoji) }, label = { Text(t.label) })
+                        NavigationBarItem(selected = t == tab, onClick = { tab = t }, icon = { Icon(t.icon(), null) }, label = { Text(t.label) })
                     }
                 }
             },
         ) { padding ->
-            Box(Modifier.fillMaxSize().padding(padding)) {
+            Box(Modifier.fillMaxSize().padding(padding).consumeWindowInsets(padding)) {
                 when (tab) {
-                    Tab.Library -> LibraryScreen(ui, library, onOpenGame = { stack.add(Route.Game(it)) }, onAddServer = {
-                        servers.add()
-                        tab = Tab.Settings
-                    })
+                    Tab.Library -> LibraryScreen(ui, library, onOpenGame = { stack.add(Route.Game(it)) }, onAddServer = startAddingServer)
                     Tab.Downloads -> DownloadsScreen(ui)
                     Tab.Exports -> ExportsScreen()
-                    Tab.Settings -> SettingsScreen(library)
+                    Tab.Settings -> SettingsScreen(library, servers, onAddServer = startAddingServer, onEditServer = {
+                        servers.edit(it)
+                        stack.add(Route.ServerEditor)
+                    }, onOpenDownloads = { tab = Tab.Downloads })
                 }
             }
         }
     }
 }
 
-/** The brand's page header. */
+/** The app's top app bar: the same on every screen, with its status bar inset. */
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun BrandHeader(title: String, subtitle: String? = null, modifier: Modifier = Modifier, trailing: @Composable () -> Unit = {}) {
-    Row(
-        modifier.fillMaxWidth().background(Brand.Gradient, MaterialTheme.shapes.large).padding(horizontal = 20.dp, vertical = 16.dp),
-        horizontalArrangement = Arrangement.SpaceBetween,
-    ) {
-        Column(Modifier.weight(1f)) {
-            Text(title, color = Color.White, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold, maxLines = 2)
-            if (subtitle != null) Text(subtitle, color = Color.White.copy(alpha = 0.85f), style = MaterialTheme.typography.bodySmall)
-        }
-        trailing()
-    }
+fun SppTopBar(title: String, subtitle: String? = null, onBack: (() -> Unit)? = null, actions: @Composable () -> Unit = {}) {
+    TopAppBar(
+        title = {
+            Column {
+                Text(title, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                if (subtitle != null) Text(subtitle, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            }
+        },
+        navigationIcon = {
+            if (onBack != null) IconButton(onBack) { Icon(SppIcons.Back, "Back") }
+        },
+        actions = { actions() },
+        colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.background),
+    )
+}
+
+/** A section's heading inside a list. */
+@Composable
+fun SppSectionTitle(text: String, modifier: Modifier = Modifier) {
+    Text(text, modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, top = 16.dp, bottom = 8.dp), style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Medium)
 }
 
 @Composable
@@ -151,4 +191,18 @@ fun SppPanel(modifier: Modifier = Modifier, content: @Composable () -> Unit) {
     Card(modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer), shape = MaterialTheme.shapes.large) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) { content() }
     }
+}
+
+/** A row's two lines of text. */
+@Composable
+fun SppRowText(title: String, detail: String?, modifier: Modifier = Modifier, detailColor: androidx.compose.ui.graphics.Color = MaterialTheme.colorScheme.onSurfaceVariant, titleLines: Int = 1) {
+    Column(modifier) {
+        Text(title, style = MaterialTheme.typography.bodyLarge, maxLines = titleLines, overflow = TextOverflow.Ellipsis)
+        if (detail != null) Text(detail, style = MaterialTheme.typography.bodySmall, color = detailColor)
+    }
+}
+
+@Composable
+fun SppRow(modifier: Modifier = Modifier, content: @Composable androidx.compose.foundation.layout.RowScope.() -> Unit) {
+    Row(modifier.fillMaxWidth(), verticalAlignment = androidx.compose.ui.Alignment.CenterVertically, content = content)
 }

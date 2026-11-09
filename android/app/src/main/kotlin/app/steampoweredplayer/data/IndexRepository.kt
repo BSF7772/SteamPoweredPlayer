@@ -71,6 +71,8 @@ data class LibrarySnapshot(
     val status: LibraryIndexStatus,
     val layout: LibraryLayout?,
     val message: String? = null,
+    /** The share couldn't be reached, which a network switch also looks like. False for answers the share gave, such as "no recordings here". */
+    val unreachable: Boolean = false,
 )
 
 /**
@@ -161,7 +163,7 @@ class IndexRepository(
 
     private fun offline(e: IOException): LibrarySnapshot {
         val kept = cached()
-        return (kept ?: LibrarySnapshot(null, LibrarySource.None, LibraryIndexStatus.Missing, null)).copy(message = e.message ?: e.javaClass.simpleName)
+        return (kept ?: LibrarySnapshot(null, LibrarySource.None, LibraryIndexStatus.Missing, null)).copy(message = e.message ?: e.javaClass.simpleName, unreachable = true)
     }
 
     private fun storedLayout(): LibraryLayout? = try {

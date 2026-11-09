@@ -38,6 +38,8 @@ import app.steampoweredplayer.export.EncoderCap
 import app.steampoweredplayer.export.ExportLadder
 import app.steampoweredplayer.export.ExportPlan
 import app.steampoweredplayer.export.ExportRequest
+import app.steampoweredplayer.export.ExportScope
+import app.steampoweredplayer.export.ExportScopes
 import app.steampoweredplayer.export.ExportSpan
 import app.steampoweredplayer.export.ExportSpans
 import app.steampoweredplayer.export.Exports
@@ -49,6 +51,7 @@ import app.steampoweredplayer.net.DownloadRequest
 import app.steampoweredplayer.net.DownloadRoutes
 import app.steampoweredplayer.net.Downloads
 import app.steampoweredplayer.play.FetchPolicy
+import app.steampoweredplayer.play.LoopHandles
 import app.steampoweredplayer.play.MarkerKind
 import app.steampoweredplayer.play.MarkerKinds
 import app.steampoweredplayer.play.MarkerNavigation
@@ -56,6 +59,7 @@ import app.steampoweredplayer.play.MpvEngine
 import app.steampoweredplayer.play.PlayableRuns
 import app.steampoweredplayer.play.PlaybackSession
 import app.steampoweredplayer.play.ReloadCause
+import app.steampoweredplayer.play.TimelineGrab
 import java.io.File
 import java.io.IOException
 import kotlin.math.abs
@@ -92,7 +96,6 @@ data class PlayerUi(
     val downloadPercent: Int = 0,
     val downloadBytesPerSecond: Long = 0,
     val downloadedRuns: List<Pair<Double, Double>> = emptyList(),
-    val pinned: Boolean = false,
     val allHere: Boolean = false,
     val markers: List<MarkerUi> = emptyList(),
     val hiddenKinds: Set<MarkerKind> = emptySet(),
@@ -107,6 +110,8 @@ data class PlayerUi(
     val bytesPerSecond: Double = 0.0,
     val exportChoice: String = ExportLadder.DEFAULT_ID,
     val exportEngine: LadderEngine = LadderEngine.Auto,
+    /** What the user picked in the Export sheet; null follows [ExportScopes.resolve]. */
+    val exportScope: ExportScope? = null,
     val decoder: String? = null,
     val decodeIsCpu: Boolean = false,
 )
@@ -208,7 +213,6 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
         _ui.update {
             it.copy(
                 start = media.startSeconds, end = media.endSeconds, position = media.startSeconds, markers = visible, encoders = encoders, bytesPerSecond = bytesPerSecond,
-                pinned = chunkCache.isPinned(libraryKey, entry.key),
             )
         }
         withContext(Dispatchers.IO) { refreshAvailable(chunkCache, folder, media) }
@@ -317,25 +321,6 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch {
             Downloads.seek(e.key, playheadChunk)
             if (missing.isNotEmpty() || initMissing) Downloads.fetch(app, DownloadRequest(p.id, e.key, d.mediaFolder, selection, playheadChunk))
-        }
-    }
-
-    /** Downloads the rest for offline, and keeps it there. */
-    fun togglePin() {
-        val c = cache ?: return
-        val e = entry ?: return
-        val p = profile ?: return
-        val d = details ?: return
-        val media = full ?: return
-        viewModelScope.launch(Dispatchers.IO) {
-            if (c.isPinned(libraryKey, e.key)) {
-                c.unpin(libraryKey, e.key)
-                _ui.update { it.copy(pinned = false) }
-            } else {
-                c.pin(libraryKey, e.key)
-                _ui.update { it.copy(pinned = true) }
-                Downloads.fetch(getApplication(), DownloadRequest(p.id, e.key, d.mediaFolder, media.chunks(), media.chunkAt(session?.currentPosition ?: 0.0).toInt()))
-            }
         }
     }
 
@@ -583,41 +568,53 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
         updateEdit { it.copy(audioDelay = seconds) }
     }
 
-    /** A then B then clear, as the desktop's A-B loop. */
-    fun loopButton() {
+    /** Puts the A-B handles on the timeline, around the playhead, for dragging. */
+    fun startLoop() {
         val ui = _ui.value
-        val t = ui.position
-        when {
-            ui.loopA == null -> _ui.update { it.copy(loopA = t) }
-            ui.loopB == null && t > ui.loopA -> {
-                _ui.update { it.copy(loopB = t) }
-                session?.setLoop(ui.loopA, t)
-            }
-            else -> {
-                _ui.update { it.copy(loopA = null, loopB = null) }
-                session?.setLoop(null, null)
-            }
+        if (ui.loopA != null) return
+        val (a, b) = LoopHandles.initial(ui.position, ui.start, ui.end)
+        _ui.update { it.copy(loopA = a, loopB = b) }
+        session?.setLoop(a, b)
+    }
+
+    fun clearLoop() {
+        _ui.update { it.copy(loopA = null, loopB = null) }
+        session?.setLoop(null, null)
+    }
+
+    /** A handle follows the finger; the loop itself changes when the finger lifts. */
+    fun dragLoopA(seconds: Double) = _ui.update { it.copy(loopA = LoopHandles.moveA(seconds, it.loopB ?: it.end, it.start)) }
+
+    fun dragLoopB(seconds: Double) = _ui.update { it.copy(loopB = LoopHandles.moveB(seconds, it.loopA ?: it.start, it.end)) }
+
+    /** The finger lifted: the loop takes the new range and the picture shows the handle that moved. */
+    fun finishLoopDrag(grab: TimelineGrab) {
+        val ui = _ui.value
+        val a = ui.loopA ?: return
+        val b = ui.loopB ?: return
+        session?.setLoop(a, b)
+        when (grab) {
+            TimelineGrab.A -> seek(a)
+            TimelineGrab.B -> seek(max(a, b - LOOP_PREVIEW_SECONDS))
+            TimelineGrab.Seek -> Unit
         }
     }
 
-    fun markIn() = updateEdit { it.copy(markIn = _ui.value.position, markOut = it.markOut?.takeIf { o -> o > _ui.value.position }) }
-
-    fun markOut() = updateEdit { it.copy(markOut = _ui.value.position, markIn = it.markIn?.takeIf { o -> o < _ui.value.position }) }
-
-    fun addRange() {
-        val e = _ui.value.edit
-        val a = e.markIn ?: _ui.value.start
-        val b = e.markOut ?: _ui.value.end
-        if (b <= a) return
+    /** The A-B range becomes one of the cuts an export takes. */
+    fun addLoopToCuts() {
+        val ui = _ui.value
+        val a = ui.loopA ?: return
+        val b = ui.loopB ?: return
         updateEdit { edit ->
-            val merged = ExportSpans.normalize((edit.kept + KeptRange(a, b)).map { ExportSpan(it.start, it.end) }).map { KeptRange(it.start, it.end) }
-            edit.copy(kept = merged, markIn = null, markOut = null)
+            edit.copy(kept = ExportSpans.normalize((edit.kept + KeptRange(a, b)).map { ExportSpan(it.start, it.end) }).map { KeptRange(it.start, it.end) })
         }
     }
 
     fun removeRange(range: KeptRange) = updateEdit { it.copy(kept = it.kept - range) }
 
     fun clearEdit() = updateEdit { it.copy(kept = emptyList(), markIn = null, markOut = null) }
+
+    fun chooseExportScope(scope: ExportScope) = _ui.update { it.copy(exportScope = scope) }
 
     /** A highlight reel: ± a few seconds around each shown event. */
     fun keepHighlights() {
@@ -633,12 +630,27 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch(Dispatchers.IO) { edits.save(key, edit) }
     }
 
-    /** What an export or a detection works on: the kept ranges, else the marks, else the whole recording. */
+    /** The part of the recording an export takes right now. */
+    fun exportScope(): ExportScope = _ui.value.let { ExportScopes.resolve(it.exportScope, it.loopA != null && it.loopB != null, it.edit.kept.isNotEmpty()) }
+
+    /** What an export or a detection works on: the choice in the Export sheet, by default the cuts, else the A-B range, else the whole recording. */
     fun exportSpans(): List<ExportSpan> {
         val ui = _ui.value
-        if (ui.edit.kept.isNotEmpty()) return ui.edit.kept.map { ExportSpan(it.start, it.end) }
-        if (ui.edit.markIn != null || ui.edit.markOut != null) return listOf(ExportSpan(ui.edit.markIn ?: ui.start, ui.edit.markOut ?: ui.end))
-        return listOf(ExportSpan(ui.start, ui.end))
+        return when (exportScope()) {
+            ExportScope.Cuts -> ui.edit.kept.map { ExportSpan(it.start, it.end) }
+            ExportScope.Loop -> listOf(ExportSpan(ui.loopA ?: ui.start, ui.loopB ?: ui.end))
+            ExportScope.Whole -> listOf(ExportSpan(ui.start, ui.end))
+        }
+    }
+
+    /** How long a part of the recording is, in the source's own seconds. */
+    fun scopeSeconds(scope: ExportScope): Double {
+        val ui = _ui.value
+        return when (scope) {
+            ExportScope.Cuts -> ui.edit.kept.sumOf { it.end - it.start }
+            ExportScope.Loop -> (ui.loopB ?: ui.end) - (ui.loopA ?: ui.start)
+            ExportScope.Whole -> ui.end - ui.start
+        }
     }
 
     fun detectSync() {
@@ -786,5 +798,8 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
         const val POSITION_STEP = 0.05
         const val END_TOLERANCE = 0.15
         const val SPEED_EVERY_MILLIS = 1000L
+
+        /** After moving B, playback starts this far before it, so the end of the loop is what's seen next. */
+        const val LOOP_PREVIEW_SECONDS = 2.0
     }
 }

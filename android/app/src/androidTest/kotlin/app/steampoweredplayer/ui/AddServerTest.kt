@@ -6,6 +6,7 @@ import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.createEmptyComposeRule
+import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
@@ -42,10 +43,9 @@ class AddServerTest {
         compose.onNodeWithText(text(R.string.add_server)).performClick()
     }
 
-    private fun fillIn(name: String, host: String, share: String) {
+    private fun fillIn(name: String, host: String) {
         compose.onNodeWithText(text(R.string.field_name)).performTextInput(name)
         compose.onNodeWithText(text(R.string.field_host)).performTextInput(host)
-        compose.onNodeWithText(text(R.string.field_share)).performTextInput(share)
     }
 
     @Test
@@ -57,39 +57,62 @@ class AddServerTest {
     }
 
     @Test
-    fun saveStaysOffUntilTheProfileIsValid() {
+    fun theFormAsksOnlyForWhatAPersonKnows() {
         ActivityScenario.launch(MainActivity::class.java).use {
             openEditor()
-            val save = compose.onNodeWithText(text(R.string.save_and_try)).performScrollTo()
-            save.assertIsNotEnabled()
-            fillIn("Test", "bad host", "share")
-            save.assertIsNotEnabled()
+            for (id in listOf(R.string.field_name, R.string.field_host, R.string.field_user, R.string.field_password)) compose.onNodeWithText(text(id)).assertExists()
+            compose.onNodeWithText(text(R.string.field_share)).assertDoesNotExist()
         }
     }
 
     @Test
-    fun cancelLeavesNothingBehind() {
+    fun connectStaysOffUntilTheServerIsValid() {
         ActivityScenario.launch(MainActivity::class.java).use {
             openEditor()
-            fillIn("Test", "192.0.2.1", "share")
-            compose.onNodeWithText(text(R.string.cancel)).performScrollTo().performClick()
+            val connect = compose.onNodeWithText(text(R.string.connect))
+            connect.assertIsNotEnabled()
+            fillIn("Test", "bad host")
+            connect.assertIsNotEnabled()
+        }
+    }
+
+    @Test
+    fun backLeavesNothingBehind() {
+        ActivityScenario.launch(MainActivity::class.java).use {
+            openEditor()
+            fillIn("Test", "192.0.2.1")
+            compose.onNodeWithContentDescription("Back").performClick()
             compose.onNodeWithText(text(R.string.home_empty_title)).assertExists()
         }
         assertFalse(servers.exists())
     }
 
     @Test
-    fun aSavedProfileIsTriedAndIsThereAfterARestart() {
+    fun aServerThatDoesntAnswerIsReportedAndNotSaved() {
         ActivityScenario.launch(MainActivity::class.java).use {
             openEditor()
-            fillIn("Test server", "192.0.2.1", "share")
-            compose.onNodeWithText(text(R.string.field_password)).performTextInput("not-a-real-password")
-            compose.onNodeWithText(text(R.string.save_and_try)).performScrollTo().assertIsEnabled().performClick()
+            fillIn("Test", "192.0.2.1")
+            compose.onNodeWithText(text(R.string.connect)).assertIsEnabled().performClick()
             compose.waitUntil(WAIT_MS) { compose.onAllNodes(hasText(text(R.string.unreachable))).fetchSemanticsNodes().isNotEmpty() }
+        }
+        assertFalse(servers.exists())
+    }
+
+    @Test
+    fun aTypedShareIsSavedAndIsThereAfterARestart() {
+        ActivityScenario.launch(MainActivity::class.java).use {
+            openEditor()
+            fillIn("Test server", "192.0.2.1")
+            compose.onNodeWithText(text(R.string.field_password)).performTextInput("not-a-real-password")
+            compose.onNodeWithText(text(R.string.advanced)).performScrollTo().performClick()
+            compose.onNodeWithText(text(R.string.field_share)).performScrollTo().performTextInput("share")
+            compose.onNodeWithText(text(R.string.connect)).assertIsEnabled().performClick()
+            compose.waitUntil(WAIT_MS) { compose.onAllNodes(hasText("Test server", substring = true)).fetchSemanticsNodes().isNotEmpty() }
+            compose.waitUntil(WAIT_MS) { servers.exists() }
         }
         assertFalse("the password must not reach the profile file", servers.readText().contains("not-a-real-password"))
         ActivityScenario.launch(MainActivity::class.java).use {
-            // The app opens on the library, whose header names the server it's using; the server's own card is in the settings.
+            // The app opens on the library, whose header names the server it's using; the server's own row is in the settings.
             compose.waitUntil(WAIT_MS) { compose.onAllNodes(hasText("Test server", substring = true)).fetchSemanticsNodes().isNotEmpty() }
             compose.onNodeWithText("Settings").performClick()
             compose.waitUntil(WAIT_MS) { compose.onAllNodes(hasText("Test server")).fetchSemanticsNodes().isNotEmpty() }
