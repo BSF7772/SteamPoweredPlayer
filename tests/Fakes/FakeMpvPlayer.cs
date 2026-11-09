@@ -59,7 +59,8 @@ public sealed class FakeMpvPlayer : IMpvPlayer
         EofReachedChanged?.Invoke(true);
     }
 
-    public void SetPause(bool paused) => Paused = paused;
+    public int PauseCalls { get; private set; }
+    public void SetPause(bool paused) { PauseCalls++; Paused = paused; }
     public void SetSpeed(double speed) => Speed = speed;
     public void SetVolume(double percent) { }
     public void SetMute(bool muted) { }

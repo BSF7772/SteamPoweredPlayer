@@ -85,6 +85,81 @@ public sealed class PlaybackSessionFrameBackTests
     }
 
     [Fact]
+    public async Task Pausing_for_a_frame_step_leaves_a_paused_player_alone()
+    {
+        // Setting mpv's pause again cancels a frame step in flight, and the probe then times out: every press did this on the real player.
+        var (s, p, _) = await OpenAtAsync(100);
+        s.SetPause(true);
+        var before = p.PauseCalls;
+        s.PauseForFrameStep();
+        Assert.Equal(before, p.PauseCalls);
+        s.SetPause(false);
+        s.PauseForFrameStep();
+        Assert.True(p.Paused);
+    }
+
+    [Fact]
+    public async Task Exact_backs_come_back_after_repeated_timeouts()
+    {
+        var (s, p, pts) = await OpenAtAsync(100);
+        s.FrameProbeTimeout = TimeSpan.FromMilliseconds(20);
+        p.SilentSteps = 3;                                   // three slow probes reach the limit
+        for (var i = 0; i < 3; i++) await s.StepBackAsync(1 / 59.094);
+        for (var i = 0; i < 8; i++) await s.StepBackAsync(1 / 59.094);      // nominal for a while, then it tries again
+        s.FrameProbeTimeout = TimeSpan.FromMilliseconds(500);
+        await s.SeekAsync(pts[200] - 0.0003);
+        await s.StepBackAsync(1 / 59.094);
+        Assert.Equal(pts[199], p.TimePos);
+    }
+
+    [Fact]
+    public async Task A_nominal_back_that_lands_on_the_same_frame_goes_further()
+    {
+        // A chunk's first frame over a frame off the grid: one nominal frame back still shows that frame.
+        var pts = new[] { 30.000, 30.017, 30.100, 30.117 };
+        var p = new FakeMpvPlayer { FramePts = pts };
+        var s = new PlaybackSession(p) { FrameProbeTimeout = TimeSpan.FromMilliseconds(20) };
+        await s.OpenAsync(PlaybackSessionTests.Media(false, (11, 40)), 30.0995, play: false);
+        Assert.Equal(30.100, p.TimePos);
+        p.SilentSteps = 100;                                 // force the nominal path
+        await s.StepBackAsync(1.0 / 60);
+        Assert.True(p.TimePos < 30.100, $"still on {p.TimePos}");
+    }
+
+    [Fact]
+    public async Task A_press_during_a_queued_back_counts_from_where_the_queue_is_going()
+    {
+        // Found on the real app, 200 frames moved in 210 presses: a finishing load put the position back on its own frame, so the next press forgot the one queued.
+        const double frame = 1.0 / 60;
+        var p = new FakeMpvPlayer();
+        var s = new PlaybackSession(p) { FrameProbeTimeout = TimeSpan.FromMilliseconds(10) };
+        await s.OpenAsync(PlaybackSessionTests.Media(false, (1, 300)), 60, play: false);
+
+        var first = new TaskCompletionSource();
+        var second = new TaskCompletionSource();
+        p.Gate = first;
+        var loads = p.Loads.Count;
+        var a = s.StepBackAsync(frame);                      // press 1 is loading
+        await WaitForLoads(p, loads + 1);
+        var b = s.StepBackAsync(frame);                      // press 2 waits behind it
+        loads = p.Loads.Count;
+        p.Gate = second;
+        first.SetResult();                                   // press 1 finishes, press 2 starts loading
+        await WaitForLoads(p, loads + 1);
+        var c = s.StepBackAsync(frame);                      // press 3 arrives while nothing is queued
+        p.Gate = null;
+        second.SetResult();
+        await Task.WhenAll(a, b, c);
+        Assert.Equal(60 - 3 * frame, p.Loads[^1].Start, 6);
+    }
+
+    private static async Task WaitForLoads(FakeMpvPlayer p, int count)
+    {
+        for (var i = 0; i < 400 && p.Loads.Count < count; i++) await Task.Delay(5);
+        Assert.True(p.Loads.Count >= count, "the load never came");
+    }
+
+    [Fact]
     public async Task Without_readable_frame_times_a_back_falls_back_to_one_nominal_frame()
     {
         var p = new FakeMpvPlayer();

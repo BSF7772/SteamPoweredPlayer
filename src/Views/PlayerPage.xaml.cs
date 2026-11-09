@@ -866,7 +866,7 @@ public sealed partial class PlayerPage : Page
     private void FrameBackward()
     {
         if (_session?.Media is null || _host is null) return;
-        _session.SetPause(true);
+        _session.PauseForFrameStep();
         UpdatePlayGlyph();
         RunSeek(() => _host.StepBackAsync(FrameSeconds()));       // a reload: mpv cannot step back across a chunk
     }

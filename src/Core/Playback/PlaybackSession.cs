@@ -67,8 +67,13 @@ public sealed class PlaybackSession : IAsyncDisposable
     private sealed record PendingReload(double Position, ReloadCause Cause, bool Force, bool? Play, int Back = 0, double Origin = 0, double Frame = 0);
 
     private List<double>? _frames;                       // consecutive frame pts found by the last probe (a lookup by value, so it never goes stale by seeking)
-    private int _probeTimeouts;                          // probes in a row whose frame step reported no time; at the limit, back-steps stay one nominal frame
-    private const int ProbeTimeoutLimit = 3;             // one slow decode must not give up exact back-steps for the whole recording
+    private int _probeTimeouts;                          // probes in a row whose frame step reported no time; at the limit, back-steps go one nominal frame for a while
+    /// <summary>Back-steps that landed by a frame's real pts, and those that fell back to a nominal frame. For the checks' reports.</summary>
+    public (int Exact, int Nominal, int ProbeTimeouts, int FarFromScreen, int NotInList, int ListShort) BackStepCounts { get; private set; }
+    private int _probeSkipped;                           // back-steps since the limit was reached
+    private const int ProbeTimeoutLimit = 3;             // one slow decode must not give up exact back-steps
+    private const int ProbeRetryAfter = 8;               // and a slow patch doesn't give them up for good either: try again after this many back-steps
+    private const int NominalBackRetries = 4;            // a nominal back-step that lands on the frame it left goes this many frames further at most
     private const double LoopEdgeSeconds = 0.02;         // a seek this close before A counts as inside the zone
 
     /// <summary>How long a probe waits for the player to report the frame it stepped to before giving up on exact back-steps.</summary>
@@ -186,6 +191,15 @@ public sealed class PlaybackSession : IAsyncDisposable
     }
 
     public void TogglePause() => SetPause(!UserPaused);
+
+    /// <summary>
+    /// Pauses for a frame step. Does nothing when already paused: setting mpv's pause again cancels a frame step in flight, which is
+    /// what the exact back-step's probe is waiting for.
+    /// </summary>
+    public void PauseForFrameStep()
+    {
+        if (!UserPaused) SetPause(true);
+    }
 
     public void SetSpeed(double speed) => _player.SetSpeed(Math.Clamp(speed, 0.25, 4));
     public void SetVolume(double percent) => _player.SetVolume(percent);
@@ -341,10 +355,15 @@ public sealed class PlaybackSession : IAsyncDisposable
             if (exact is { } e)
             {
                 shown = e.Shown;
+                BackStepCounts = BackStepCounts with { Exact = BackStepCounts.Exact + 1 };
                 req = req with { Position = e.LoadAt, Play = false };
                 lock (_gate) _userPaused = true;                // like the forward step, a frame step is a paused operation
             }
-            else req = req with { Position = req.Origin - req.Back * req.Frame };
+            else
+            {
+                req = req with { Position = req.Origin - req.Back * req.Frame };
+                BackStepCounts = BackStepCounts with { Nominal = BackStepCounts.Nominal + 1 };
+            }
         }
 
         double target;
@@ -357,21 +376,43 @@ public sealed class PlaybackSession : IAsyncDisposable
             target = Snap(_media!, req.Position);
             play = req.Play ?? !_userPaused;
             rebuild = EnsureWindow(target, req.Force);
-            _position = shown is not null && target == req.Position ? shown.Value : target;
+            // A press waiting behind this one has already moved the position: the next press counts from there, not from this frame.
+            if (_pending is null) _position = shown is not null && target == req.Position ? shown.Value : target;
         }
 
         var ok = await _player.LoadAsync(_edl, target, play, endLimit, _cts.Token).ConfigureAwait(false);
         if (!ok) throw new TimeoutException("mpv did not deliver a first frame for the reload.");
+
+        // A nominal back-step can land on the frame it left, when a chunk's first frame sits over a frame off the grid: go further.
+        if (req.Back > 0 && shown is null)
+            for (var more = 1; more <= NominalBackRetries && LandedOn(req) && target > StartOf(_media!); more++)
+            {
+                lock (_gate)
+                {
+                    target = Snap(_media!, req.Position - more * req.Frame);
+                    rebuild |= EnsureWindow(target, false);
+                    if (_pending is null) _position = target;
+                }
+                ok = await _player.LoadAsync(_edl, target, play, endLimit, _cts.Token).ConfigureAwait(false);
+                if (!ok) throw new TimeoutException("mpv did not deliver a first frame for the reload.");
+            }
 
         IReadOnlyList<int> window;
         lock (_gate)
         {
             _lastTick = shown is not null && target == req.Position ? shown.Value : target;
             _playedSinceLoad = 0;
-            _position = _lastTick;
+            if (_pending is null) _position = _lastTick;
             window = _window;
         }
         SafeInvoke(Reloaded, new SessionReload(req.Cause, target, window[0], window[^1], rebuild));
+    }
+
+    /// <summary>True when the frame on screen is still the one the back-step started from.</summary>
+    private bool LandedOn(PendingReload req)
+    {
+        var t = _player.TimePos;
+        return double.IsFinite(t) && t >= req.Origin - 0.25 * req.Frame;
     }
 
     /// <summary>Rebuilds the window around <paramref name="target"/> when it is forced, empty or no longer suitable. (Caller holds the lock.)</summary>
@@ -398,10 +439,24 @@ public sealed class PlaybackSession : IAsyncDisposable
         SessionMedia media;
         double t;
         List<double>? known;
-        lock (_gate) { media = _media!; known = _frames; if (_probeTimeouts >= ProbeTimeoutLimit) return null; }
+        lock (_gate)
+        {
+            media = _media!;
+            known = _frames;
+            if (_probeTimeouts >= ProbeTimeoutLimit)
+            {
+                if (++_probeSkipped < ProbeRetryAfter) return null;
+                _probeSkipped = 0;
+                _probeTimeouts = ProbeTimeoutLimit - 1;                         // one more try; another timeout comes straight back here
+            }
+        }
         t = _player.TimePos;
         var frame = req.Frame;
-        if (!(Math.Abs(t - req.Origin) <= 2.5 * frame)) return null;            // NaN fails too: nothing is on screen where we think
+        if (!(Math.Abs(t - req.Origin) <= 2.5 * frame))                         // NaN fails too: nothing is on screen where we think
+        {
+            BackStepCounts = BackStepCounts with { FarFromScreen = BackStepCounts.FarFromScreen + 1 };
+            return null;
+        }
 
         var ct = _cts.Token;
         try
@@ -423,14 +478,14 @@ public sealed class PlaybackSession : IAsyncDisposable
                 while (list[^1] < t - tol && list.Count < cap)
                 {
                     var next = await StepAsync(list[^1], ct).ConfigureAwait(false);
-                    if (next is null) { lock (_gate) _probeTimeouts++; return null; }
+                    if (next is null) { lock (_gate) _probeTimeouts++; BackStepCounts = BackStepCounts with { ProbeTimeouts = BackStepCounts.ProbeTimeouts + 1 }; return null; }
                     list.Add(next.Value);
                 }
                 lock (_gate) _probeTimeouts = 0;
                 known = list;
                 at = Nearest(list, t, tol);
-                if (at < 0) return null;
-                if (at < req.Back && !atHead) return null;
+                if (at < 0) { BackStepCounts = BackStepCounts with { NotInList = BackStepCounts.NotInList + 1 }; return null; }
+                if (at < req.Back && !atHead) { BackStepCounts = BackStepCounts with { ListShort = BackStepCounts.ListShort + 1 }; return null; }
                 lock (_gate) _frames = list;
             }
             var k = Math.Max(0, at - req.Back);
