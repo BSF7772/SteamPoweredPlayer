@@ -193,6 +193,30 @@ public sealed class ExportServiceTests : IDisposable
         Assert.Equal(2.0, starts[2], 0.01);
     }
 
+    [Theory]
+    [InlineData(new[] { 0.0, 1.5, 3.0, 5.1 }, 5.2, true)]
+    [InlineData(new[] { 0.0, 1.5, 1.5, 1.5 }, 5.2, false)]      // the real failure: every later frame on one instant
+    [InlineData(new double[0], 5.2, false)]
+    public void A_join_must_reach_the_kept_length(double[] times, double expected, bool whole) =>
+        Assert.Equal(whole, ExportService.IsWholePicture(times, expected));
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]                  // "Fix timing drift", on by default in the app
+    public async Task Encoded_cuts_keep_the_whole_picture(bool fixDrift)
+    {
+        // Found by the verifier on a real clip: the picture stopped at 1.5 s of a 5.2 s span, with the later frames stamped 0.016 ms apart.
+        var o = ClipAxisMpvTests.Origin;
+        (double A, double B)[] kept = [(0.5, 2.0), (4.0, 5.5), (8.0, 10.2)];
+        var job = Job(0, 1, X264) with { Spans = kept.Select(k => new ExportSpan(o + k.A, o + k.B)).ToList(), Edit = new EditSettings { FixSync = fixDrift } };
+        var r = await ExportService.RunAsync(job, null, default);
+        var frames = await ShownFrames(r.Path);
+        var total = kept.Sum(k => k.B - k.A);
+        Assert.InRange(frames[^1].Pts - frames[0].Pts, total - 0.15, total + 0.15);
+        var gaps = frames.Zip(frames.Skip(1), (x, y) => y.Pts - x.Pts).ToList();
+        Assert.True(gaps.Min() > 0.001, $"smallest frame gap {gaps.Min() * 1000:0.000} ms");
+    }
+
     [Fact]
     public async Task Encode_trims_exactly()
     {

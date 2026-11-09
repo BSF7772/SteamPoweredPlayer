@@ -69,13 +69,16 @@ public static class ExportService
             var totalSpan = plans.Sum(p => p.End - p.Start);
             var segments = new List<string>(plans.Count);
             double finished = 0;
+            // One frame rate for all parts. Each part measured alone can pick another (59.94 and 60 on one real recording), and a join across
+            // their different time bases stamps every later frame on one instant.
+            var sharedFps = plans.Count > 1 ? ChunkFrameRate.Measure(job.Media) : null;
             for (var i = 0; i < plans.Count; i++)
             {
                 var plan = plans[i];
                 var share = (plan.End - plan.Start) / totalSpan;
                 var from = finished;
                 var label = plans.Count > 1 ? $"Part {i + 1}/{plans.Count} · " : "";
-                segments.Add(await SegmentAsync(job, plan, totalSpan, Path.Combine(work, $"s{i}"), extension,
+                segments.Add(await SegmentAsync(job, plan, totalSpan, sharedFps, Path.Combine(work, $"s{i}"), extension,
                     (f, stage) => progress?.Report(new ExportProgress(Math.Min(0.99, from + f * share), label + stage)), ct).ConfigureAwait(false));
                 finished += share;
             }
@@ -88,6 +91,7 @@ public static class ExportService
                 var list = Path.Combine(work, "list.txt");
                 await File.WriteAllTextAsync(list, string.Concat(segments.Select(s => $"file '{Path.GetFileName(Path.GetDirectoryName(s))}/{Path.GetFileName(s)}'\n")), ct).ConfigureAwait(false);
                 await Pipeline.RunAsync(ConcatArgs(list, produced), outputSeconds, (_, _) => { }, ct).ConfigureAwait(false);
+                await RequireWholePictureAsync(produced, outputSeconds, ct).ConfigureAwait(false);
             }
 
             var chapters = ExportChapters.Layout(plans, job.Chapters ?? [], job.Edit.Speed);
@@ -112,7 +116,22 @@ public static class ExportService
         }
     }
 
-    private static async Task<string> SegmentAsync(ExportJob job, ExportPlan plan, double totalSpan, string dir, string extension,
+    /// <summary>A join whose picture stops well short is an error to show, not a file to save: its sound would still run to the end, so nothing else would tell.</summary>
+    private static async Task RequireWholePictureAsync(string joined, double expected, CancellationToken ct)
+    {
+        var frames = await ProbePacketsAsync(joined, "v:0", [], ct).ConfigureAwait(false);
+        if (!IsWholePicture(frames.Select(f => f.Seconds), expected))
+            throw new InvalidOperationException("Joining the parts failed: the picture came out shorter than the kept range. Nothing was saved.");
+    }
+
+    /// <summary>True when the frames reach the expected length, within half a second or 5 %, whichever is more.</summary>
+    public static bool IsWholePicture(IEnumerable<double> frameTimes, double expected)
+    {
+        var last = frameTimes.DefaultIfEmpty(0).Max();
+        return last >= expected - Math.Max(0.5, expected * 0.05);
+    }
+
+    private static async Task<string> SegmentAsync(ExportJob job, ExportPlan plan, double totalSpan, double? sharedFps, string dir, string extension,
         Action<double, string> progress, CancellationToken ct)
     {
         Directory.CreateDirectory(dir);
@@ -122,6 +141,7 @@ public static class ExportService
         var (mux, origin) = await JoinAsync(job.Media, plan, audio, dir, gatherEnd, muxEnd, progress, ct).ConfigureAwait(false);
         var info = await Ff.ProbeAsync(mux, ct).ConfigureAwait(false)
             ?? throw new InvalidOperationException("ffprobe could not read the joined recording.");
+        if (sharedFps is { } fps) info.Fps = fps;
         var output = Path.Combine(dir, "out" + extension);
         var (start, end) = OutputTrim(plan, origin, info.Duration);
         var settings = job.Settings.Clone();
