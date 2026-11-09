@@ -160,6 +160,6 @@
     }
   ],
   "todo": [
-    "Phase 4: the Android SDK packages (platforms;android-36, build-tools;36.1.0) are installed by sdkmanager from android-cmdline-tools into an SDK folder; compose and pin that step (and the libmpv AAR, with arm64-v8a and x86_64) when the phone app starts. The current spikes use .tools/android/sdk."
+    "Phase 4: the Android SDK packages (platforms;android-36, build-tools;36.1.0) are installed by sdkmanager from android-cmdline-tools into an SDK folder; compose and pin that step when the phone app starts (the libmpv AAR is a Gradle dependency, see docs/third-party.md). The current spikes use .tools/android/sdk."
   ]
 }

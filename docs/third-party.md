@@ -48,5 +48,16 @@ itself is this repository.
 | Google.Protobuf | see `tests/*.csproj` | BSD-3-Clause | tests only (building fixtures); not shipped |
 | xUnit and the .NET test SDK | see `tests/*.csproj` | Apache-2.0 / MIT | tests only; not shipped |
 
+## Gradle dependencies (Android)
+
+Declared in `android/app/build.gradle.kts`, resolved by Gradle from Google Maven and Maven Central. Besides the Jetpack libraries:
+
+| Package | Version | Licence | Used by |
+|---|---|---|---|
+| `dev.jdtech.mpv:libmpv` | 1.0.0 (mpv 0.42.0, FFmpeg 9.0.2; ABIs arm64-v8a, armeabi-v7a, x86, x86_64; the app packages arm64-v8a and x86_64). AAR SHA-256 `df146592480fc8418415a06b1f1a1d6318b0088e21f52254b0e9a82b61ca8fa2` | Wrapper MIT; the binaries GPL-3.0-or-later as a whole | Player. Source and build scripts: https://github.com/jarnedemeulemeester/libmpv-android |
+| `androidx.media3:media3-transformer`, `-exoplayer`, `-effect`, `-common` | 1.11.1 | Apache-2.0 | Re-encodes. A lossless export is the app's own `Mp4Remux`, so the codec setup stays Steam's bytes |
+| `io.coil-kt.coil3:coil-compose` | 3.3.0 (newer ones need compileSdk 37) | Apache-2.0 | Game art, trickplay sheets |
+| `org.codelibs:jcifs` | 3.0.4 | LGPL-2.1 | SMB |
+
 Other dependencies (further NuGet and Gradle packages) keep their own licences; they are compatible with GPL-3.0-or-later (see plan
 §2 D19). Update this table whenever a dependency is added.

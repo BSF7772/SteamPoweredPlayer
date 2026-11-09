@@ -89,6 +89,9 @@ class AddServerTest {
         }
         assertFalse("the password must not reach the profile file", servers.readText().contains("not-a-real-password"))
         ActivityScenario.launch(MainActivity::class.java).use {
+            // The app opens on the library, whose header names the server it's using; the server's own card is in the settings.
+            compose.waitUntil(WAIT_MS) { compose.onAllNodes(hasText("Test server", substring = true)).fetchSemanticsNodes().isNotEmpty() }
+            compose.onNodeWithText("Settings").performClick()
             compose.waitUntil(WAIT_MS) { compose.onAllNodes(hasText("Test server")).fetchSemanticsNodes().isNotEmpty() }
         }
     }

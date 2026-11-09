@@ -16,6 +16,9 @@ import androidx.work.WorkerParameters
 import androidx.work.workDataOf
 import app.steampoweredplayer.R
 import app.steampoweredplayer.data.ChunkDownloader
+import app.steampoweredplayer.data.ChunkHeads
+import app.steampoweredplayer.data.HeadCheck
+import app.steampoweredplayer.data.readNBytesCompat
 import app.steampoweredplayer.data.DownloadProgress
 import app.steampoweredplayer.data.DownloadStatus
 import app.steampoweredplayer.data.ProfileStore
@@ -51,7 +54,7 @@ class DownloadWorker(context: Context, params: WorkerParameters) : CoroutineWork
         val primary = route.first()
         val vault = PasswordVault(File(app.noBackupFilesDir, "vault"))
         val sources = withContext(Dispatchers.IO) {
-            route.mapNotNull { profile -> vault.get(profile.id)?.let { SmbRemoteFiles(profile, it) } }
+            route.mapNotNull { profile -> vault.get(profile.id)?.let { SmbRemoteFiles(profile.atShareRoot(), it) } }
         }
         if (sources.isEmpty()) {
             Log.w(TAG, "no stored password")
@@ -60,7 +63,16 @@ class DownloadWorker(context: Context, params: WorkerParameters) : CoroutineWork
         showForeground(DownloadProgress(), primary)
 
         val chunks = request.chunks ?: try {
-            withContext(Dispatchers.IO) { DownloadRoutes.completeChunks(sources.first().list(request.relativeFolder)) }
+            withContext(Dispatchers.IO) {
+                val source = sources.first()
+                DownloadRoutes.completeChunks(source.list(request.relativeFolder)) { name ->
+                    try {
+                        source.open("${request.relativeFolder}/$name", 0).use { ChunkHeads.classify(it.readNBytesCompat(ChunkHeads.HEAD_LENGTH)) }
+                    } catch (_: RemoteFileGone) {
+                        HeadCheck.Vanished
+                    }
+                }
+            }
         } catch (_: RemoteFileGone) {
             Log.w(TAG, "recording is gone")
             return Result.failure()
@@ -75,22 +87,28 @@ class DownloadWorker(context: Context, params: WorkerParameters) : CoroutineWork
             ReconnectPolicy({ SystemClock.elapsedRealtime() }, Random.Default, sources.size), Dispatchers.IO,
         )
         val gate = MeteredNoticeGate { Downloads.noticeDismissed(app) }
-        LinkMonitor(app).use { link ->
-            coroutineScope {
-                val helpers = listOf(
-                    launch { link.changes.collect { downloader.onNetworkChanged() } },
-                    launch { link.state.collect { if (gate.shouldShow(it)) Downloads.showMeteredNotice() } },
-                    launch {
-                        downloader.progress.collect {
-                            report(it, primary)
-                            delay(REPORT_EVERY_MS)
-                        }
-                    },
-                )
-                downloader.select(chunks, request.playheadChunk)
-                downloader.run()
-                helpers.forEach { it.cancelAndJoin() }
+        downloader.select(chunks, request.playheadChunk)
+        Downloads.started(request.recording, downloader)
+        try {
+            LinkMonitor(app).use { link ->
+                coroutineScope {
+                    val helpers = listOf(
+                        launch { link.changes.collect { downloader.onNetworkChanged() } },
+                        launch { link.state.collect { if (gate.shouldShow(it)) Downloads.showMeteredNotice() } },
+                        launch {
+                            downloader.progress.collect {
+                                Downloads.report(request.recording, it)
+                                report(it, primary)
+                                delay(REPORT_EVERY_MS)
+                            }
+                        },
+                    )
+                    downloader.run()
+                    helpers.forEach { it.cancelAndJoin() }
+                }
             }
+        } finally {
+            Downloads.finished(request.recording, downloader)
         }
         val end = downloader.progress.value
         report(end, primary)
