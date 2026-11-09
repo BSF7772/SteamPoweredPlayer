@@ -1,13 +1,14 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 package app.steampoweredplayer.net
 
-import app.steampoweredplayer.data.FolderNames
+import app.steampoweredplayer.data.ChunkScan
+import app.steampoweredplayer.data.HeadCheck
 import app.steampoweredplayer.data.ServerProfile
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 
-/** One download job. [relativeFolder] is the media folder inside the profile's share and path. No [chunks] means the whole recording. */
+/** One download job. [relativeFolder] is the media folder relative to the share's root. No [chunks] means the whole recording. */
 @Serializable
 data class DownloadRequest(
     val profileId: String,
@@ -40,11 +41,9 @@ object DownloadRoutes {
     /** What names the library in the cache: the id it reports once known, the profile's own id until then. */
     fun libraryKey(profile: ServerProfile): String = profile.libraryId ?: profile.id
 
-    /** The chunk numbers present and finished in both streams, sorted. A `.tmp` is Steam still writing; a chunk in one stream can't play yet. */
-    fun completeChunks(fileNames: Iterable<String>): List<Int> {
-        val parsed = fileNames.mapNotNull { FolderNames.parseChunk(it) }.filterNot { it.temporary }
-        val video = parsed.filter { it.stream == 0 }.map { it.number }.toSet()
-        val audio = parsed.filter { it.stream == 1 }.map { it.number }.toSet()
-        return (video intersect audio).sorted()
-    }
+    /**
+     * The chunk numbers complete in both streams, sorted, by the desktop's rule: a `.tmp` is Steam still writing, a chunk in one stream can't play yet, and a crash can
+     * leave a zero-filled file under a normal name. [head] reads a file's head; only files that pass the name checks are read.
+     */
+    fun completeChunks(fileNames: Iterable<String>, head: (String) -> HeadCheck = { HeadCheck.Valid }): List<Int> = ChunkScan.complete(fileNames, head)
 }

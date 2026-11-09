@@ -37,4 +37,6 @@
     <string name="metered_notice">Downloading on a metered connection or with Data Saver on.</string>
     <string name="dont_show_again">Don\'t show again</string>
     <string name="ok">OK</string>
+    <string name="export_channel">Exports</string>
+    <string name="export_title">Exporting a clip</string>
 </resources>

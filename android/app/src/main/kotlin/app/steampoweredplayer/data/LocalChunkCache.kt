@@ -6,6 +6,9 @@ import java.io.File
 import java.io.IOException
 import java.io.InputStream
 import java.util.concurrent.atomic.AtomicBoolean
+import kotlinx.coroutines.channels.BufferOverflow
+import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.SerializationException
 import kotlinx.serialization.json.Json
@@ -32,7 +35,68 @@ fun isPlainName(name: String): Boolean = name != "." && name != ".." && plainNam
  * recordings, leased chunks or the entry just written, so the cache may exceed its cap. The files are the truth; the index holds only the order and
  * the pins. Unlike the desktop's, a leftover `.part` stays, because a dropped download resumes from it ([partialLength], spike S3). Thread-safe.
  */
-class LocalChunkCache private constructor(private val dir: File, val maxBytes: Long) {
+class LocalChunkCache private constructor(private val dir: File, maxBytes: Long) {
+    /** The byte cap. Lowering it trims at once. */
+    @Volatile
+    var maxBytes: Long = maxBytes
+        set(value) {
+            require(value >= 0)
+            field = value
+            val trimmed = synchronized(lock) { evict(null) }
+            if (trimmed) saveIndex()
+        }
+
+    private val _completed = MutableSharedFlow<ChunkKey>(extraBufferCapacity = COMPLETED_BUFFER, onBufferOverflow = BufferOverflow.DROP_OLDEST)
+
+    /** Each file as it completes, for a player waiting on it. */
+    val completed: SharedFlow<ChunkKey> = _completed
+
+    /** One recording on this phone. */
+    data class CachedRecording(val libraryId: String, val recording: String, val bytes: Long, val chunks: Int, val pinned: Boolean)
+
+    /** The folder that holds a recording's files under Steam's own names. */
+    fun folderOf(libraryId: String, recording: String): File {
+        require(isPlainName(libraryId) && isPlainName(recording))
+        return File(File(dir, libraryId), recording)
+    }
+
+    /** What's on the phone, biggest first. A pinned recording with nothing downloaded yet shows too. */
+    fun recordings(): List<CachedRecording> = synchronized(lock) {
+        val keys = entries.keys.map { it.libraryId to it.recording }.toSet() + pinned
+        keys.map { (lib, rec) ->
+            val own = entries.filterKeys { it.libraryId == lib && it.recording == rec }
+            CachedRecording(lib, rec, own.values.sumOf { it.size }, own.keys.filter { it.chunk > 0 && it.stream == 0 }.size, (lib to rec) in pinned)
+        }.sortedByDescending { it.bytes }
+    }
+
+    /** The numbers of the chunks with both streams here. */
+    fun chunksOf(libraryId: String, recording: String): Set<Int> = synchronized(lock) {
+        val own = entries.keys.filter { it.libraryId == libraryId && it.recording == recording && it.chunk > 0 }
+        own.filter { it.stream == 0 }.map { it.chunk }.toSet() intersect own.filter { it.stream == 1 }.map { it.chunk }.toSet()
+    }
+
+    /** Removes a recording's files and its pin, also the `.part` files. Files in use by a lease stay. */
+    fun remove(libraryId: String, recording: String) {
+        require(isPlainName(libraryId) && isPlainName(recording))
+        synchronized(lock) {
+            pinned.remove(libraryId to recording)
+            for (key in entries.keys.filter { it.libraryId == libraryId && it.recording == recording && it !in inUse }) {
+                if (fileOf(key).delete() || !fileOf(key).exists()) total -= entries.remove(key)?.size ?: 0
+            }
+            folderOf(libraryId, recording).listFiles().orEmpty().filter { it.name.endsWith(PART_SUFFIX) }.forEach { it.delete() }
+        }
+        saveIndex()
+    }
+
+    /** Removes everything that isn't pinned or leased. */
+    fun clearUnpinned() {
+        synchronized(lock) {
+            for (key in entries.keys.filter { (it.libraryId to it.recording) !in pinned && it !in inUse }) {
+                if (fileOf(key).delete() || !fileOf(key).exists()) total -= entries.remove(key)?.size ?: 0
+            }
+        }
+        saveIndex()
+    }
     @Serializable private data class IndexEntry(val library: String, val recording: String, val stream: Int, val chunk: Int, val seq: Long)
     @Serializable private data class IndexPin(val library: String, val recording: String)
     @Serializable private data class Index(val clock: Long = 0, val entries: List<IndexEntry> = emptyList(), val pinned: List<IndexPin> = emptyList())
@@ -104,6 +168,7 @@ class LocalChunkCache private constructor(private val dir: File, val maxBytes: L
             evict(key)
         }
         saveIndex()
+        _completed.tryEmit(key)
         return path
     }
 
@@ -222,6 +287,7 @@ class LocalChunkCache private constructor(private val dir: File, val maxBytes: L
         private const val INDEX_FILE = "cache-index.json"
         private const val PART_SUFFIX = ".part"
         private const val BUFFER_BYTES = 81920
+        private const val COMPLETED_BUFFER = 256
         private val json = Json { ignoreUnknownKeys = true; encodeDefaults = true }
 
         /** Opens (creating if needed), reads the files and bookkeeping, and trims to [maxBytes]. Blocking: call off the main thread. */

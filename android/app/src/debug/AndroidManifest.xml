@@ -2,9 +2,13 @@
 <!-- SPDX-License-Identifier: GPL-3.0-or-later -->
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
     <application>
-        <receiver
-            android:name=".net.DevDownloadReceiver"
-            android:exported="true"
-            android:permission="android.permission.DUMP" />
+        <!-- Debug builds only: `adb shell am start -d spp://recording/<relative folder>` opens a recording on the screen, so checks can drive the app with its saved credentials. -->
+        <activity android:name=".MainActivity" android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:scheme="spp" android:host="recording" />
+            </intent-filter>
+        </activity>
     </application>
 </manifest>

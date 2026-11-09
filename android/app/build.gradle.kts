@@ -48,13 +48,14 @@ dependencies {
     implementation("androidx.compose.ui:ui-tooling-preview")
     implementation("androidx.activity:activity-compose:1.12.4")
     implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.10.0")
+    implementation("androidx.lifecycle:lifecycle-runtime-compose:2.10.0")
     implementation("androidx.work:work-runtime-ktx:2.11.0")
     implementation("org.codelibs:jcifs:3.0.4")
     // Player: mpv 0.42 and FFmpeg as prebuilt shared libraries for all four ABIs; the app packages two (abiFilters above). GPL-3.0-or-later binaries.
     implementation("dev.jdtech.mpv:libmpv:1.0.0")
-    // Export: lossless Mp4Muxer, Transformer for re-encodes. 1.11.1 is the version the S7 spike validated.
-    implementation("androidx.media3:media3-muxer:1.11.1")
+    // Export: Transformer for re-encodes, with its in-app muxer. 1.11.1 is the version the S7 spike validated. The lossless path is the app's own Mp4Remux.
     implementation("androidx.media3:media3-transformer:1.11.1")
+    implementation("androidx.media3:media3-exoplayer:1.11.1")
     implementation("androidx.media3:media3-effect:1.11.1")
     implementation("androidx.media3:media3-common:1.11.1")
     // Game art and trickplay sheets from the local cache.

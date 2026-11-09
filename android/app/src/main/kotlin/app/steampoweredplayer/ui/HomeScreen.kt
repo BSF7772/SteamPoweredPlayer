@@ -48,43 +48,25 @@ import app.steampoweredplayer.smb.ConnectionResult
 import app.steampoweredplayer.smb.RefusedReason
 import app.steampoweredplayer.ui.theme.Brand
 
+/** The servers part of the settings: their profiles, a connection check and the editor. */
 @Composable
-fun HomeScreen(vm: ServersViewModel = viewModel()) {
+fun ServersSection(vm: ServersViewModel) {
     val state by vm.state.collectAsState()
-    Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
-        Column(
-            Modifier.safeDrawingPadding().padding(16.dp).verticalScroll(rememberScrollState()),
-            verticalArrangement = Arrangement.spacedBy(16.dp),
-        ) {
-            Column(Modifier.fillMaxWidth().background(Brand.Gradient, MaterialTheme.shapes.large).padding(20.dp)) {
-                Text(stringResource(R.string.app_name), color = Color.White, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
-            }
-            val context = LocalContext.current
-            val meteredNotice by Downloads.meteredNotice.collectAsState()
-            if (meteredNotice) {
+    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        val editing = state.editing
+        if (editing != null) {
+            ProfileEditor(editing, onSave = vm::save, onCancel = vm::cancelEdit)
+        } else {
+            if (state.profiles.isEmpty()) {
                 SppCard {
-                    Text(stringResource(R.string.metered_notice), style = MaterialTheme.typography.bodyMedium)
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        TextButton({ Downloads.closeMeteredNotice(context, forever = false) }) { Text(stringResource(R.string.ok)) }
-                        TextButton({ Downloads.closeMeteredNotice(context, forever = true) }) { Text(stringResource(R.string.dont_show_again)) }
-                    }
+                    Text(stringResource(R.string.home_empty_title), style = MaterialTheme.typography.titleMedium)
+                    Text(stringResource(R.string.home_empty_body), style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
             }
-            val editing = state.editing
-            if (editing != null) {
-                ProfileEditor(editing, onSave = vm::save, onCancel = vm::cancelEdit)
-            } else {
-                if (state.profiles.isEmpty()) {
-                    SppCard {
-                        Text(stringResource(R.string.home_empty_title), style = MaterialTheme.typography.titleMedium)
-                        Text(stringResource(R.string.home_empty_body), style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    }
-                }
-                state.profiles.forEach { profile ->
-                    ProfileCard(profile, state.attempt?.takeIf { it.profileId == profile.id }, vm)
-                }
-                Button(vm::add) { Text(stringResource(R.string.add_server)) }
+            state.profiles.forEach { profile ->
+                ProfileCard(profile, state.attempt?.takeIf { it.profileId == profile.id }, vm)
             }
+            Button(vm::add) { Text(stringResource(R.string.add_server)) }
         }
     }
 }

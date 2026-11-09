@@ -4,6 +4,7 @@ package app.steampoweredplayer.data
 import java.io.IOException
 import java.io.InputStream
 import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.first
@@ -65,6 +66,7 @@ class ChunkDownloader(
     private val inFlight = HashSet<ChunkKey>()
     private val sizeRetries = HashMap<ChunkKey, Int>()
     private var playhead = 0
+    private var finishing = false
     private val networkGeneration = MutableStateFlow(0)
     private val _progress = MutableStateFlow(DownloadProgress())
     val progress: StateFlow<DownloadProgress> = _progress
@@ -87,6 +89,16 @@ class ChunkDownloader(
     /** The playhead moved: fetch from there next. */
     suspend fun seek(playheadChunk: Int) = lock.withLock { playhead = playheadChunk }
 
+    /** More to fetch while running. False once [run] has taken its last file: the caller starts a new job then. */
+    suspend fun add(chunks: Iterable<Int>, playheadChunk: Int): Boolean = lock.withLock {
+        if (finishing) return@withLock false
+        playhead = playheadChunk
+        val more = chunks.flatMap { n -> (0..1).map { key(it, n) } }.filterNot { it in cache || it in pending || it in inFlight }
+        pending.addAll(more)
+        if (more.isNotEmpty()) _progress.update { it.copy(filesTotal = it.filesTotal + more.size) }
+        true
+    }
+
     /** A network came up or changed: stop waiting and try now, starting again from the first source. */
     suspend fun onNetworkChanged() {
         lock.withLock { policy.onNetworkChanged() }
@@ -102,7 +114,21 @@ class ChunkDownloader(
 
     private suspend fun work() {
         while (true) {
-            val key = claim() ?: return
+            val key = claim()
+            if (key == null) {
+                // Another worker's file can come back after a dropped connection, and more can be added while one is in flight.
+                val over = lock.withLock {
+                    if (inFlight.isEmpty()) {
+                        finishing = true
+                        true
+                    } else {
+                        false
+                    }
+                }
+                if (over) return
+                delay(IDLE_WAIT_MILLIS)
+                continue
+            }
             try {
                 awaitTurn()
                 fetch(key)
@@ -201,5 +227,6 @@ class ChunkDownloader(
 
     private companion object {
         const val MAX_SIZE_RETRIES = 3
+        const val IDLE_WAIT_MILLIS = 50L
     }
 }
