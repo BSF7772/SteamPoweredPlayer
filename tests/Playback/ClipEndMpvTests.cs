@@ -67,7 +67,7 @@ public sealed class ClipEndMpvTests : IDisposable
     {
         var settings = Settings(encoder);
         var media = await Scan();
-        var spans = ExportSpans.Plans(media, [new ExportSpan(media.ChunkStartSeconds(1), media.ChunkEndSeconds(4))], settings.Encoder == "copy");
+        var spans = ExportSpans.Plans(media, [new ExportSpan(media.ChunkStartSeconds(1), media.ChunkEndSeconds(4))]);
         Assert.Equal(Intended, spans[0].End, 6);
         var r = await ExportService.RunAsync(new ExportJob(media, [new ExportSpan(media.ChunkStartSeconds(1), media.ChunkEndSeconds(4))], settings, new EditSettings(), _out, "out"), null, default);
         var (video, audio) = await Lengths(r.Path);

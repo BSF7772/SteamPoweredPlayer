@@ -20,23 +20,23 @@ public sealed class ExportEditRulesTests
     }
 
     [Fact]
-    public void Lossless_spans_sharing_a_chunk_merge_so_no_chunk_is_written_twice()
+    public void Lossless_spans_keep_their_exact_times_even_inside_one_chunk()
     {
-        var plans = ExportSpans.Plans(Media(), [new(1, 2), new(2.5, 3.5), new(20, 21)], lossless: true);
-        Assert.Equal([(1, 2), (7, 7)], plans.Select(p => (p.FirstChunk, p.LastChunk)));
-        // Intentional change (edit-list start): the FIRST plan keeps its exact start (its lead-in is hidden); later ones start on their keyframe.
-        Assert.Equal((1.0, 3.5), (plans[0].Start, plans[0].End));
-        Assert.Equal(18.0, plans[1].Start);
+        var plans = ExportSpans.Plans(Media(), [new(1, 2), new(2.5, 3.5), new(20, 21)]);
+        Assert.Equal([(1, 1), (1, 2), (7, 7)], plans.Select(p => (p.FirstChunk, p.LastChunk)));
+        Assert.Equal([1.0, 2.5, 20.0], plans.Select(p => p.Start));
+        Assert.Equal([2.0, 3.5, 21.0], plans.Select(p => p.End));
     }
 
     [Fact]
-    public void A_lossless_plan_counts_from_a_and_one_on_its_keyframe_counts_from_the_first_dts()
+    public void Only_the_recordings_own_first_and_last_chunk_keep_frames_off_the_grid()
     {
-        var inside = ExportPlan.For(Media(), 4.5, 8)!;                  // chunk 2 starts at 3 s
-        Assert.Equal(4.499, ExportService.LosslessOrigin(inside, 2.967), 6);
-        var onKeyframe = ExportPlan.For(Media(), 3, 8)!;
-        Assert.Equal(2.967, ExportService.LosslessOrigin(onKeyframe, 2.967), 6);
-        Assert.Equal(5.0, ExportService.LosslessOrigin(inside, 5.0), 6);   // a first packet after A is never cut away
+        var media = Media();
+        Assert.Equal((true, false), Open(ExportPlan.For(media, 0, 3)!));
+        Assert.Equal((false, true), Open(ExportPlan.For(media, 27, 30)!));
+        Assert.Equal((false, false), Open(ExportPlan.For(media, 3, 6)!));
+        Assert.Equal((false, false), Open(ExportPlan.For(media, 1, 29)!));
+        (bool, bool) Open(ExportPlan p) { var r = ExportService.RangeOf(media, p); return (r.OpenHead, r.OpenTail); }
     }
 
     [Theory]
@@ -50,22 +50,9 @@ public sealed class ExportEditRulesTests
     }
 
     [Fact]
-    public void Lossless_args_count_from_a_so_the_keyframe_is_negative_and_the_muxer_writes_an_edit_list()
-    {
-        // Intentional change: no -ss/make_zero on the picture any more (they shift everything, so no edit list).
-        var audio = string.Join(' ', ExportService.LosslessAudioArgs("a", "c", 100, 106.5, -1.5));
-        Assert.Contains("-copyts -itsoffset -101.5 -i a", audio);
-        Assert.Contains("-ss 0 -to 6.5", audio);
-        var video = string.Join(' ', ExportService.LosslessArgs("v", "c", "o", 100, 106.5));
-        Assert.Contains("-itsoffset -100 -i v -i c", video);
-        Assert.Contains("-to 6.5 -avoid_negative_ts disabled", video);
-        Assert.DoesNotContain("-ss", video);
-    }
-
-    [Fact]
     public void Encoded_spans_keep_their_exact_times()
     {
-        var plans = ExportSpans.Plans(Media(), [new(1, 2), new(2.5, 3.5)], lossless: false);
+        var plans = ExportSpans.Plans(Media(), [new(1, 2), new(2.5, 3.5)]);
         Assert.Equal(2, plans.Count);
         Assert.Equal(1.0, plans[0].Start);
     }
@@ -80,7 +67,7 @@ public sealed class ExportEditRulesTests
     [Fact]
     public void Chapters_map_through_cuts_and_speed_and_drop_what_was_cut()
     {
-        var plans = ExportSpans.Plans(Media(), [new(0, 3), new(9, 12)], false);
+        var plans = ExportSpans.Plans(Media(), [new(0, 3), new(9, 12)]);
         var c = ExportChapters.Layout(plans, [new(9, "b"), new(1, "a"), new(5, "gone"), new(1.0001, "same instant")], 2);
         Assert.Equal([new OutputChapter(0, 0.5, "Start"), new OutputChapter(0.5, 1.5, "a"), new OutputChapter(1.5, 3, "b")], c);
     }
@@ -109,7 +96,7 @@ public sealed class ExportEditRulesTests
     public void Samples_stay_inside_the_kept_spans()
     {
         var media = Media();
-        var plans = ExportSpans.Plans(media, [new(0, 3), new(15, 30)], false);
+        var plans = ExportSpans.Plans(media, [new(0, 3), new(15, 30)]);
         var samples = ExportService.SamplePlans(media, plans);
         Assert.Equal(2, samples.Count);
         Assert.All(samples, s => Assert.Contains(plans, p => s.Start >= p.Start && s.End <= p.End));
@@ -337,16 +324,16 @@ public sealed class ExportEditEndToEndTests : IDisposable
     }
 
     [Fact]
-    public async Task Two_lossless_spans_hide_the_lead_in_of_the_first_and_start_the_second_on_its_keyframe()
+    public async Task Two_lossless_spans_each_start_on_their_a()
     {
-        // The concat join can't carry an edit list into the middle of the file, so only the first span is frame-exact.
+        // Intentional change: the second span used to show its lead-in from the keyframe (6 s), because the concat join dropped its edit list. One edit list per range now.
         var r = await ExportService.RunAsync(Job(Copy, new ExportSpan(O + 1, O + 2), new ExportSpan(O + 7.5, O + 10)), null, default);
-        Assert.InRange((await Ff.ProbeAsync(r.Path))!.Duration, 5 - 0.1, 5 + 0.15);   // 1 s + (10 - 6) s
+        Assert.InRange((await Ff.ProbeAsync(r.Path))!.Duration, 3.5 - 0.05, 3.5 + 0.05);   // 1 s + 2.5 s
         var source = await SourceFramesAsync();
         Assert.InRange(await ShownFrameAsync(r.Path, source: source), O + 1 - 0.001, O + 1 + 0.034);
         var all = await FramesAsync(r.Path);
         var secondStart = source.Single(f => f.Md5 == all[30].Md5).Pts;    // 1 s into the output
-        Assert.InRange(secondStart, O + 6 - 0.001, O + 6 + 0.07);
+        Assert.InRange(secondStart, O + 7.5 - 0.001, O + 7.5 + 0.07);
     }
 
     [Theory]

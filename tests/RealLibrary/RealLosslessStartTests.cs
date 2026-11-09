@@ -97,7 +97,7 @@ public sealed class RealLosslessStartTests(ITestOutputHelper output) : IDisposab
                 + $"chapters {chapters}; {r.Bytes / 1024} KiB");
             if (keep is { Length: > 0 } && Directory.Exists(keep)) File.Copy(r.Path, Path.Combine(keep, Path.GetFileName(r.Path)), true);
 
-            Assert.InRange(info.Duration, length - 0.05, length + 0.1);
+            Assert.InRange(info.Duration, length - 0.034, length + 0.034);        // B, to within the last frame's own length; the frames themselves are checked exactly
             Assert.Single(shown);
             Assert.InRange(shown[0] - a, -0.002, 0.034);
             Assert.InRange(s.VStart, 0, 0.05);

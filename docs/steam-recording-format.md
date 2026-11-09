@@ -53,7 +53,7 @@ as a clip). Regex: `^(bg|fg)_(\d+)_(\d{8})_(\d{6})(?:_(\d+))?$`. Empty `video/bg
   `init-stream1.m4s` (audio), `chunk-stream{0,1}-NNNNN.m4s`, 3.000 s per segment.
 - Typical video: HEVC Main (`hev1`), 1080p–1440p at 59.94 fps, ~22 Mbps, **`yuvj420p` (full range)**. Older or other GPUs can give
   H.264 (`avc1`). Audio: AAC-LC 48 kHz stereo, 128 kbps.
-- **One IDR at the start of each chunk** (GOP = 3 s). A lossless cut is read from the keyframe before its start (up to 3 s earlier); an MP4 edit list hides those lead-in frames so the file plays from the exact start. Cutting the picture inside a GOP itself needs a re-encode.
+- **One IDR at the start of each chunk** (GOP = 3 s). A lossless cut stores whole chunks, from the keyframe before its start (up to 3 s earlier); MP4 edit lists show just the frames of each kept range, so the file plays exactly those. The frames past the end must stay stored too: with `P B B` order a frame shown before the end can reference one stored after it. Cutting the picture inside a GOP itself needs a re-encode.
 - Chunks carry absolute `tfdt`, and frames are stamped unevenly (game-capture jitter). **The `tfdt` axis is the session's absolute
   time**: chunk N starts at about (N−1) × 3 s (+ up to 8 ms) in live sessions and also in trimmed sessions (a session whose chunk
   1881 sits at 5640.006 s). Clips restart the chunk numbers at 1 but **not** `tfdt` (chunk 1 of one clip starts at 585.0 s).
@@ -81,7 +81,7 @@ The chunks don't say where it ends (picture and sound both run to the last chunk
 `<Period start="PT25M34.317S">` (on the chunks' tfdt axis) and `mediaPresentationDuration="PT10.092S"` on `<MPD>` (the numbers here are
 an example). `clip.pb` repeats the duration (field 1.4 and 1.5.3, in ms) but has no start. The intended window is
 `[Period start, Period start + duration]`, and Steam's own player shows only that. So does this app: the player and every export use
-`SessionMedia.StartSeconds`..`EndSeconds` (`ClipBounds`), and a lossless export hides the lead-in with an MP4 edit list.
+`SessionMedia.StartSeconds`..`EndSeconds` (`ClipBounds`), and a lossless export hides what lies outside it with MP4 edit lists.
 
 Measured on all 196 saved clips of one real library that had a readable manifest and contiguous chunks:
 - `pb duration == mediaPresentationDuration` in 195 (the other, a clip received from another device, differs by 0.36 s; the manifest is what the player uses).
@@ -97,9 +97,7 @@ Measured on all 196 saved clips of one real library that had a readable manifest
 SteamPoweredPlayer applies it in `ClipBounds` (Core): the scanner sets `SessionMedia.EndLimitSeconds` for clips only, and `EndSeconds`,
 `DurationSeconds`, the player (mpv `end=`, since an EDL part's `length` does not cut an `mp4_dash` segment, tested with mpv), the timeline,
 seeking and every export range stop there. Cache sessions have no such end (their live tail is a different case: the newest chunks can
-hold about 0.8 s less video than audio). **Not applied: the head.** The first chunk also starts 0 to 3 s before `Period start`; the
-player still opens at the first chunk, and a lossless export still starts on the keyframe at that chunk's start (only a re-encode can start
-at `Period start`).
+hold about 0.8 s less video than audio). The first chunk also starts 0 to 3 s before `Period start`; the player opens at `Period start`, and every export starts there too (a lossless one through its edit list).
 
 ## The manifest is not the truth
 Seen in practice:

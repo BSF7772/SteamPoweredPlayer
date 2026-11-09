@@ -22,9 +22,9 @@ public sealed record ExportResult(string Path, long Bytes, IReadOnlyList<ExportP
 /// <summary>
 /// Runs an export. Each kept span is handled alone: its chunks are copied through <see cref="RangeSource"/> first, so Steam can keep
 /// trimming its cache while ffmpeg works on private bytes. The audio takes extra chunks (<see cref="ExportPlan.AudioChunks"/>), so a
-/// sync shift or Steam's jitter never runs out of sound. A lossless span is then muxed on the real timestamps, cut to the picture and
-/// played from A through an edit list over the keyframe's lead-in (see <see cref="LosslessArgs"/>);
-/// a re-encode goes through FastEncoder's <see cref="Pipeline"/> with a frame-exact trim. Several spans are joined without re-encoding.
+/// sync shift or Steam's jitter never runs out of sound. A lossless export stores the kept ranges' whole chunks and shows exactly their
+/// frames through edit lists (<see cref="LosslessEdits"/>); a re-encode goes through FastEncoder's <see cref="Pipeline"/> with a frame-exact
+/// trim, and several spans are joined without re-encoding again.
 /// Working files stay in a private folder next to the destination (same volume, so the final move is atomic), so a failed or
 /// cancelled export never leaves a partial output.
 /// </summary>
@@ -46,7 +46,7 @@ public static class ExportService
         RequireFfmpeg();
         if (ExportPaths.IsInside(job.OutputFolder, job.ForbiddenRoot))
             throw new InvalidOperationException("Exports can't be saved inside Steam's recording folder. Choose another folder.");
-        var plans = ExportSpans.Plans(job.Media, job.Spans, job.Lossless);
+        var plans = ExportSpans.Plans(job.Media, job.Spans);
         if (plans.Count == 0) throw new InvalidOperationException("Nothing to export: Steam no longer has this range.");
 
         Directory.CreateDirectory(job.OutputFolder);
@@ -55,7 +55,17 @@ public static class ExportService
         File.SetAttributes(work, File.GetAttributes(work) | FileAttributes.Hidden);
         try
         {
-            var extension = job.Lossless ? ".mp4" : "." + job.Settings.Container;
+            if (job.Lossless)
+            {
+                var clip = await LosslessAsync(job, plans, work, (f, stage) => progress?.Report(new ExportProgress(Math.Min(0.99, f), stage)), ct).ConfigureAwait(false);
+                ct.ThrowIfCancellationRequested();
+                var saved = ExportPaths.Unique(job.OutputFolder, job.Stem, ".mp4");
+                File.Move(clip, saved);
+                progress?.Report(new ExportProgress(1, "Done"));
+                return new ExportResult(saved, new FileInfo(saved).Length, plans);
+            }
+
+            var extension = "." + job.Settings.Container;
             var totalSpan = plans.Sum(p => p.End - p.Start);
             var segments = new List<string>(plans.Count);
             double finished = 0;
@@ -71,7 +81,7 @@ public static class ExportService
             }
 
             var produced = segments[0];
-            var outputSeconds = ExportSpans.OutputSeconds(plans, job.Lossless ? 1 : job.Edit.Speed);
+            var outputSeconds = ExportSpans.OutputSeconds(plans, job.Edit.Speed);
             if (segments.Count > 1)
             {
                 produced = Path.Combine(work, "joined" + extension);
@@ -80,7 +90,7 @@ public static class ExportService
                 await Pipeline.RunAsync(ConcatArgs(list, produced), outputSeconds, (_, _) => { }, ct).ConfigureAwait(false);
             }
 
-            var chapters = ExportChapters.Layout(plans, job.Chapters ?? [], job.Lossless ? 1 : job.Edit.Speed);
+            var chapters = ExportChapters.Layout(plans, job.Chapters ?? [], job.Edit.Speed);
             if (chapters.Count > 0)
             {
                 var meta = Path.Combine(work, "chapters.txt");
@@ -107,7 +117,6 @@ public static class ExportService
     {
         Directory.CreateDirectory(dir);
         var audio = ExportPlan.AudioChunks(job.Media, plan, job.AudioDelay);
-        if (job.Lossless) return await LosslessAsync(job, plan, audio, dir, progress, ct).ConfigureAwait(false);
 
         const double gatherEnd = 0.05, muxEnd = 0.07;
         var (mux, origin) = await JoinAsync(job.Media, plan, audio, dir, gatherEnd, muxEnd, progress, ct).ConfigureAwait(false);
@@ -124,67 +133,75 @@ public static class ExportService
     }
 
     /// <summary>
-    /// A lossless span: the picture is copied from the keyframe of its first chunk to the exact end, and the sound is cut to the same
-    /// times. When the plan starts after that keyframe, the lead-in frames stay in the file (they are what the first frames reference)
-    /// but an MP4 edit list hides them: timestamps count from A, the keyframe sits at a negative time, and the file plays from A.
+    /// A lossless export. The picture only starts on a chunk's first frame, and with B-frames a frame shown before B can need one stored
+    /// after it, so every kept range's whole chunks go into one file, each chunk once, on their real timestamps. Edit lists then show
+    /// exactly the source frames in each range and hide the rest: no sample is touched. Chapters go in with the join, because a later
+    /// remux would read through the edit lists.
     /// </summary>
-    private static async Task<string> LosslessAsync(ExportJob job, ExportPlan plan, (int First, int Last) audioChunks, string dir, Action<double, string> progress, CancellationToken ct)
+    private static async Task<string> LosslessAsync(ExportJob job, IReadOnlyList<ExportPlan> plans, string dir, Action<double, string> progress, CancellationToken ct)
     {
-        const double gatherEnd = 0.9;
+        const double gatherEnd = 0.85, muxEnd = 0.95;
         var video = Path.Combine(dir, "video.mp4");
         var audio = Path.Combine(dir, "audio.m4a");
-        await GatherAsync(job.Media, plan, audioChunks, video, audio, f => progress(f * gatherEnd, "Reading chunks"), ct).ConfigureAwait(false);
-        var first = await FirstDtsAsync(video, ct).ConfigureAwait(false) ?? plan.SnappedStart;
-        var origin = LosslessOrigin(plan, first);
-        var end = LosslessEnd(plan);
-        var cut = Path.Combine(dir, "audio-cut.m4a");
+        var videoChunks = plans.SelectMany(p => Enumerable.Range(p.FirstChunk, p.LastChunk - p.FirstChunk + 1)).ToHashSet();
+        var audioChunks = plans.Select(p => ExportPlan.AudioChunks(job.Media, p, job.AudioDelay)).SelectMany(r => Enumerable.Range(r.First, r.Last - r.First + 1)).ToHashSet();
+        await using (var v = RangeSource.Create(job.Media, 0, videoChunks))
+        await using (var a = RangeSource.Create(job.Media, 1, audioChunks))
+            await GatherAsync(v, a, video, audio, f => progress(f * gatherEnd, "Reading chunks"), ct).ConfigureAwait(false);
+
+        var chapters = ExportChapters.Layout(plans, job.Chapters ?? [], 1);
+        string? metadata = null;
+        if (chapters.Count > 0)
+        {
+            metadata = Path.Combine(dir, "chapters.txt");
+            await File.WriteAllTextAsync(metadata, ExportChapters.Metadata(chapters), ct).ConfigureAwait(false);
+        }
+        var mux = Path.Combine(dir, "mux.mp4");
+        await Pipeline.RunAsync(MuxArgs(video, audio, mux, metadata), plans.Sum(p => p.SnappedEnd - p.SnappedStart),
+            (f, _) => progress(gatherEnd + f * (muxEnd - gatherEnd), "Joining"), ct).ConfigureAwait(false);
+
+        var scales = Mp4EditList.ReadTimescales(mux);
+        var stored = await Task.WhenAll(PacketsAsync(video, mux, "v:0", ct), PacketsAsync(audio, mux, "a:0", ct)).ConfigureAwait(false);
+        var ranges = plans.Select(p => RangeOf(job.Media, p)).ToList();
+        var (pictureEdits, soundEdits) = LosslessEdits.Compute(ranges, stored[0], stored[1], scales, job.AudioDelay);
+        if (pictureEdits.Count == 0) throw new InvalidOperationException("Nothing to export: no frame falls inside this range.");
+
         var output = Path.Combine(dir, "out.mp4");
-        var span = plan.End - plan.SnappedStart;
-        await Pipeline.RunAsync(LosslessAudioArgs(audio, cut, origin, end, job.AudioDelay), span,
-            (f, _) => progress(gatherEnd + f * 0.5 * (1 - gatherEnd), "Joining"), ct).ConfigureAwait(false);
-        await Pipeline.RunAsync(LosslessArgs(video, cut, output, origin, end), span,
-            (f, _) => progress(gatherEnd + (0.5 + f * 0.5) * (1 - gatherEnd), "Joining"), ct).ConfigureAwait(false);
+        Mp4EditList.Rewrite(mux, output, pictureEdits, soundEdits);
         File.Delete(video);                                                                          // this job's own files: free the space early
         File.Delete(audio);
-        File.Delete(cut);
+        File.Delete(mux);
         return output;
     }
 
-    /// <summary>The exact end; at a chunk's edge a little past it, because Steam's chunks run a few ms off the grid and a last frame must not go.</summary>
-    public static double LosslessEnd(ExportPlan plan) => plan.End >= plan.SnappedEnd - 0.001 ? plan.End + 0.05 : plan.End;
+    /// <summary>A range's frames are those in [Start, End), except at the recording's own first and last chunk: no frame there is ever cut for sitting a few ms off the grid.</summary>
+    public static LosslessRange RangeOf(SessionMedia media, ExportPlan plan) =>
+        new(plan.Start, plan.End,
+            plan.FirstChunk == media.FirstChunk && plan.Start <= plan.SnappedStart + 0.001,
+            plan.LastChunk == media.LastChunk && plan.End >= plan.SnappedEnd - 0.001);
 
-    /// <summary>
-    /// The instant on the media axis that becomes 0 in a lossless output. A plan that starts after its keyframe counts from A (1 ms
-    /// early, so a frame stamped exactly on A is kept), which makes the keyframe's timestamp negative. A plan that starts on its keyframe
-    /// counts from <paramref name="firstDts"/>, the first packet's dts, so that packet is never cut away.
-    /// </summary>
-    public static double LosslessOrigin(ExportPlan plan, double firstDts) =>
-        plan.Start > plan.SnappedStart + 0.001 ? Math.Max(plan.Start - 0.001, firstDts) : firstDts;   // a first packet after A (jitter) is never cut away
+    /// <summary>A track's packets on the source axis, paired in file order with their ticks on the joined file's media axis (edit lists ignored).</summary>
+    private static async Task<StoredPackets> PacketsAsync(string source, string joined, string stream, CancellationToken ct)
+    {
+        var from = await ProbePacketsAsync(source, stream, [], ct).ConfigureAwait(false);
+        var to = await ProbePacketsAsync(joined, stream, ["-ignore_editlist", "1"], ct).ConfigureAwait(false);
+        return new StoredPackets(from.Select(p => p.Seconds).ToList(), to.Select(p => p.Ticks).ToList());
+    }
 
-    /// <summary>
-    /// The sound of a lossless span as its own file. <c>-copyts</c> keeps the absolute tfdt, <c>-itsoffset</c> applies the sync and moves
-    /// <paramref name="origin"/> to 0; <c>-ss 0</c> drops the sound before it, and <c>-to</c> ends it with the picture. Every audio frame is
-    /// a key frame, so it cuts anywhere (to within one frame, 21 ms).
-    /// </summary>
-    public static List<string> LosslessAudioArgs(string audio, string output, double origin, double end, double audioDelay) =>
-    [
-        "-hide_banner", "-nostdin", "-y", "-loglevel", "error", "-progress", "pipe:1", "-nostats", "-copyts",
-        "-itsoffset", Number(audioDelay - origin), "-i", audio, "-vn", "-c", "copy",
-        "-ss", "0", "-to", Number(end - origin), "-avoid_negative_ts", "disabled", output,
-    ];
-
-    /// <summary>
-    /// The picture and the cut sound as one file. <c>-itsoffset</c> moves <paramref name="origin"/> to 0, so the keyframe before it gets a
-    /// negative timestamp; <c>-avoid_negative_ts disabled</c> keeps it, and the MP4 muxer writes an edit list that starts the track at 0.
-    /// There is no <c>-ss</c> on purpose: it shifts every timestamp and so writes no edit list. <c>-to</c> ends the picture on B.
-    /// </summary>
-    /// <param name="audio">The sound from <see cref="LosslessAudioArgs"/>, already counting from the same origin.</param>
-    public static List<string> LosslessArgs(string video, string audio, string output, double origin, double end) =>
-    [
-        "-hide_banner", "-nostdin", "-y", "-loglevel", "error", "-progress", "pipe:1", "-nostats", "-copyts",
-        "-itsoffset", Number(-origin), "-i", video, "-i", audio, "-map", "0:v:0", "-map", "1:a:0", "-c", "copy",
-        "-to", Number(end - origin), "-avoid_negative_ts", "disabled", "-movflags", "+faststart", output,
-    ];
+    private static async Task<List<(long Ticks, double Seconds)>> ProbePacketsAsync(string path, string stream, string[] options, CancellationToken ct)
+    {
+        var r = await Ff.RunAsync(Ff.Ffprobe, ["-v", "error", .. options, "-select_streams", stream, "-show_entries", "packet=pts,pts_time", "-of", "csv=p=0", path], ct).ConfigureAwait(false);
+        var result = new List<(long, double)>();
+        foreach (var line in r.StdOut.Split('\n', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries))
+        {
+            var cells = line.Split(',');
+            if (cells.Length < 2 || !long.TryParse(cells[0], NumberStyles.Integer, CultureInfo.InvariantCulture, out var ticks)
+                || !double.TryParse(cells[1], NumberStyles.Float, CultureInfo.InvariantCulture, out var seconds))
+                throw new InvalidOperationException("ffprobe gave a packet without a time in the joined recording.");
+            result.Add((ticks, seconds));
+        }
+        return result;
+    }
 
     /// <summary>
     /// The first packet's dts as ffmpeg reads it. A chunk's tfdt isn't that: the init segment's edit list moves it, by 66 ms on a real clip.
@@ -195,15 +212,15 @@ public static class ExportService
         return double.TryParse(r.StdOut.Split('\n', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries).FirstOrDefault()?.TrimEnd(','), NumberStyles.Float, CultureInfo.InvariantCulture, out var dts) ? dts : null;
     }
 
-    private static string Number(double value) => value.ToString("0.######", CultureInfo.InvariantCulture);
-
     /// <summary>Copies a plan's chunks into <paramref name="dir"/> and muxes them; returns the mux and the instant that became its 0.</summary>
     private static async Task<(string Mux, double Origin)> JoinAsync(SessionMedia media, ExportPlan plan, (int First, int Last) audioChunks, string dir, double gatherEnd, double muxEnd,
         Action<double, string> progress, CancellationToken ct)
     {
         var video = Path.Combine(dir, "video.mp4");
         var audio = Path.Combine(dir, "audio.m4a");
-        await GatherAsync(media, plan, audioChunks, video, audio, f => progress(f * gatherEnd, "Reading chunks"), ct).ConfigureAwait(false);
+        await using (var v = RangeSource.Create(media, 0, plan.FirstChunk, plan.LastChunk))
+        await using (var a = RangeSource.Create(media, 1, audioChunks.First, audioChunks.Last))
+            await GatherAsync(v, a, video, audio, f => progress(f * gatherEnd, "Reading chunks"), ct).ConfigureAwait(false);
         // make_zero below moves the earliest packet of the two to 0, so that instant is where the trim counts from.
         var origin = Math.Min(await FirstDtsAsync(video, ct).ConfigureAwait(false) ?? plan.SnappedStart, await FirstDtsAsync(audio, ct).ConfigureAwait(false) ?? double.MaxValue);
         var mux = Path.Combine(dir, "mux.mp4");
@@ -226,10 +243,11 @@ public static class ExportService
     }
 
     /// <summary><c>-copyts</c> keeps the absolute tfdt of both streams, so they stay aligned; <c>make_zero</c> then moves them together to 0.</summary>
-    public static List<string> MuxArgs(string video, string audio, string output) =>
+    public static List<string> MuxArgs(string video, string audio, string output, string? chapterMetadata = null) =>
     [
         "-hide_banner", "-nostdin", "-y", "-loglevel", "error", "-progress", "pipe:1", "-nostats", "-copyts",
-        "-i", video, "-i", audio, "-map", "0:v:0", "-map", "1:a:0", "-c", "copy",
+        "-i", video, "-i", audio, .. chapterMetadata is null ? (string[])[] : ["-f", "ffmetadata", "-i", chapterMetadata, "-map_chapters", "2"],
+        "-map", "0:v:0", "-map", "1:a:0", "-c", "copy",
         "-avoid_negative_ts", "make_zero", "-movflags", "+faststart", output,
     ];
 
@@ -246,10 +264,8 @@ public static class ExportService
         "-movflags", "+faststart", output,
     ];
 
-    private static async Task GatherAsync(SessionMedia media, ExportPlan plan, (int First, int Last) audioChunks, string video, string audio, Action<double> progress, CancellationToken ct)
+    private static async Task GatherAsync(RangeSource v, RangeSource a, string video, string audio, Action<double> progress, CancellationToken ct)
     {
-        await using var v = RangeSource.Create(media, 0, plan.FirstChunk, plan.LastChunk);
-        await using var a = RangeSource.Create(media, 1, audioChunks.First, audioChunks.Last);
         var total = Math.Max(1, v.Length + a.Length);
         long done = 0;
         foreach (var (source, path) in new[] { ((Stream)v, video), (a, audio) })
@@ -299,9 +315,9 @@ public static class ExportService
     public static async Task<long> EstimateAsync(ExportJob job, CancellationToken ct)
     {
         RequireFfmpeg();
-        var plans = ExportSpans.Plans(job.Media, job.Spans, job.Lossless);
+        var plans = ExportSpans.Plans(job.Media, job.Spans);
         if (plans.Count == 0) return 0;
-        if (job.Lossless) return plans.Sum(p => ChunkBytes(job.Media, p));
+        if (job.Lossless) return ChunkBytes(job.Media, plans);
         if (job.Settings.TargetSize) return (long)(job.Settings.TargetMB * 1024 * 1024);
 
         var total = plans.Sum(p => p.End - p.Start);
@@ -351,10 +367,10 @@ public static class ExportService
         return result;
     }
 
-    private static long ChunkBytes(SessionMedia media, ExportPlan plan)
+    private static long ChunkBytes(SessionMedia media, IReadOnlyList<ExportPlan> plans)
     {
         long bytes = 0;
-        foreach (var chunk in media.Chunks().Where(c => c >= plan.FirstChunk && c <= plan.LastChunk))
+        foreach (var chunk in media.Chunks().Where(c => plans.Any(p => c >= p.FirstChunk && c <= p.LastChunk)))      // a chunk two ranges share is stored once
             for (var stream = 0; stream < 2; stream++)
             {
                 var info = new FileInfo(Path.Combine(media.Folder, Steam.FolderNames.ChunkFile(stream, chunk)));

@@ -222,10 +222,10 @@ public sealed class ClipEndTests
     }
 
     [Fact]
-    public void Lossless_end_of_a_trimmed_plan_is_exact_not_padded()
+    public void End_of_a_trimmed_plan_is_exact_not_padded()
     {
         var plan = ExportPlan.Whole(Clip(1544.409))!;
-        Assert.Equal(1544.409, ExportService.LosslessEnd(plan), 9);
+        Assert.Equal(1544.409, plan.End, 9);
         var (_, end) = ExportService.OutputTrim(plan, 1533.01, 11.99);
         Assert.Equal(1544.409 - 1533.01, end!.Value, 6);               // a re-encode cuts there too instead of running to the file's end
     }

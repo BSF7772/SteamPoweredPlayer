@@ -58,7 +58,19 @@ public sealed class RangeSource : Stream
         ArgumentOutOfRangeException.ThrowIfNegative(stream);
         ArgumentOutOfRangeException.ThrowIfGreaterThan(stream, 1);
         ArgumentOutOfRangeException.ThrowIfGreaterThan(firstChunk, lastChunk);
+        return Build(media, stream, c => c >= firstChunk && c <= lastChunk);
+    }
 
+    /// <summary>The init segment and exactly the chunks in <paramref name="chunks"/>, in order: the chunks of several kept ranges, each once.</summary>
+    public static RangeSource Create(SessionMedia media, int stream, IReadOnlySet<int> chunks)
+    {
+        ArgumentOutOfRangeException.ThrowIfNegative(stream);
+        ArgumentOutOfRangeException.ThrowIfGreaterThan(stream, 1);
+        return Build(media, stream, chunks.Contains);
+    }
+
+    private static RangeSource Build(SessionMedia media, int stream, Func<int, bool> wanted)
+    {
         var parts = new List<Part>();
         long start = 0;
 
@@ -68,7 +80,7 @@ public sealed class RangeSource : Stream
         parts.Add(new Part(init, null, initInfo.Length, start));
         start += initInfo.Length;
 
-        foreach (var chunk in media.Chunks().Where(c => c >= firstChunk && c <= lastChunk))
+        foreach (var chunk in media.Chunks().Where(wanted))
         {
             var path = System.IO.Path.Combine(media.Folder, FolderNames.ChunkFile(stream, chunk));
             var info = new FileInfo(path);

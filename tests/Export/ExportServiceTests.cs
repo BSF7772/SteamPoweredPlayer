@@ -126,6 +126,73 @@ public sealed class ExportServiceTests : IDisposable
         Assert.Equal([Path.GetFileName(r.Path)], Directory.GetFileSystemEntries(_out).Select(Path.GetFileName));   // no working files left
     }
 
+    /// <summary>Hash of every decoded frame with its pts, as a player shows them.</summary>
+    private static async Task<List<(double Pts, string Md5)>> ShownFrames(string path)
+    {
+        if (!Ff.Available) Ff.Locate();
+        var times = (await Ff.RunAsync(Ff.Ffprobe, ["-v", "error", "-select_streams", "v:0", "-show_entries", "frame=pts_time", "-of", "csv=p=0", path])).StdOut
+            .Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).Select(l => double.Parse(l.TrimEnd(','), System.Globalization.CultureInfo.InvariantCulture)).ToList();
+        var md5 = (await Ff.RunAsync(Ff.Ffmpeg, ["-v", "error", "-i", path, "-map", "0:v:0", "-fps_mode", "passthrough", "-f", "framemd5", "-"])).StdOut
+            .Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).Where(l => !l.StartsWith('#')).Select(l => l.Split(',')[^1].Trim()).ToList();
+        Assert.Equal(times.Count, md5.Count);
+        return times.Zip(md5, (t, m) => (t, m)).ToList();
+    }
+
+    private async Task<List<(double Pts, string Md5)>> SourceFrames()
+    {
+        var path = Path.Combine(_clip, "whole-source.mp4");
+        await using (var source = RangeSource.Create(Media(), 0, 1, 4))
+        await using (var target = File.Create(path))
+            await source.CopyToAsync(target);
+        var frames = await ShownFrames(path);
+        File.Delete(path);
+        return frames;
+    }
+
+    [Theory]
+    [InlineData(1.21, 7.37)]            // both off the 3 s grid
+    [InlineData(3.0, 9.0)]              // both on it
+    [InlineData(0.5, 2.9)]              // inside one chunk
+    public async Task Lossless_shows_exactly_the_source_frames_in_a_b(double a, double b)
+    {
+        var o = ClipAxisMpvTests.Origin;
+        var source = await SourceFrames();
+        var r = await ExportService.RunAsync(Job(o + a, o + b, Copy), null, default);
+        var expected = source.Where(f => f.Pts >= o + a - 0.001 && f.Pts < o + b).Select(f => f.Md5);
+        Assert.Equal(expected, (await ShownFrames(r.Path)).Select(f => f.Md5));
+    }
+
+    [Fact]
+    public async Task Lossless_with_cuts_shows_exactly_the_kept_frames_and_nothing_between()
+    {
+        var o = ClipAxisMpvTests.Origin;
+        (double A, double B)[] kept = [(0.7, 1.4), (1.9, 2.6), (4.1, 4.9), (9.2, 11.3)];       // the first two share a chunk
+        var source = await SourceFrames();
+        var job = Job(0, 1, Copy) with { Spans = kept.Select(k => new ExportSpan(o + k.A, o + k.B)).ToList() };
+        var r = await ExportService.RunAsync(job, null, default);
+        var expected = kept.SelectMany(k => source.Where(f => f.Pts >= o + k.A - 0.001 && f.Pts < o + k.B)).Select(f => f.Md5);
+        Assert.Equal(expected, (await ShownFrames(r.Path)).Select(f => f.Md5));
+        var info = await Ff.ProbeAsync(r.Path);
+        Assert.Equal(kept.Sum(k => k.B - k.A), info!.Duration, 0.05);
+    }
+
+    [Fact]
+    public async Task Lossless_keeps_chapters_on_the_output_axis_under_cuts()
+    {
+        var o = ClipAxisMpvTests.Origin;
+        var job = Job(0, 1, Copy) with
+        {
+            Spans = [new ExportSpan(o + 0.5, o + 1.5), new ExportSpan(o + 4, o + 6)],
+            Chapters = [new ExportChapter(o + 1, "first"), new ExportChapter(o + 5, "second")],
+        };
+        var r = await ExportService.RunAsync(job, null, default);
+        var starts = (await Ff.RunAsync(Ff.Ffprobe, ["-v", "error", "-show_entries", "chapter=start_time", "-of", "csv=p=0", r.Path])).StdOut
+            .Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).Select(l => double.Parse(l.TrimEnd(','), System.Globalization.CultureInfo.InvariantCulture)).ToList();
+        Assert.Equal(3, starts.Count);                 // "Start", then the two markers
+        Assert.Equal(0.5, starts[1], 0.01);
+        Assert.Equal(2.0, starts[2], 0.01);
+    }
+
     [Fact]
     public async Task Encode_trims_exactly()
     {

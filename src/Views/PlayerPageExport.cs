@@ -269,7 +269,7 @@ public sealed partial class PlayerPage
         SpecialExpander.Header = Presets.Get(_exportChoice) is { } picked && tier is null ? "Special purpose · " + picked.Name : "Special purpose";
         if (tier is null) SpecialExpander.IsExpanded = true;
 
-        var plans = _media is null ? [] : ExportSpans.Plans(_media, ExportSelection(), lossless: false);
+        var plans = _media is null ? [] : ExportSpans.Plans(_media, ExportSelection());
         var ready = plans.Count > 0;
         ExportButton.IsEnabled = ready;
         SaveClipButton.IsEnabled = ready;
@@ -561,7 +561,7 @@ public sealed partial class PlayerPage
     private async void Share_Click(object sender, RoutedEventArgs e)
     {
         if (!await ConfirmPlayerSettingsAsync()) return;
-        if (BuildJob(ExportLadder.ShareId, ShareSheet.NewFolder()) is not { } job) return;
+        if (BuildJob(_exportChoice, ShareSheet.NewFolder()) is not { } job) return;      // what the user chose: a share isn't always for social media
         AppServices.Share(job with { Chapters = null, Stem = ExportPaths.SafeStem($"{GameText.Text} {DateTime.Now:yyyy-MM-dd HH-mm-ss}") });
     }
 
