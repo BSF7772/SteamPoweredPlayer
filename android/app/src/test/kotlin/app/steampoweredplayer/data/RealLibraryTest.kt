@@ -40,10 +40,13 @@ class RealLibraryTest {
                 val names = folder.list().orEmpty().toList()
                 val numbers = names.mapNotNull { FolderNames.parseChunk(it) }.filter { !it.temporary && it.stream == 0 }.map { it.number }
                 val last = numbers.maxOrNull() ?: continue
-                val start = ClipBounds.parseDuration(Regex("""<Period[^>]*\sstart="([^"]+)"""").find(mpd.readText())?.groupValues?.get(1)) ?: continue
-                // The axis shift, like the desktop's: a clip's chunks keep the session's tfdt, on a whole number of segments.
-                val shift = Math.floor(start / SessionMedia.DEFAULT_SEGMENT_SECONDS) * SessionMedia.DEFAULT_SEGMENT_SECONDS
-                val media = SessionMedia(folder.path, listOf(SegmentRun(numbers.min(), last)), axisShiftSeconds = shift)
+                // The axis shift comes from the chunks' own tfdt, not from the manifest, so the check is independent of what it checks.
+                val first = numbers.min()
+                val init = File(folder, FolderNames.initFile(0)).takeIf { it.exists() }?.readBytes() ?: continue
+                val head = File(folder, FolderNames.chunkFile(0, first)).inputStream().use { it.readNBytes(FirstFragment.TFDT_HEAD_BYTES) }
+                val tfdt = FirstFragment.tfdtSeconds(init, head) ?: continue
+                val shift = SessionMedia.axisShiftFor(tfdt, first, SessionMedia.DEFAULT_SEGMENT_SECONDS)
+                val media = SessionMedia(folder.path, listOf(SegmentRun(first, last)), axisShiftSeconds = shift)
                 total++
                 if (ClipBounds.fromManifest(mpd.readText(), media.chunkEndSeconds(last), media.segmentSeconds) != null) withEnd++
             }

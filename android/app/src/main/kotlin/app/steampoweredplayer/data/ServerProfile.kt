@@ -48,6 +48,9 @@ data class ServerProfile(
         return "smb://$h$p/$share/" + parts.joinToString("/") + if (parts.isEmpty()) "" else tail
     }
 
+    /** The same server, with paths counted from the share's root. Library layouts and download requests are relative to that. */
+    fun atShareRoot(): ServerProfile = copy(path = "")
+
     companion object {
         const val DEFAULT_PORT = 445
     }

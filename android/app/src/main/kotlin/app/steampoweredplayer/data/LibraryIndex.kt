@@ -99,7 +99,7 @@ enum class LibraryIndexStatus { Ok, NewerSchema, Corrupt, Missing }
 
 data class LibraryIndexParse(val status: LibraryIndexStatus, val index: LibraryIndex?, val schemaVersion: Int, val error: String?)
 
-internal object UtcInstantSerializer : KSerializer<Instant> {
+object UtcInstantSerializer : KSerializer<Instant> {
     override val descriptor = PrimitiveSerialDescriptor("UtcInstant", PrimitiveKind.STRING)
 
     override fun deserialize(decoder: Decoder): Instant {
@@ -119,7 +119,7 @@ internal object UtcInstantSerializer : KSerializer<Instant> {
 }
 
 /** A run is `[first,last]`. */
-internal object SegmentRunSerializer : KSerializer<SegmentRun> {
+object SegmentRunSerializer : KSerializer<SegmentRun> {
     private val pair = ListSerializer(Int.serializer())
     override val descriptor = pair.descriptor
 

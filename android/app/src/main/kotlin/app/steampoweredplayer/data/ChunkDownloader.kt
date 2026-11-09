@@ -26,6 +26,11 @@ interface RemoteFiles {
     fun open(relativePath: String, offset: Long): InputStream
 }
 
+/** Change notify on a folder of the share (no polling). Returns when something in it changed; throws [IOException] when the watch can't go on. Blocking. */
+fun interface ChangeNotifier {
+    fun awaitChange(relativeFolder: String, recursive: Boolean)
+}
+
 enum class DownloadStatus { Idle, Running, Reconnecting, CannotReach, Done }
 
 /** The data figures the plan asks for: what came from the source so far. */
