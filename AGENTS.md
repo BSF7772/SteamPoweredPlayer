@@ -36,6 +36,7 @@ cd android; .\gradlew testItestUnitTest assembleDebug   # phone app (unit tests 
 tools\bootstrap.ps1 -Android -Emulator   # adds the emulator and its system image (about 2.4 GB download); needs Windows Hypervisor Platform
 tools\emu.ps1 start                      # create the AVD when missing, boot headless (-Window for a window); also: check, stop, delete
 cd android; .\gradlew connectedItestAndroidTest         # instrumented tests on the running emulator, as app.steampoweredplayer.itest
+tools\deploy-phone.ps1                   # what Settings' Install on phone runs: build, install over USB, start; -Serial emulator-5554 -IdSuffix .deploytest to test without touching the real app
 tools\emu-download.ps1 -Folder <media folder in the share> -ShareRoot <share's folder> -Cut network   # real download with the saved credentials, compared by SHA-256; also -Cut kill, unreachable, none
 ```
 Never uninstall `app.steampoweredplayer` from the emulator or wipe its AVD: its data holds server passwords the maintainer typed, which can't be exported. Update it with `adb install -r`.
@@ -75,9 +76,7 @@ spikes/              throwaway experiments (Phase 0)
 - **Background recordings are Steam's rolling cache.** Steam trims them continuously. Open every file with read + write + **delete**
   sharing so Steam's cleanup never fails, and survive files vanishing mid-read.
 - Folder and timeline timestamps are **UTC**.
-- Lossless cuts are read from the keyframe before A (3 s grid) and an MP4 edit list hides those lead-in frames, so the file plays from A
-  (the file holds up to 3 s of hidden frames; only the first kept span of a joined export gets this, later spans start on their keyframe).
-  A cut inside a GOP without hidden frames means a re-encode.
+- A lossless export stores whole chunks (the keyframe before A up to the chunk holding B; each chunk once) on their real timestamps, and MP4 edit lists show exactly the source frames in [A,B) for every kept range: `LosslessEdits` computes them, `Mp4EditList` writes them, no sample moves. A reader that ignores edit lists shows the hidden frames. A cut inside a GOP without hidden frames means a re-encode.
 - Android reads the library through file-share protocols and is **download-first by default**, because wireless links are unreliable. The desktop has no download feature: the OS mounts shares, so a share is just a path.
 - No polling: use FileSystemWatcher, SMB change notify, libmpv events and Android network callbacks.
 

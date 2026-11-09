@@ -4,6 +4,7 @@ using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Navigation;
 using SteamPoweredPlayer.Core;
+using SteamPoweredPlayer.Core.Diagnostics;
 using SteamPoweredPlayer.Core.Library;
 using SteamPoweredPlayer.Services;
 
@@ -26,6 +27,9 @@ public sealed partial class SettingsPage : Page
 
         ShowFolders();
         ChangeDataButton.IsEnabled = !AppServices.Options.Sample && AppServices.Steam.RecordingsPath is not null;
+        PhoneCard.Visibility = PhoneDeploy.FindScript(AppContext.BaseDirectory) is not null ? Visibility.Visible : Visibility.Collapsed;
+        DeployPhoneButton.IsEnabled = !s_deploying;
+        DeployRing.IsActive = s_deploying;
     }
 
     private void ShowFolders()
@@ -62,6 +66,37 @@ public sealed partial class SettingsPage : Page
         ShowFolders();
         AppServices.Window?.RefreshChips();
         AppServices.Toast("Library folder changed", "The index and thumbnails are saved there from now on. The old folder is left as it was.", InfoBarSeverity.Success, 6);
+    }
+
+    /// <summary>Arguments added to the deploy script; <c>--uicheck</c> uses <c>-CheckOnly</c>, so it drives the real button without building or installing.</summary>
+    internal static IReadOnlyList<string> DeployArguments { get; set; } = [];
+
+    /// <summary>The script runs on, and its result shows, even after leaving this page: <see cref="s_deploying"/> stops a second run meanwhile.</summary>
+    private static bool s_deploying;
+
+    private async void DeployPhone_Click(object sender, RoutedEventArgs e)
+    {
+        if (s_deploying || PhoneDeploy.FindScript(AppContext.BaseDirectory) is not { } script) return;
+        s_deploying = true;
+        DeployPhoneButton.IsEnabled = false;
+        DeployRing.IsActive = true;
+        DeployStatus.Text = "Starting…";
+        try
+        {
+            var code = await PhoneDeploy.RunAsync(script, DeployArguments, line => DispatcherQueue.TryEnqueue(() => DeployStatus.Text = line), CancellationToken.None);
+            if (code != 0) AppServices.Toast("Couldn't install on the phone", DeployStatus.Text, InfoBarSeverity.Warning, 0);
+            else if (DeployArguments.Count == 0) AppServices.Toast("Installed on the phone", "You can unplug it.", InfoBarSeverity.Success, 6);
+        }
+        catch (Exception ex) when (ex is System.ComponentModel.Win32Exception or InvalidOperationException)
+        {
+            DeployStatus.Text = "Couldn't run the script: " + ex.Message;
+        }
+        finally
+        {
+            s_deploying = false;
+            DeployPhoneButton.IsEnabled = true;
+            DeployRing.IsActive = false;
+        }
     }
 
     private void OpenData_Click(object sender, RoutedEventArgs e) => Reveal(AppServices.DataFolder?.Root);

@@ -254,7 +254,7 @@ internal static partial class UiCheck
                 {
                     Step($"settings ({round}/3)");
                     await Nav("NavSettings", typeof(SettingsPage), $"nav.settings.{round}", $"Settings page opens from the title bar ({round}/3)");
-                    if (round == 1) await Capture("settings");
+                    if (round == 1) { await Capture("settings"); await DeployButtonCheck(); }
                     Step($"settings-to-library ({round}/3)");
                     await Nav("NavLibrary", typeof(LibraryPage), $"nav.library.{round}", $"Settings -> Library ({round}/3)");
                 }
@@ -550,6 +550,23 @@ internal static partial class UiCheck
         private ContentDialog? OpenDialog() =>
             window.Content.XamlRoot is { } root ? VisualTreeHelper.GetOpenPopupsForXamlRoot(root).Select(p => p.Child).OfType<ContentDialog>().FirstOrDefault() : null;
 
+        /// <summary>Settings' phone button through the real script, stopped after it looks for the phone: nothing is built or installed here.</summary>
+        private async Task DeployButtonCheck()
+        {
+            if (Find("SettingsDeployPhone") is not Control button) { Add(CheckResult.Fail("settings.deploy-phone", "Install on phone runs the deploy script", "no button (this checkout should have the script)")); return; }
+            SettingsPage.DeployArguments = ["-CheckOnly"];
+            try
+            {
+                var pressed = Invoke(button);
+                var done = await WaitFor(() => button.IsEnabled && (Find("SettingsDeployStatus") as TextBlock)?.Text is { Length: > 0 } t && t != "Starting…" && !t.StartsWith("Looking", StringComparison.Ordinal), 30);
+                var status = (Find("SettingsDeployStatus") as TextBlock)?.Text ?? "";
+                // Which of these depends on whether a phone happens to be plugged in; both prove that the button reached adb. No device name goes in the report.
+                var answered = status.StartsWith("Found ", StringComparison.Ordinal) || status.StartsWith("No phone found", StringComparison.Ordinal);
+                Add(CheckResult.From(pressed && done && answered, "settings.deploy-phone", "Install on phone runs the deploy script and shows its answer", answered ? status.Split(' ')[0] + " ..." : status));
+            }
+            finally { SettingsPage.DeployArguments = []; }
+        }
+
         /// <summary>Share up to the sheet, which automation couldn't close: a small H.264 + AAC 720p file, removed afterwards.</summary>
         private async Task ShareCheck(string id)
         {
@@ -568,8 +585,12 @@ internal static partial class UiCheck
                 Press("PlayerShare");
                 var ready = await WaitFor(() => shared is not null, 60);
                 var info = shared is null ? null : await FastEncoder.Core.Ff.ProbeAsync(shared);
-                var ok = info is { VideoCodec: "h264", AudioCodec: "aac", Fps: <= 30.5 } && Math.Min(info.Width, info.Height) <= 720;
-                Add(CheckResult.From(ready && ok, $"{id}.share", "Share makes a 720p30 H.264 + AAC copy for the share window",
+                // The tier chosen in the export panel, whichever it is: only Ultra performance makes a 720p30 H.264 + AAC copy.
+                var choice = Core.Export.ExportLadder.IsKnown(AppServices.Settings.ExportPreset) ? AppServices.Settings.ExportPreset : Core.Export.ExportLadder.DefaultId;
+                var ok = choice == Core.Export.ExportLadder.ShareId
+                    ? info is { VideoCodec: "h264", AudioCodec: "aac", Fps: <= 30.5 } && Math.Min(info.Width, info.Height) <= 720
+                    : info is not null && (info.VideoCodec != "h264" || info.Fps > 30.5 || Math.Min(info.Width, info.Height) > 720);
+                Add(CheckResult.From(ready && ok, $"{id}.share", $"Share makes a copy with the chosen tier ({choice}) for the share window",
                     info is null ? "no file within 60 s" : $"{info.VideoCodec}/{info.AudioCodec} {info.Width}x{info.Height} {F(info.Fps, "0.#")} fps, {new FileInfo(shared!).Length / 1024} KiB"));
                 ShareSheet.Sweep();
                 var gone = shared is not null && !File.Exists(shared);
@@ -721,6 +742,51 @@ internal static partial class UiCheck
             Add(CheckResult.From(parts.Count == texts.Count && (live || durations == 1) && maxFf <= Math.Ceiling(fps) && moved is > presses - 1.5 and < presses + 1.5,
                 $"{id}.frame-back-button", "Frame-back button: one frame per press, stable timecode",
                 $"moved {F(moved, "0.0")} frames in {presses} presses, highest FF {maxFf} at {F(fps, "0.##")} fps, duration {string.Join(" then ", parts.Select(p => p[1]).Distinct())}, session {F(s.UiDuration, "0.000")} s"));
+            await FrameBackAcrossChunks(id, s, mpv, () => Invoke(back), fps);
+        }
+
+        /// <summary>
+        /// The press rate a person holds the button at, far enough to cross two chunks: every press has to move a frame, also at each
+        /// chunk's first frame, where the player has to load and walk the chunk before.
+        /// </summary>
+        private async Task FrameBackAcrossChunks(string id, PlaybackSession s, MpvPlayer mpv, Action press, double fps)
+        {
+            var media = s.Media!;
+            var chunk = media.Chunks().Where(c => media.ChunkStartSeconds(c) - 2 * media.SegmentSeconds - 1 >= media.StartSeconds && media.ChunkEndSeconds(c) <= mpv.TimePos).LastOrDefault();
+            if (chunk == 0) { Add(CheckResult.Fail($"{id}.frame-back-chunks", "Frame back keeps moving across two chunks", "the recording is too short to cross two chunks")); return; }
+            await s.SeekAsync(media.ChunkStartSeconds(chunk) + 0.3);
+            await WaitFor(() => s.UserPaused && !s.IsReloading, 3);
+            await Task.Delay(250);
+            var before = mpv.TimePos;
+            var presses = (int)Math.Ceiling((media.SegmentSeconds + 0.5) * fps);
+            for (var i = 0; i < presses; i++)
+            {
+                press();
+                await Task.Delay(180);
+            }
+            await WaitFor(() => !s.IsReloading, 5);
+            await Task.Delay(250);
+            var after = mpv.TimePos;
+            var moved = await FramesBetween(media, chunk, after, before);
+            Add(CheckResult.From(Math.Abs(moved - presses) <= 1, $"{id}.frame-back-chunks", "Frame back keeps moving across two chunks at 180 ms a press",
+                $"moved {moved} real frames in {presses} presses, {F(before - after, "0.000")} s back; back-steps {s.BackStepCounts}"));
+        }
+
+        /// <summary>Stored frames with a pts in (<paramref name="after"/>, <paramref name="before"/>]: counted, because Steam's frame rate varies and seconds × fps isn't a frame count.</summary>
+        private static async Task<int> FramesBetween(SessionMedia media, int lastChunk, double after, double before)
+        {
+            var path = Path.Combine(Path.GetTempPath(), "spp-uicheck-" + Guid.NewGuid().ToString("N")[..8] + ".mp4");
+            try
+            {
+                await using (var source = Core.Export.RangeSource.Create(media, 0, Math.Max(media.FirstChunk!.Value, lastChunk - 3), lastChunk))
+                await using (var target = File.Create(path))
+                    await source.CopyToAsync(target);
+                var r = await FastEncoder.Core.Ff.RunAsync(FastEncoder.Core.Ff.Ffprobe, ["-v", "error", "-select_streams", "v:0", "-show_entries", "packet=pts_time", "-of", "csv=p=0", path]);
+                return r.StdOut.Split((char)10, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                    .Select(l => double.Parse(l.TrimEnd(','), CultureInfo.InvariantCulture))
+                    .Count(t => t > after + 0.002 && t <= before + 0.002);
+            }
+            finally { try { File.Delete(path); } catch (IOException) { } }
         }
 
         /// <summary>

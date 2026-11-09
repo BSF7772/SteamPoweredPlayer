@@ -15,9 +15,18 @@ android {
         versionCode = 1
         versionName = "0.4.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
-        ndk { abiFilters += listOf("arm64-v8a", "x86_64") } // x86_64: the development emulator
+        // x86_64: the development emulator. tools\deploy-phone.ps1 builds only the phone's own CPU, which is smaller and quicker.
+        ndk { abiFilters += (findProperty("sppAbi") as String?)?.let { listOf(it) } ?: listOf("arm64-v8a", "x86_64") }
     }
     buildTypes {
+        // What goes on the real phone: optimised like a release, signed with the local debug key so `adb install -r` can update it.
+        // Not shrunk: R8 rules for JCIFS and libmpv's JNI aren't worth the risk for a build that only ever goes over USB.
+        create("phone") {
+            initWith(getByName("release"))
+            signingConfig = signingConfigs.getByName("debug")
+            matchingFallbacks += "release"
+            (findProperty("sppIdSuffix") as String?)?.let { applicationIdSuffix = it }
+        }
         // Instrumented tests clear the app's data and Gradle uninstalls what it tested. Their own id keeps the debug app's saved
         // server profiles and Keystore-sealed passwords out of reach.
         create("itest") {

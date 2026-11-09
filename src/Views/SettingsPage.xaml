@@ -59,6 +59,24 @@
                     </Button>
                 </StackPanel>
             </Border>
+
+            <Border x:Name="PhoneCard" Style="{StaticResource Card}" Visibility="Collapsed">
+                <StackPanel Spacing="6">
+                    <TextBlock Text="Phone app" Style="{StaticResource SectionTitle}" />
+                    <TextBlock Style="{StaticResource Caption}" TextWrapping="Wrap"
+                               Text="Builds the Android app and installs it on the phone plugged in by USB, then starts it. Its saved servers stay. You can unplug the phone when it's done. The phone needs USB debugging on (Developer options)." />
+                    <StackPanel Orientation="Horizontal" Spacing="8" Margin="0,4,0,0">
+                        <Button x:Name="DeployPhoneButton" AutomationProperties.AutomationId="SettingsDeployPhone" Click="DeployPhone_Click">
+                            <StackPanel Orientation="Horizontal" Spacing="8">
+                                <FontIcon Glyph="&#xE8EA;" FontSize="14" />
+                                <TextBlock Text="Install on phone" />
+                            </StackPanel>
+                        </Button>
+                        <ProgressRing x:Name="DeployRing" IsActive="False" Width="20" Height="20" />
+                    </StackPanel>
+                    <TextBlock x:Name="DeployStatus" AutomationProperties.AutomationId="SettingsDeployStatus" IsTextSelectionEnabled="True" TextWrapping="Wrap" />
+                </StackPanel>
+            </Border>
         </StackPanel>
     </ScrollViewer>
 </Page>
