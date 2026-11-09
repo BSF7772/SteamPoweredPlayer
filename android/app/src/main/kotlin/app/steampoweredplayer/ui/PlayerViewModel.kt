@@ -182,7 +182,9 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
         val chunkCache = withContext(Dispatchers.IO) { Downloads.cache(app) }
         cache = chunkCache
         // What's stored opens at once and offline; the share then says what changed.
+        mark("repo, cache")
         val stored = withContext(Dispatchers.IO) { repo.stored(entry.key) }
+        mark("details")
         val loaded = stored ?: withContext(Dispatchers.IO) {
             try {
                 repo.load(entry, checkHeads = fromScan)
@@ -199,8 +201,10 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
         full = media
         frameTables = FrameTables(folder)
         val visible = withContext(Dispatchers.IO) { markersAndTrickplay(repo, loaded, media) }
+        mark("markers")
         val bytesPerSecond = if (entry.durationSeconds > 0) entry.sizeBytes / entry.durationSeconds else 0.0
         val encoders = withContext(Dispatchers.Default) { DeviceEncoders.list() }
+        mark("encoders")
         _ui.update {
             it.copy(
                 start = media.startSeconds, end = media.endSeconds, position = media.startSeconds, markers = visible, encoders = encoders, bytesPerSecond = bytesPerSecond,
@@ -208,6 +212,7 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
             )
         }
         withContext(Dispatchers.IO) { refreshAvailable(chunkCache, folder, media) }
+        mark("heads")
         publishDownloaded()
         viewModelScope.launch {
             chunkCache.completed.collect { key ->
@@ -405,12 +410,17 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
         opened = true
         _ui.update { it.copy(waiting = false, loading = false, paused = !wantPlay, atEnd = false) }
         if (first) {
+            mark("load starts")
             s.open(run, target, wantPlay)
         } else {
             s.replaceMedia(run)
             s.setPause(!wantPlay)
             s.reload(target, ReloadCause.Seek, force = true)
         }
+    }
+
+    private fun mark(stage: String) {
+        if (openedAt != 0L) Log.i(TAG, "opening: $stage at ${android.os.SystemClock.elapsedRealtime() - openedAt} ms")
     }
 
     private fun onReloaded(target: Double) {
