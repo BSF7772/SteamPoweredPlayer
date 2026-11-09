@@ -43,8 +43,10 @@ import app.steampoweredplayer.export.ExportScopes
 import app.steampoweredplayer.export.ExportSpan
 import app.steampoweredplayer.export.ExportSpans
 import app.steampoweredplayer.export.Exports
+import app.steampoweredplayer.export.FrameGrab
 import app.steampoweredplayer.export.FrameTables
 import app.steampoweredplayer.export.LadderEngine
+import app.steampoweredplayer.export.ScreenshotNames
 import app.steampoweredplayer.export.SourceFormat
 import app.steampoweredplayer.export.SpanRequest
 import app.steampoweredplayer.net.DownloadRequest
@@ -101,6 +103,8 @@ data class PlayerUi(
     val hiddenKinds: Set<MarkerKind> = emptySet(),
     val loopA: Double? = null,
     val loopB: Double? = null,
+    /** The A or B handle picked by a tap: the step buttons move it instead of the playhead. */
+    val selectedHandle: TimelineGrab? = null,
     val edit: RecordingEdit = RecordingEdit(),
     val sync: SyncUi = SyncUi(),
     val encoders: List<EncoderCap> = emptyList(),
@@ -134,6 +138,7 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
     private var full: SessionMedia? = null
 
     @Volatile private var frameTables: FrameTables? = null
+    @Volatile private var mediaFolder: File? = null
     private var cache: LocalChunkCache? = null
     private var libraryKey = ""
     private val available = HashSet<Int>()
@@ -205,6 +210,7 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
         if (media.chunkCount == 0) throw IOException("Steam no longer has this recording.")
         full = media
         frameTables = FrameTables(folder)
+        mediaFolder = folder
         val visible = withContext(Dispatchers.IO) { markersAndTrickplay(repo, loaded, media) }
         mark("markers")
         val bytesPerSecond = if (entry.durationSeconds > 0) entry.sizeBytes / entry.durationSeconds else 0.0
@@ -578,7 +584,7 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun clearLoop() {
-        _ui.update { it.copy(loopA = null, loopB = null) }
+        _ui.update { it.copy(loopA = null, loopB = null, selectedHandle = null) }
         session?.setLoop(null, null)
     }
 
@@ -597,6 +603,89 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
             TimelineGrab.A -> seek(a)
             TimelineGrab.B -> seek(max(a, b - LOOP_PREVIEW_SECONDS))
             TimelineGrab.Seek -> Unit
+        }
+    }
+
+    /** A tap on the timeline that didn't move: selects a handle, switches to the other one, or lets go. */
+    fun tapHandle(grab: TimelineGrab) = _ui.update { it.copy(selectedHandle = if (it.loopA == null) null else LoopHandles.tapped(it.selectedHandle, grab)) }
+
+    /** A drag takes hold of that handle, so the step buttons carry on from where the finger left it. */
+    fun holdHandle(grab: TimelineGrab) = _ui.update { if (grab == TimelineGrab.Seek || it.loopA == null) it else it.copy(selectedHandle = grab) }
+
+    fun releaseHandle() = _ui.update { it.copy(selectedHandle = null) }
+
+    /** Moves the selected handle by whole frames (negative = earlier). The loop and the picture follow on [commitHandle], so a held button doesn't reload on every step. */
+    fun nudgeHandle(frames: Int) = moveHandle(frames * LoopHandles.frameSeconds(_ui.value.sourceFps))
+
+    /** Moves the selected handle a chunk's length (±3 s) and shows it at once. */
+    fun jumpHandle(direction: Int) {
+        moveHandle(direction * LoopHandles.JUMP_SECONDS)
+        commitHandle()
+    }
+
+    private fun moveHandle(deltaSeconds: Double) = _ui.update { u ->
+        val h = u.selectedHandle ?: return@update u
+        val a = u.loopA ?: return@update u
+        val b = u.loopB ?: return@update u
+        val (na, nb) = LoopHandles.nudge(h, deltaSeconds, a, b, u.start, u.end)
+        u.copy(loopA = na, loopB = nb)
+    }
+
+    /** The selected handle's place, for the bubble shown while a move button is held. */
+    fun selectedHandleSeconds(): Double? = _ui.value.let { u ->
+        when (u.selectedHandle) {
+            TimelineGrab.A -> u.loopA
+            TimelineGrab.B -> u.loopB
+            else -> null
+        }
+    }
+
+    /** The loop takes the moved handle, and the picture stops on the frame it marks: A's first frame, or the last frame before B. */
+    fun commitHandle() {
+        val u = _ui.value
+        val h = u.selectedHandle ?: return
+        val a = u.loopA ?: return
+        val b = u.loopB ?: return
+        session?.setLoop(a, b)
+        wantPlay = false
+        session?.setPause(true)
+        _ui.update { it.copy(paused = true) }
+        seek(LoopHandles.shownAt(h, a, b, LoopHandles.frameSeconds(u.sourceFps)))
+    }
+
+    /**
+     * Saves the frame on screen at the source's full size as a PNG in Pictures/SteamPoweredPlayer, nothing drawn over it, like the desktop. The phone's libmpv can't write
+     * images, so [FrameGrab] decodes that frame again from its chunk. Returns the file's name and where the phone keeps it.
+     */
+    suspend fun screenshot(game: String): Pair<String, android.net.Uri> {
+        val e = engine ?: throw IOException("Nothing is playing yet.")
+        val media = full ?: throw IOException("Nothing is playing yet.")
+        val folder = mediaFolder ?: throw IOException("Nothing is playing yet.")
+        val tables = frameTables ?: throw IOException("Nothing is playing yet.")
+        val position = e.timePos.takeIf { it.isFinite() } ?: _ui.value.position
+        val frame = LoopHandles.frameSeconds(_ui.value.sourceFps)
+        val context = getApplication<Application>()
+        val stamp = java.time.LocalDateTime.now().format(java.time.format.DateTimeFormatter.ofPattern("yyyy-MM-dd HH-mm-ss", java.util.Locale.ROOT))
+        val name = ScreenshotNames.of(game, stamp)
+        return withContext(Dispatchers.IO) {
+            val dir = File(context.cacheDir, "screenshots").apply { mkdirs() }
+            val file = File(dir, "shot.png")
+            file.delete()
+            val here = media.chunkAt(position).toInt()
+            val around = media.chunks().filter { it in here - 1..here + 1 }.mapNotNull { c -> tables.of(c)?.let { c to it } }.toMap()
+            val place = FrameGrab.pick(around, position, frame) ?: throw IOException("This part of the recording isn't on the phone.")
+            val bitmap = FrameGrab.decode(folder, place, File(dir, "frame.mp4"))
+            try {
+                file.outputStream().use { if (!bitmap.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, it)) throw IOException("Couldn't write the picture.") }
+            } finally {
+                bitmap.recycle()
+            }
+            Log.i(TAG, "screenshot: frame ${place.index} of chunk ${place.chunk} at ${"%.4f".format(java.util.Locale.ROOT, place.seconds)} s for time-pos ${"%.4f".format(java.util.Locale.ROOT, position)}")
+            try {
+                name to Exports.publishImage(context, file, name)
+            } finally {
+                file.delete()
+            }
         }
     }
 

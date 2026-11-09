@@ -7,6 +7,8 @@ import android.content.Context
 import android.content.ContextWrapper
 import android.content.pm.ActivityInfo
 import android.graphics.BitmapFactory
+import android.content.Intent
+import android.os.SystemClock
 import android.provider.Settings
 import android.text.format.Formatter
 import android.view.OrientationEventListener
@@ -46,6 +48,8 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.relocation.BringIntoViewRequester
+import androidx.compose.foundation.relocation.bringIntoViewRequester
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.shape.CircleShape
@@ -98,6 +102,7 @@ import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onSizeChanged
@@ -106,6 +111,8 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.onClick
+import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.drawText
@@ -206,6 +213,26 @@ fun PlayerScreen(
         sheet = s
         keepControls()
     }
+    val context = LocalContext.current
+    val takeScreenshot: () -> Unit = {
+        keepControls()
+        scope.launch {
+            try {
+                // Named after the game, like the desktop; a recording the library doesn't list falls back to its own title.
+                val game = library.games.firstOrNull { row -> row.recordings.any { it.relativeFolder == entry.relativeFolder } }?.game?.name
+                val (name, uri) = vm.screenshot(game ?: ui.title)
+                // The toast names the file; its action opens it.
+                val result = snackbars.showSnackbar("Screenshot saved: $name", "Open", duration = SnackbarDuration.Short)
+                if (result == SnackbarResult.ActionPerformed) {
+                    runCatching {
+                        context.startActivity(Intent(Intent.ACTION_VIEW).setDataAndType(uri, "image/png").addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK))
+                    }
+                }
+            } catch (e: java.io.IOException) {
+                snackbars.showSnackbar("Couldn't save the screenshot: ${e.message}", duration = SnackbarDuration.Short)
+            }
+        }
+    }
 
     // The overlay goes away by itself while playing; a paused picture keeps its controls until a tap.
     LaunchedEffect(controls, ui.paused, touched, sheet, scrub != null) {
@@ -222,7 +249,7 @@ fun PlayerScreen(
 
         // One tree for both orientations, so the video surface and the player survive a rotation.
         Column(Modifier.fillMaxSize().then(if (landscape) Modifier else Modifier.windowInsetsPadding(WindowInsets.safeDrawing))) {
-            if (!landscape) PortraitTopBar(ui.title, onBack) { openSheet(Sheet.Export) }
+            if (!landscape) PortraitTopBar(ui.title, onBack, takeScreenshot) { openSheet(Sheet.Export) }
             Box(Modifier.fillMaxWidth().then(if (landscape) Modifier.fillMaxHeight() else Modifier)) {
                 Column {
                     VideoArea(
@@ -241,7 +268,7 @@ fun PlayerScreen(
                         onFullscreen = { orientation.enterFullscreen() },
                     ) {
                         if (landscape && controls) {
-                            FullscreenOverlay(ui, vm, keepControls, onExit = { orientation.exitFullscreen() }, onBack = { orientation.exitFullscreen() }, onSheet = openSheet)
+                            FullscreenOverlay(ui, vm, keepControls, onExit = { orientation.exitFullscreen() }, onBack = { orientation.exitFullscreen() }, onSheet = openSheet, onScreenshot = takeScreenshot, onScrub = { scrub = it })
                         }
                     }
                     if (!landscape) Spacer(Modifier.height(LANE_HEIGHT))
@@ -253,7 +280,7 @@ fun PlayerScreen(
             if (!landscape) {
                 TimeRow(ui) { openSheet(Sheet.Events) }
                 ui.error?.let { Text(it, Modifier.padding(horizontal = 16.dp), color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
-                TransportRow(vm, ui, keepControls)
+                TransportRow(vm, ui, keepControls) { scrub = it }
                 Box(Modifier.padding(horizontal = 16.dp, vertical = 4.dp)) { OptionsRow(vm, ui, openSheet) }
                 Spacer(Modifier.height(8.dp))
                 Ladder(vm, ui, Modifier.padding(horizontal = 16.dp))
@@ -286,10 +313,11 @@ fun PlayerScreen(
 }
 
 @Composable
-private fun PortraitTopBar(title: String, onBack: () -> Unit, onExport: () -> Unit) {
+private fun PortraitTopBar(title: String, onBack: () -> Unit, onScreenshot: () -> Unit, onExport: () -> Unit) {
     Row(Modifier.fillMaxWidth().height(56.dp).padding(start = 4.dp, end = 12.dp), verticalAlignment = Alignment.CenterVertically) {
         IconButton(onBack) { Icon(SppIcons.Back, "Back", tint = Color.White) }
         Text(title, Modifier.weight(1f).padding(horizontal = 4.dp), color = Color.White, maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.titleMedium)
+        IconButton(onScreenshot) { Icon(SppIcons.Screenshot, "Screenshot", tint = Color.White) }
         ExportButton(onExport)
     }
 }
@@ -392,6 +420,7 @@ private fun VideoArea(
     var dragFrom by remember { mutableStateOf(0.0) }
     var seekFlash by remember { mutableStateOf(0) }
     var seekSerial by remember { mutableIntStateOf(0) }
+    var flashLabel by remember { mutableStateOf<String?>(null) }
     val latestShow by rememberUpdatedState(onShowControls)
     val latestDouble by rememberUpdatedState(onDoubleTap)
     Box(
@@ -408,8 +437,12 @@ private fun VideoArea(
                     lastUp = up.uptimeMillis
                     lastSide = side
                     if (quick) {
-                        vm.seekBy(side * DOUBLE_TAP_SECONDS)
-                        seekFlash = if (seekFlash.sign() == side) seekFlash + side * DOUBLE_TAP_SECONDS.toInt() else side * DOUBLE_TAP_SECONDS.toInt()
+                        // With a handle selected, every step control moves the handle: a double tap jumps it a chunk.
+                        val handle = vm.ui.value.selectedHandle
+                        val step = if (handle != null) LoopHandles.JUMP_SECONDS.toInt() else DOUBLE_TAP_SECONDS.toInt()
+                        if (handle != null) vm.jumpHandle(side) else vm.seekBy(side * DOUBLE_TAP_SECONDS)
+                        flashLabel = handle?.name
+                        seekFlash = if (seekFlash.sign() == side) seekFlash + side * step else side * step
                         seekSerial++
                         latestDouble()
                     } else {
@@ -483,7 +516,7 @@ private fun VideoArea(
             IconButton(onFullscreen, Modifier.align(Alignment.BottomEnd).padding(bottom = TIMELINE_TOUCH_HEIGHT - LANE_HEIGHT)) { Icon(SppIcons.Fullscreen, "Fullscreen", tint = Color.White) }
         }
         if (seekFlash != 0) {
-            SeekFlash(seekFlash, Modifier.align(if (seekFlash > 0) Alignment.CenterEnd else Alignment.CenterStart))
+            SeekFlash(seekFlash, flashLabel, Modifier.align(if (seekFlash > 0) Alignment.CenterEnd else Alignment.CenterStart))
             LaunchedEffect(seekSerial) {
                 delay(FLASH_MILLIS)
                 seekFlash = 0
@@ -537,11 +570,11 @@ private fun playLabel(ui: PlayerUi) = when {
 
 /** The half-moon over the side that was double-tapped. */
 @Composable
-private fun SeekFlash(seconds: Int, modifier: Modifier) {
+private fun SeekFlash(seconds: Int, handle: String?, modifier: Modifier) {
     val forward = seconds > 0
     val shape = if (forward) RoundedCornerShape(topStartPercent = 50, bottomStartPercent = 50) else RoundedCornerShape(topEndPercent = 50, bottomEndPercent = 50)
     Box(modifier.fillMaxHeight().fillMaxWidth(SEEK_FLASH_WIDTH).background(Color.White.copy(alpha = 0.14f), shape), contentAlignment = Alignment.Center) {
-        Text((if (forward) "+" else "−") + "${abs(seconds)} s", color = Color.White, fontWeight = FontWeight.Medium)
+        Text(listOfNotNull(handle, (if (forward) "+" else "−") + "${abs(seconds)} s").joinToString(" "), color = Color.White, fontWeight = FontWeight.Medium)
     }
 }
 
@@ -624,6 +657,8 @@ private fun Timeline(vm: PlayerViewModel, ui: PlayerUi, inset: androidx.compose.
                         return seconds?.let { insetPx + ((it - u.start) / (u.end - u.start).coerceAtLeast(0.001)).toFloat() * line }
                     }
                     val grab = LoopHandles.grab(down.position.x, xOf(latest.loopA), xOf(latest.loopB), reachPx)
+                    val slop = viewConfiguration.touchSlop
+                    var moved = false
                     fun follow(x: Float) {
                         val t = secondsAt(x)
                         when (grab) {
@@ -641,7 +676,8 @@ private fun Timeline(vm: PlayerViewModel, ui: PlayerUi, inset: androidx.compose.
                             }
                         }
                     }
-                    follow(down.position.x)
+                    // A handle stays put until the finger really moves, so a tap only selects it.
+                    if (grab == TimelineGrab.Seek) follow(down.position.x)
                     onKeepControls()
                     var lastX = down.position.x
                     var lifted = false
@@ -654,14 +690,22 @@ private fun Timeline(vm: PlayerViewModel, ui: PlayerUi, inset: androidx.compose.
                             break
                         }
                         change.consume()
-                        if (change.position.x != lastX) {
+                        if (!moved && abs(change.position.x - down.position.x) > slop) moved = true
+                        if (change.position.x != lastX && (moved || grab == TimelineGrab.Seek)) {
                             lastX = change.position.x
                             follow(lastX)
                         }
                     }
-                    when (grab) {
-                        TimelineGrab.Seek -> if (lifted) scrubbing?.let(vm::seek)
-                        else -> vm.finishLoopDrag(grab)
+                    when {
+                        grab == TimelineGrab.Seek -> {
+                            vm.releaseHandle()
+                            if (lifted) scrubbing?.let(vm::seek)
+                        }
+                        moved -> {
+                            vm.holdHandle(grab)
+                            vm.finishLoopDrag(grab)
+                        }
+                        lifted -> vm.tapHandle(grab)
                     }
                     scrubbing = null
                     onScrub(null)
@@ -695,9 +739,17 @@ private fun Timeline(vm: PlayerViewModel, ui: PlayerUi, inset: androidx.compose.
             drawRect(LoopColor, Offset(x(loopA), lineBottom - thick), Size(x(loopB) - x(loopA), thick))
             val handleY = lineTop + lineHeight / 2
             val radius = HANDLE_RADIUS.toPx()
-            for ((t, text) in listOf(loopA to a, loopB to b)) {
+            for ((h, pair) in listOf(TimelineGrab.A to (loopA to a), TimelineGrab.B to (loopB to b))) {
+                val (t, text) = pair
                 val cx = x(t)
-                drawCircle(LoopColor, radius, Offset(cx, handleY))
+                if (u.selectedHandle == h) {
+                    // The selected handle grows and gets a white ring, so the tap is seen to have landed.
+                    val big = radius * SELECTED_GROWTH
+                    drawCircle(LoopColor, big, Offset(cx, handleY))
+                    drawCircle(Color.White, big, Offset(cx, handleY), style = Stroke(2.dp.toPx()))
+                } else {
+                    drawCircle(LoopColor, radius, Offset(cx, handleY))
+                }
                 drawText(text, topLeft = Offset(cx - text.size.width / 2f, handleY - text.size.height / 2f))
             }
         }
@@ -721,7 +773,12 @@ private fun TimeRow(ui: PlayerUi, onEvents: () -> Unit) {
 
 /** Five equal cells around the middle of the screen, so play stays exactly centred. */
 @Composable
-private fun TransportRow(vm: PlayerViewModel, ui: PlayerUi, onKeepControls: () -> Unit) {
+private fun TransportRow(vm: PlayerViewModel, ui: PlayerUi, onKeepControls: () -> Unit, onScrub: (Scrub?) -> Unit) {
+    val handle = ui.selectedHandle
+    if (handle != null && ui.loopA != null) {
+        HandleTransportRow(vm, ui, handle, onKeepControls, onScrub)
+        return
+    }
     Row(Modifier.fillMaxWidth().height(80.dp), horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically) {
         TransportCell(SppIcons.PreviousMarker, "Previous marker", enabled = ui.markers.isNotEmpty()) {
             vm.previousEvent()
@@ -749,6 +806,110 @@ private fun TransportRow(vm: PlayerViewModel, ui: PlayerUi, onKeepControls: () -
         TransportCell(SppIcons.NextMarker, "Next marker", enabled = ui.markers.isNotEmpty()) {
             vm.nextEvent()
             onKeepControls()
+        }
+    }
+}
+
+/**
+ * The same five cells while an A or B handle is selected, in the loop's colour: the outer ones jump the handle ±3 s, the arrows move it 15 frames a press and faster while held,
+ * and play stays in the middle. The picture follows the handle when the finger lifts.
+ */
+@Composable
+private fun HandleTransportRow(vm: PlayerViewModel, ui: PlayerUi, handle: TimelineGrab, onKeepControls: () -> Unit, onScrub: (Scrub?) -> Unit) {
+    val name = handle.name
+    val jump = LoopHandles.JUMP_SECONDS.toInt()
+    fun step(direction: Int): (Long) -> Unit = { held ->
+        vm.nudgeHandle(direction * LoopHandles.heldFrames(held))
+        vm.selectedHandleSeconds()?.let { onScrub(Scrub(it, name)) }
+        onKeepControls()
+    }
+    val release: () -> Unit = {
+        onScrub(null)
+        vm.commitHandle()
+        onKeepControls()
+    }
+    Row(Modifier.fillMaxWidth().height(80.dp), horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically) {
+        JumpCell("−$jump s", "Move $name $jump seconds earlier") {
+            vm.jumpHandle(-1)
+            onKeepControls()
+        }
+        HoldCell(SppIcons.MoveHandleBack, "Move $name earlier", step(-1), release)
+        Box(Modifier.width(TRANSPORT_CELL), contentAlignment = Alignment.Center) {
+            Box(
+                Modifier.size(64.dp).clip(CircleShape).background(Color(0xFFF2F2F7)).clickable(role = Role.Button) {
+                    vm.togglePause()
+                    onKeepControls()
+                },
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(playIcon(ui), playLabel(ui), Modifier.size(32.dp), tint = Color(0xFF101018))
+            }
+        }
+        HoldCell(SppIcons.MoveHandleForward, "Move $name later", step(1), release)
+        JumpCell("+$jump s", "Move $name $jump seconds later") {
+            vm.jumpHandle(1)
+            onKeepControls()
+        }
+    }
+}
+
+@Composable
+private fun JumpCell(text: String, label: String, onClick: () -> Unit) {
+    Box(Modifier.width(TRANSPORT_CELL), contentAlignment = Alignment.Center) {
+        Box(
+            Modifier.size(48.dp).clip(CircleShape).border(1.5.dp, LoopColor, CircleShape).clickable(role = Role.Button, onClick = onClick).semantics { contentDescription = label },
+            contentAlignment = Alignment.Center,
+        ) {
+            Text(text, color = LoopColor, style = MaterialTheme.typography.labelMedium, maxLines = 1)
+        }
+    }
+}
+
+/** A button that repeats while held: [onStep] gets how long it has been held, [onRelease] runs once when the finger lifts. */
+@Composable
+private fun HoldCell(icon: ImageVector, label: String, onStep: (Long) -> Unit, onRelease: () -> Unit) {
+    val step by rememberUpdatedState(onStep)
+    val release by rememberUpdatedState(onRelease)
+    val scope = rememberCoroutineScope()
+    var pressed by remember { mutableStateOf(false) }
+    Box(Modifier.width(TRANSPORT_CELL), contentAlignment = Alignment.Center) {
+        Box(
+            Modifier.size(48.dp).clip(CircleShape).background(if (pressed) LoopColor.copy(alpha = 0.45f) else LoopColor.copy(alpha = 0.18f))
+                .semantics {
+                    role = Role.Button
+                    contentDescription = label
+                    onClick {
+                        step(0)
+                        release()
+                        true
+                    }
+                }
+                .pointerInput(Unit) {
+                    awaitEachGesture {
+                        val down = awaitFirstDown()
+                        down.consume()
+                        pressed = true
+                        val from = SystemClock.uptimeMillis()
+                        step(0)
+                        val repeat = scope.launch {
+                            delay(LoopHandles.REPEAT_AFTER_MILLIS)
+                            while (true) {
+                                step(SystemClock.uptimeMillis() - from)
+                                delay(LoopHandles.REPEAT_EVERY_MILLIS)
+                            }
+                        }
+                        try {
+                            waitForUpOrCancellation()
+                        } finally {
+                            repeat.cancel()
+                            pressed = false
+                            release()
+                        }
+                    }
+                },
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(icon, null, Modifier.size(30.dp), tint = LoopColor)
         }
     }
 }
@@ -864,14 +1025,15 @@ private fun LadderTile(emoji: String, code: String, name: String, selected: Bool
 
 /** Sideways the picture has the screen; a tap brings everything back over it. Export stays top right and the fullscreen icon bottom right. */
 @Composable
-private fun BoxScope.FullscreenOverlay(ui: PlayerUi, vm: PlayerViewModel, onKeepControls: () -> Unit, onExit: () -> Unit, onBack: () -> Unit, onSheet: (Sheet) -> Unit) {
+private fun BoxScope.FullscreenOverlay(ui: PlayerUi, vm: PlayerViewModel, onKeepControls: () -> Unit, onExit: () -> Unit, onBack: () -> Unit, onSheet: (Sheet) -> Unit, onScreenshot: () -> Unit, onScrub: (Scrub?) -> Unit) {
     Box(Modifier.matchParentSize().background(Color(0x4D000000)))
     Row(Modifier.align(Alignment.TopStart).fillMaxWidth().padding(start = 12.dp, end = 16.dp, top = 8.dp), verticalAlignment = Alignment.CenterVertically) {
         IconButton(onBack) { Icon(SppIcons.Back, "Back", tint = Color.White) }
         Text(ui.title, Modifier.weight(1f).padding(horizontal = 4.dp), color = Color.White, maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.titleMedium)
+        IconButton(onScreenshot) { Icon(SppIcons.Screenshot, "Screenshot", tint = Color.White) }
         ExportButton { onSheet(Sheet.Export) }
     }
-    Box(Modifier.align(Alignment.Center)) { TransportRow(vm, ui, onKeepControls) }
+    Box(Modifier.align(Alignment.Center)) { TransportRow(vm, ui, onKeepControls, onScrub) }
     Row(Modifier.align(Alignment.BottomStart).fillMaxWidth().padding(start = 24.dp, end = 12.dp, bottom = 32.dp), verticalAlignment = Alignment.CenterVertically) {
         Text("${TimeText.of(ui.position - ui.start)} / ${TimeText.of((ui.end - ui.start).coerceAtLeast(0.0))}", color = Color.White, style = MaterialTheme.typography.labelMedium)
         Spacer(Modifier.weight(1f))
@@ -936,8 +1098,17 @@ private fun EventsSheet(vm: PlayerViewModel, ui: PlayerUi, close: () -> Unit) {
     FlowRow(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
         kinds.forEach { k -> FilterChip(k !in ui.hiddenKinds, { vm.toggleKind(k) }, { Text(MarkerKinds.emoji(k) + " " + k.name, maxLines = 1) }) }
     }
+    val shown = ui.markers.filter { it.kind !in ui.hiddenKinds }
+    val now = MarkerNavigation.nowIndex(shown.map { it.marker.startSeconds }, ui.position)
+    val window = MarkerNavigation.windowAround(shown.size, now, MAX_LISTED_EVENTS)
+    val nowView = remember { BringIntoViewRequester() }
+    // Opened, the list goes to where the playhead is, with a few events after it in view too; it then stays where the user scrolls it, and only the line moves.
+    val around = with(LocalDensity.current) { NOW_CONTEXT.toPx() }
+    LaunchedEffect(Unit) { nowView.bringIntoView(androidx.compose.ui.geometry.Rect(0f, -around, 1f, around)) }
     Column {
-        ui.markers.filter { it.kind !in ui.hiddenKinds }.take(MAX_LISTED_EVENTS).forEach { m ->
+        for (i in window.first..window.last + 1) {
+            if (i == now) NowLine(ui, Modifier.bringIntoViewRequester(nowView))
+            val m = shown.getOrNull(i)?.takeIf { i in window } ?: continue
             Row(
                 Modifier.fillMaxWidth().height(48.dp).clickable {
                     vm.seek(MarkerNavigation.landing(m.marker))
@@ -954,11 +1125,22 @@ private fun EventsSheet(vm: PlayerViewModel, ui: PlayerUi, close: () -> Unit) {
     }
 }
 
+/** The "you are here" line between the events before and after the playhead, with the playhead's time. */
+@Composable
+private fun NowLine(ui: PlayerUi, modifier: Modifier) {
+    Row(modifier.fillMaxWidth().height(28.dp).semantics { contentDescription = "Playhead at ${TimeText.of(ui.position - ui.start)}" }, verticalAlignment = Alignment.CenterVertically) {
+        Box(Modifier.size(10.dp).background(Color.White, CircleShape))
+        Box(Modifier.weight(1f).height(2.dp).background(Brand.GradientH))
+        Spacer(Modifier.width(8.dp))
+        Text("Now " + TimeText.of(ui.position - ui.start), color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.labelMedium)
+    }
+}
+
 @Composable
 private fun LoopSheet(vm: PlayerViewModel, ui: PlayerUi) {
     SheetTitle("A-B loop and cuts")
     Text(
-        "A ${TimeText.of((ui.loopA ?: ui.start) - ui.start)} to B ${TimeText.of((ui.loopB ?: ui.end) - ui.start)}. Drag the handles on the timeline to change it.",
+        "A ${TimeText.of((ui.loopA ?: ui.start) - ui.start)} to B ${TimeText.of((ui.loopB ?: ui.end) - ui.start)}. Drag a handle on the timeline, or tap it and move it with the arrows: 15 frames a press, faster while held, and ±3 s with the outer buttons.",
         style = MaterialTheme.typography.bodyMedium,
         color = MaterialTheme.colorScheme.onSurfaceVariant,
     )
@@ -1095,6 +1277,8 @@ private val LINE_HEIGHT = 3.dp
 private val TIMELINE_TOUCH_HEIGHT = 50.dp
 private val HANDLE_REACH = 24.dp
 private val HANDLE_RADIUS = 13.dp
+private const val SELECTED_GROWTH = 1.4f
+private val NOW_CONTEXT = 48.dp * 3
 private val THUMB_RADIUS = 6.5.dp
 private val MARKER_RADIUS = 4.dp
 private val TRANSPORT_CELL = 64.dp

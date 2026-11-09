@@ -55,4 +55,17 @@ object MarkerNavigation {
 
     fun previous(markers: List<Marker>, position: Double, lead: Double = LEAD_SECONDS, minGap: Double = 1.0): Marker? =
         markers.takeWhile { landing(it, lead) < position - minGap }.lastOrNull()
+
+    /** Where "now" goes in a list of markers sorted by time: before the first one that starts after [position]. */
+    fun nowIndex(starts: List<Double>, position: Double): Int {
+        val i = starts.indexOfFirst { it > position }
+        return if (i < 0) starts.size else i
+    }
+
+    /** The slice of a long list to show, at most [max] items, centred on [now] so the "you are here" line is always in it. */
+    fun windowAround(count: Int, now: Int, max: Int): IntRange {
+        if (count <= max) return 0 until count
+        val from = (now - max / 2).coerceIn(0, count - max)
+        return from until from + max
+    }
 }

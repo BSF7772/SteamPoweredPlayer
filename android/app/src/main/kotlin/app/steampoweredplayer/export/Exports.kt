@@ -148,6 +148,26 @@ object Exports {
         }
     }
 
+    /** Copies a PNG to the shared Pictures folder, beside where the phone keeps its own screenshots. The system adds a number when the name is taken. */
+    fun publishImage(context: Context, file: File, displayName: String): Uri {
+        val resolver = context.contentResolver
+        val values = ContentValues().apply {
+            put(MediaStore.Images.Media.DISPLAY_NAME, displayName)
+            put(MediaStore.Images.Media.MIME_TYPE, "image/png")
+            put(MediaStore.Images.Media.RELATIVE_PATH, Environment.DIRECTORY_PICTURES + "/SteamPoweredPlayer")
+            put(MediaStore.Images.Media.IS_PENDING, 1)
+        }
+        val uri = resolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, values) ?: throw IOException("The phone's media library refused the picture.")
+        try {
+            resolver.openOutputStream(uri)?.use { out -> file.inputStream().use { it.copyTo(out, 1 shl 20) } } ?: throw IOException("Can't write to the media library.")
+            resolver.update(uri, ContentValues().apply { put(MediaStore.Images.Media.IS_PENDING, 0) }, null, null)
+        } catch (e: IOException) {
+            resolver.delete(uri, null, null)
+            throw e
+        }
+        return uri
+    }
+
     /** Copies a finished file to the shared Movies folder. The system adds a number when the name is taken. */
     fun publish(context: Context, file: File, displayName: String): Uri {
         val resolver = context.contentResolver
