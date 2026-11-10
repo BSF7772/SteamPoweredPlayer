@@ -4,6 +4,9 @@ obj/
 *.user
 .vs/
 
+# release output (installer, checksums)
+dist/
+
 # portable toolchain and caches (everything is installed inside the workspace, never committed)
 .tools/
 

@@ -49,6 +49,27 @@
       "verifiedBy": "SHA-256 and size taken from the publisher's checksums.sha256 and the GitHub asset metadata of release autobuild-2026-11-06-12-50 (both agree). The archive was NOT downloaded when pinning, so the extraction layout (top folder with bin/ and LICENSE.txt) is the documented BtbN layout and still unverified by a run."
     },
     {
+      "id": "innosetup",
+      "version": "6.7.4",
+      "description": "Inno Setup 6.7.4 compiler (ISCC.exe). Builds the Windows installer; a build tool only, never shipped.",
+      "group": "release",
+      "optional": false,
+      "url": "https://github.com/jrsoftware/issrc/releases/download/is-6_7_4/innosetup-6.7.4.exe",
+      "fileName": "innosetup-6.7.4.exe",
+      "sha256": "a549929319f9120716677c685535ca4671e4b937b5fdc87e2585f32d8eb30e8c",
+      "size": 10604576,
+      "archive": "inno-installer",
+      "stripRoot": false,
+      "extract": [
+        { "from": ".", "to": "." },
+        { "from": "ISCC.exe", "to": "ISCC.exe" }
+      ],
+      "license": "Inno Setup licence (free for any use; a build tool, not shipped)",
+      "licenseUrl": "https://jrsoftware.org/files/is/license.txt",
+      "sourceUrl": "https://github.com/jrsoftware/issrc/tree/is-6_7_4",
+      "verifiedBy": "SHA-256 and size match the digest GitHub shows for the release asset (checked 2026-11-10) and a local download. bootstrap.ps1 runs the installer silently with /DIR into .tools\\innosetup\\6.7.4\\ (archive type 'inno-installer')."
+    },
+    {
       "id": "jdk",
       "version": "21.0.13+9",
       "description": "Eclipse Temurin JDK 21.0.13+9 (Windows x64 zip). Gradle and the Android build.",

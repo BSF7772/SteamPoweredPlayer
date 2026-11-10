@@ -19,6 +19,7 @@
 .PARAMETER Only         Entry ids to install (overrides the group selection).
 .PARAMETER IncludeOptional  Also install optional desktop entries (ffmpeg).
 .PARAMETER Android      Also install the Android group (jdk, gradle, cmdline-tools, platform-tools).
+.PARAMETER Release      Also install what building the Windows installer needs: ffmpeg (bundled in the release) and Inno Setup.
 .PARAMETER Emulator     Also install the emulator group (emulator, system image).
 .PARAMETER All          Everything, optional entries included.
 .PARAMETER Offline      Never download; fail when an archive is missing.
@@ -32,6 +33,7 @@ param(
     [string[]]$Only,
     [switch]$IncludeOptional,
     [switch]$Android,
+    [switch]$Release,
     [switch]$Emulator,
     [switch]$All,
     [switch]$Offline,
@@ -141,8 +143,15 @@ function Install-Entry($entry) {
     New-Item -ItemType Directory -Force -Path $tmp | Out-Null
     try {
         Write-Step "  extracting ($($entry.archive))"
-        & $tar -xf $archive -C $tmp
-        if ($LASTEXITCODE -ne 0) { throw "tar failed with exit code $LASTEXITCODE for $($entry.fileName)" }
+        if ($entry.archive -eq 'inno-installer') {
+            # An Inno Setup installer: run it silently, for the current user only, into the scratch folder (nothing system-wide, no
+            # tasks such as file associations). Its HKCU uninstall entry is harmless; the files are copied out below.
+            $p = Start-Process -FilePath $archive -Wait -PassThru -ArgumentList @('/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', '/CURRENTUSER', '/TASKS=', "/DIR=$tmp")
+            if ($p.ExitCode -ne 0) { throw "the installer $($entry.fileName) exited with code $($p.ExitCode)" }
+        } else {
+            & $tar -xf $archive -C $tmp
+            if ($LASTEXITCODE -ne 0) { throw "tar failed with exit code $LASTEXITCODE for $($entry.fileName)" }
+        }
 
         $src = $tmp
         if ($entry.stripRoot) {
@@ -198,6 +207,7 @@ if ($Only) {
         $isOpt = [bool]$_.optional
         ($All) -or
         ($_.group -eq 'desktop' -and (-not $isOpt -or $IncludeOptional)) -or
+        ($Release -and ($_.group -eq 'release' -or $_.id -eq 'ffmpeg')) -or
         ($Android -and $_.group -eq 'android') -or
         ($Emulator -and $_.group -eq 'emulator')
     })

@@ -1,7 +1,7 @@
 <!-- SPDX-License-Identifier: GPL-3.0-or-later -->
 # Third-party components
 
-SteamPoweredPlayer is licensed GPL-3.0-or-later (see `LICENSE`). The release bundles the binaries below next to the executable.
+SteamPoweredPlayer is licensed GPL-3.0-or-later (see `LICENSE`). The Windows installer bundles the binaries below next to the executable (the installer puts them in the app's install folder).
 They are never committed to this repository: `tools/deps.json` pins each one (download URL, size, SHA-256), `tools/bootstrap.ps1`
 fetches and verifies them into the gitignored `.tools/`, and `tools/Dependencies.targets` re-checks the libmpv hash on every build
 and copies the binaries and `licenses/` to the output. A wrong hash fails the build.
@@ -12,6 +12,9 @@ and copies the binaries and `licenses/` to the output. A wrong hash fails the bu
 |---|---|---|---|---|
 | libmpv (`libmpv-2.dll`) | mpv 0.42.0, shinchiro mpv-winbuild-cmake release 20261105 (`3138fc8eea`) | Playback (D3D11 render API) | GPL-2.0-or-later build, distributed as part of a GPL-3.0-or-later work | always |
 | ffmpeg, ffprobe | FFmpeg 8.1.3 (+34 commits, `a35157abb9`), BtbN FFmpeg-Builds autobuild-2026-11-06-12-50, win64 GPL static | Lossless range export, encoding, analysis | GPL (x264, x265 and other GPL components enabled; `ffmpeg -L` prints the exact text) | release builds; optional for development (ffmpeg >= 8 on PATH is accepted) |
+
+Also inside the installer: the .NET 10 runtime (MIT) and the Windows App SDK runtime (MIT), because the app is built self-contained.
+The installer itself is built with Inno Setup 6.7.4 (pinned in `tools/deps.json`, group `release`).
 
 Development-only tools (not shipped): Temurin JDK 21.0.13+9 (GPL-2.0 with Classpath exception), Gradle 9.9.0 (Apache-2.0), Android
 command-line tools and platform-tools (Android SDK licence / Apache-2.0). They are pinned in the same manifest, group `android`.

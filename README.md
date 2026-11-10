@@ -4,16 +4,32 @@ Native Windows 11 app (C# · WinUI 3 · Mica · libmpv) that plays and edits you
 or without Steam running. An Android companion (Kotlin · Compose · libmpv) reads the same library over encrypted SMB 3.1.1.
 Sister project of [FastEncoder](#fastencoder): same look, same presets, same audio-sync detector.
 
-> **Status: plan phase. Nothing is built yet; the Phase 0 spikes are done (results in the plan, §9).** Everything below is the target. The plan, with the evidence behind it, is in
+> **Status: first public release, version 0.1.0.** The Windows desktop app is the released part. The Android companion is in the
+> repository and builds from source, but there is no phone download yet. The plan, with the evidence behind it, is in
 > [`.hermes/plans/`](.hermes/plans/), and the reverse-engineered recording format is in
 > [`docs/steam-recording-format.md`](docs/steam-recording-format.md).
 
-## Run
+## Install (Windows)
+Download **`SteamPoweredPlayer-<version>-Setup.exe`** from the [latest release](../../releases/latest) and run it. It installs for
+your user only (no administrator prompt), adds a Start menu entry and a desktop shortcut (you can untick it), and contains
+everything the app needs: libmpv, ffmpeg and the .NET runtime. Remove it from Windows Settings > Apps; your settings and data are
+kept. Windows 10 (2004) or Windows 11, 64-bit.
+
+The installer is not code-signed yet, so Windows SmartScreen may say "Windows protected your PC": choose **More info > Run anyway**.
+`SHA256SUMS.txt` on the release page lets you check the download.
+
+## Run from source
 Double-click `SteamPoweredPlayer.bat`. The first run builds the app; after that it starts instantly.
 Use `SteamPoweredPlayer.bat --rebuild` after editing the source.
 
 Requires the .NET 10 SDK and ffmpeg on PATH (`winget install Microsoft.DotNet.SDK.10 Gyan.FFmpeg`). `tools\bootstrap.ps1` downloads
 everything else (libmpv, and for Android the JDK, SDK and Gradle) into `.tools\` inside the repo, so nothing is installed system-wide.
+
+## Build the installer
+`powershell -ExecutionPolicy Bypass -File tools\package.ps1 -Version 0.1.0` builds `dist\SteamPoweredPlayer-0.1.0-Setup.exe` and
+`dist\SHA256SUMS.txt`. It fetches the pinned tools (libmpv, ffmpeg, Inno Setup; each SHA-256 checked) into `.tools\` first.
+The GitHub Actions workflow `.github/workflows/release.yml` does the same when a tag such as `v0.1.0` is pushed, runs the tests and
+attaches the installer to a GitHub release.
 
 On first run the app finds Steam's recording folder in Steam's own settings, and proposes a data folder (index, art, thumbnails)
 next to it, which you confirm or change. You choose an export folder the first time you export.
