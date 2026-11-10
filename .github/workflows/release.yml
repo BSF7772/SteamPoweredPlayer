@@ -59,6 +59,13 @@ jobs:
         shell: pwsh
         run: tools\bootstrap.ps1 -Release
 
+      - name: Put the pinned ffmpeg on PATH (the unit tests start 'ffmpeg')
+        shell: pwsh
+        run: |
+          $d = Get-ChildItem .tools\ffmpeg -Directory | Select-Object -First 1
+          if (-not (Test-Path (Join-Path $d.FullName 'ffmpeg.exe'))) { throw 'pinned ffmpeg not found' }
+          $d.FullName >> $env:GITHUB_PATH
+
       - name: Unit tests
         shell: pwsh
         run: dotnet test tests -c Release -nologo --verbosity minimal
